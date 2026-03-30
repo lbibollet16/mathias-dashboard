@@ -240,7 +240,7 @@ export default function Dashboard() {
 
       {/* TABS */}
       <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,padding:'0 20px',display:'flex'}}>
-        {[{id:'calc',l:'Calculateur Achats'},{id:'import',l:'Importer Ventes'},{id:'retours',l:'Retours RMA'},{id:'booking',l:'Booking'},{id:'negatifs',l:'Pièces Négatives',d:true},{id:'commandes',l:'📋 Commandes du Jour'},{id:'fournitures',l:'🔧 Fournitures'}].map(t=>(
+        {[{id:'calc',l:'Calculateur Achats'},{id:'import',l:'Importer Ventes'},{id:'retours',l:'Retours RMA'},{id:'booking',l:'Booking'},{id:'negatifs',l:'Pièces Négatives',d:true},{id:'commandes',l:'📋 Commandes du Jour'},{id:'fournitures',l:'💡 Suggestions'}].map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:'12px 16px',border:'none',background:'transparent',cursor:'pointer',fontSize:13,fontWeight:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',transition:'all .15s'}}>
             {t.l}
           </button>
@@ -495,7 +495,7 @@ export default function Dashboard() {
         {/* ── NÉGATIFS ────────────────────────────────────────────── */}
         {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts}/>}
         {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts}/>}
-        {tab==='fournitures' && <FournituresTab fournituresData={fournituresData} setFournituresData={setFournituresData} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
+        {tab==='fournitures' && <FournituresTab fournituresData={fournituresData} setFournituresData={setFournituresData} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} data={data}/>}
       </div>
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-thumb{background:${dark?'#444':'#ccc'};border-radius:3px}`}</style>
     </div>
@@ -832,115 +832,76 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap}: an
 
 
 
-// ── Fournitures Tab ───────────────────────────────────────────────────────────
-function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, sub, thBg, S, C, hvr}: any) {
+// ── Suggestions de Commande Tab ──────────────────────────────────────────────
+function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, sub, thBg, S, C, hvr, data}: any) {
   const [employe, setEmploye] = useState(() => { try { return localStorage.getItem('employe_nom') || '' } catch { return '' } })
   const [showEmployeModal, setShowEmployeModal] = useState(false)
   const [nomTemp, setNomTemp] = useState('')
-  const [filtCat, setFiltCat] = useState('ALL')
-  const [recherche, setRecherche] = useState('')
-  const [panier, setPanier] = useState<{item:any, qte:number}[]>([])
-  const [showPanier, setShowPanier] = useState(false)
-  const [showManuel, setShowManuel] = useState(false)
+  const [sku, setSku] = useState('')
+  const [qte, setQte] = useState(1)
+  const [note, setNote] = useState('')
+  const [skuInfo, setSkuInfo] = useState<any>(null)
+  const [skuErreur, setSkuErreur] = useState('')
   const [loading, setLoading] = useState(false)
   const [msgOk, setMsgOk] = useState('')
-  const [mSku, setMSku] = useState('')
-  const [mDesc, setMDesc] = useState('')
-  const [mFourn, setMFourn] = useState('')
-  const [mQte, setMQte] = useState(1)
-  const [mNote, setMNote] = useState('')
+  const [rapportEmploye, setRapportEmploye] = useState('ALL')
 
-  const catalogue: any[] = fournituresData?.catalogue || []
   const demandes: any[] = fournituresData?.demandes || []
-  const categories = Array.from(new Set(catalogue.map((c:any) => c.categorie))).sort() as string[]
+  const allItems: any[] = data?.liste_complete || []
 
-  const iconesCat: Record<string,string> = {
-    'Électrique': '⚡',
-    'Fixations': '🔩',
-    'Nettoyants & Produits': '🧴',
-    'Fluides': '🛢️',
-    'Protection & Sécurité': '🦺',
-    'Fournitures atelier': '🔧',
-    'Traction': '📦',
-    'Demande manuelle': '✏️',
-    'Autre': '📦',
+  // Trouver une pièce dans le cache Traction
+  function chercherSku(s: string) {
+    const norm = (x:string) => x.trim().toLowerCase().replace(/\s+/g,'')
+    return allItems.find((it:any) => norm(it.pk) === norm(s))
   }
 
-  const couleursCat: Record<string,string> = {
-    'Électrique': '#f59e0b',
-    'Fixations': '#6366f1',
-    'Nettoyants & Produits': '#10b981',
-    'Fluides': '#3b82f6',
-    'Protection & Sécurité': '#ef4444',
-    'Fournitures atelier': '#8b5cf6',
-    'Traction': '#64748b',
-    'Autre': '#64748b',
+  // Calculer besoin 2 mois basé sur historique
+  function calculerBesoin2Mois(item: any): number {
+    if (!item?.ventesMoyParMois) return 0
+    const aujourd = new Date()
+    const m1 = aujourd.getMonth()
+    const m2 = (m1 + 1) % 12
+    return (item.ventesMoyParMois[m1] || 0) + (item.ventesMoyParMois[m2] || 0)
   }
 
-  const catalogueFiltré = catalogue.filter((c:any) => {
-    if (filtCat !== 'ALL' && c.categorie !== filtCat) return false
-    if (recherche && !c.description.toLowerCase().includes(recherche.toLowerCase()) && !(c.sku||'').toLowerCase().includes(recherche.toLowerCase())) return false
-    return true
-  })
-
-  function ajouterPanier(item: any) {
-    if (!employe) { setShowEmployeModal(true); return }
-    setPanier(prev => {
-      const exist = prev.find(p => p.item.sku === item.sku && p.item.description === item.description)
-      if (exist) return prev.map(p => p.item.description === item.description ? {...p, qte: p.qte + 1} : p)
-      return [...prev, {item, qte: 1}]
-    })
-  }
-
-  function modifierQte(desc: string, delta: number) {
-    setPanier(prev => prev.map(p => p.item.description === desc ? {...p, qte: Math.max(1, p.qte + delta)} : p).filter(p => p.qte > 0))
-  }
-
-  function retirerPanier(desc: string) {
-    setPanier(prev => prev.filter(p => p.item.description !== desc))
-  }
-
-  function estDansPanier(desc: string) {
-    return panier.some(p => p.item.description === desc)
-  }
-
-  async function envoyerPanier() {
-    if (!employe || panier.length === 0) return
-    setLoading(true)
-    for (const {item, qte} of panier) {
-      await fetch('/api/fournitures', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({
-          employe, sku: item.sku, description: item.description,
-          fournisseur: item.fournisseur, categorie: item.categorie,
-          quantite: qte, unite: item.unite
-        })
-      })
+  function onSkuChange(val: string) {
+    setSku(val)
+    setSkuErreur('')
+    setSkuInfo(null)
+    if (val.trim().length >= 3) {
+      const found = chercherSku(val.trim())
+      if (found) {
+        setSkuInfo(found)
+        const besoin = calculerBesoin2Mois(found)
+        if (besoin > 0) setQte(Math.ceil(besoin))
+      }
     }
-    setPanier([])
-    setShowPanier(false)
-    await recharger()
-    setMsgOk(`✅ ${panier.length} article${panier.length>1?'s':''} commandé${panier.length>1?'s':''}!`)
-    setTimeout(() => setMsgOk(''), 4000)
-    setLoading(false)
   }
 
-  async function soumettreManuel(e: any) {
+  async function soumettre(e: any) {
     e.preventDefault()
     if (!employe) { setShowEmployeModal(true); return }
-    if (!mDesc) return
+    if (!sku.trim()) return
     setLoading(true)
+    const item = chercherSku(sku.trim())
     await fetch('/api/fournitures', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ employe, sku: mSku, description: mDesc, fournisseur: mFourn, categorie: 'Demande manuelle', quantite: mQte, note: mNote })
+      body: JSON.stringify({
+        employe,
+        sku: sku.trim(),
+        description: item?.desc || sku.trim(),
+        fournisseur: item?.fournisseur || '',
+        categorie: 'Suggestion',
+        quantite: qte,
+        unite: 'unité',
+        note: note
+      })
     })
-    setMSku(''); setMDesc(''); setMFourn(''); setMQte(1); setMNote('')
-    setShowManuel(false)
+    setSku(''); setQte(1); setNote(''); setSkuInfo(null)
     await recharger()
-    setMsgOk('✅ Demande manuelle envoyée!')
-    setTimeout(() => setMsgOk(''), 3000)
+    setMsgOk(`✅ Suggestion envoyée dans Commandes du Jour!`)
+    setTimeout(() => setMsgOk(''), 4000)
     setLoading(false)
   }
 
@@ -949,228 +910,167 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
     if (r.ok) setFournituresData(await r.json())
   }
 
-  async function annulerDemande(id: number) {
+  async function annuler(id: number) {
     await fetch('/api/fournitures', { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id, statut: 'annulée' }) })
     await recharger()
   }
 
-  const mesDemandesPending = demandes.filter((d:any) => d.employe === employe)
-  const nbPanier = panier.reduce((s,p) => s + p.qte, 0)
+  const employes = Array.from(new Set(demandes.map((d:any) => d.employe))).sort() as string[]
+  const demandesFiltrees = demandes.filter((d:any) => rapportEmploye === 'ALL' || d.employe === rapportEmploye)
+  const besoin2mois = skuInfo ? calculerBesoin2Mois(skuInfo) : 0
 
   return <>
     {/* Modal employé */}
     {showEmployeModal && (
       <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
-        <div style={{background:card,borderRadius:16,padding:36,width:380,border:`1px solid ${bdr}`,boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
-          <div style={{fontSize:40,textAlign:'center',marginBottom:12}}>👤</div>
-          <h3 style={{margin:'0 0 6px',textAlign:'center',fontSize:20}}>Identifie-toi</h3>
-          <p style={{color:sub,fontSize:13,margin:'0 0 20px',textAlign:'center'}}>Entre ton prénom pour tes demandes</p>
-          <input value={nomTemp} onChange={e=>setNomTemp(e.target.value)} placeholder="Ton prénom..." style={{...S,marginBottom:14,fontSize:15,textAlign:'center'}}
-            onKeyDown={e=>{if(e.key==='Enter'&&nomTemp.trim()){const n=nomTemp.trim();setEmploye(n);try{localStorage.setItem('employe_nom',n)}catch{};setShowEmployeModal(false)}}} autoFocus/>
+        <div style={{background:card,borderRadius:14,padding:32,width:360,border:`1px solid ${bdr}`}}>
+          <h3 style={{margin:'0 0 8px',textAlign:'center'}}>👤 Qui es-tu?</h3>
+          <p style={{color:sub,fontSize:13,margin:'0 0 16px',textAlign:'center'}}>Entre ton prénom</p>
+          <input value={nomTemp} onChange={e=>setNomTemp(e.target.value)} placeholder="Ton prénom..." style={{...S,marginBottom:14,fontSize:15}} autoFocus
+            onKeyDown={e=>{if(e.key==='Enter'&&nomTemp.trim()){const n=nomTemp.trim();setEmploye(n);try{localStorage.setItem('employe_nom',n)}catch{};setShowEmployeModal(false)}}}/>
           <button onClick={()=>{const n=nomTemp.trim();if(n){setEmploye(n);try{localStorage.setItem('employe_nom',n)}catch{};setShowEmployeModal(false)}}}
-            style={{background:C.blue,color:'#fff',border:'none',borderRadius:10,padding:'12px 0',width:'100%',fontSize:15,fontWeight:700,cursor:'pointer'}}>Continuer →</button>
+            style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'11px 0',width:'100%',fontWeight:700,cursor:'pointer',fontSize:14}}>Confirmer</button>
         </div>
       </div>
     )}
 
-    {/* Panier slide-in */}
-    {showPanier && (
-      <div style={{position:'fixed',inset:0,zIndex:9998}} onClick={()=>setShowPanier(false)}>
-        <div style={{position:'fixed',top:0,right:0,bottom:0,width:420,background:card,boxShadow:'-4px 0 30px rgba(0,0,0,.2)',display:'flex',flexDirection:'column',zIndex:9999}} onClick={e=>e.stopPropagation()}>
-          <div style={{padding:'20px 24px',borderBottom:`1px solid ${bdr}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-            <h3 style={{margin:0,fontSize:18}}>🛒 Mon panier</h3>
-            <button onClick={()=>setShowPanier(false)} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:sub}}>✕</button>
+    <div style={{maxWidth:900,margin:'0 auto'}}>
+
+      {/* Header */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,flexWrap:'wrap',gap:10}}>
+        <div>
+          <h2 style={{margin:0,fontSize:20,fontWeight:800}}>💡 Suggestions de Commande</h2>
+          <p style={{color:sub,fontSize:13,margin:'4px 0 0'}}>Entre un SKU pour suggérer une commande à la réception</p>
+        </div>
+        {employe
+          ? <div style={{background:dark?'#1a1a2e':'#f0f4ff',border:`1px solid ${C.blue}33`,borderRadius:20,padding:'7px 16px',fontSize:13}}>
+              👤 <strong>{employe}</strong>
+              <button onClick={()=>setShowEmployeModal(true)} style={{fontSize:11,color:C.blue,background:'none',border:'none',cursor:'pointer',marginLeft:8,textDecoration:'underline'}}>changer</button>
+            </div>
+          : <button onClick={()=>setShowEmployeModal(true)} style={{background:C.blue,color:'#fff',border:'none',borderRadius:20,padding:'8px 18px',cursor:'pointer',fontWeight:700}}>👤 S'identifier</button>
+        }
+      </div>
+
+      {/* Message succès */}
+      {msgOk && <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}`,borderRadius:10,padding:'12px 16px',marginBottom:16,color:C.green,fontWeight:700}}>{msgOk}</div>}
+
+      {/* Formulaire */}
+      <div style={{background:card,borderRadius:14,border:`1px solid ${bdr}`,padding:'24px 28px',marginBottom:20}}>
+        <form onSubmit={soumettre}>
+          {/* SKU */}
+          <div style={{marginBottom:16}}>
+            <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Numéro de pièce (SKU) *</label>
+            <input value={sku} onChange={e=>onSkuChange(e.target.value)} placeholder="Ex: 83-6016, VR6320, 782-1131..." required
+              style={{...S,fontSize:15,fontWeight:sku?700:400,border:`2px solid ${skuInfo?C.green:skuErreur?C.red:bdr}`}}/>
           </div>
-          <div style={{flex:1,overflowY:'auto',padding:'16px 24px'}}>
-            {panier.length === 0
-              ? <div style={{textAlign:'center',color:sub,padding:40}}>
-                  <div style={{fontSize:48,marginBottom:12}}>🛒</div>
-                  <p>Ton panier est vide</p>
-                </div>
-              : panier.map(({item, qte}) => (
-                <div key={item.description} style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:12,padding:'14px 16px',marginBottom:10,border:`1px solid ${bdr}`}}>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
-                    <div style={{flex:1}}>
-                      <div style={{fontWeight:600,fontSize:13,marginBottom:3}}>{item.description}</div>
-                      {item.sku && <div style={{fontSize:11,color:sub}}>SKU: {item.sku}</div>}
-                      {item.fournisseur && <div style={{fontSize:11,color:sub}}>{item.fournisseur}</div>}
-                    </div>
-                    <button onClick={()=>retirerPanier(item.description)} style={{background:'none',border:'none',color:C.red,cursor:'pointer',fontSize:16,padding:0}}>✕</button>
-                  </div>
-                  <div style={{display:'flex',alignItems:'center',gap:10,marginTop:10}}>
-                    <button onClick={()=>modifierQte(item.description,-1)} style={{width:32,height:32,borderRadius:8,border:`1px solid ${bdr}`,background:'none',cursor:'pointer',fontSize:16,fontWeight:700,color:sub}}>−</button>
-                    <span style={{fontWeight:700,fontSize:15,minWidth:30,textAlign:'center'}}>{qte}</span>
-                    <button onClick={()=>modifierQte(item.description,1)} style={{width:32,height:32,borderRadius:8,border:`1px solid ${bdr}`,background:C.blue,cursor:'pointer',fontSize:16,fontWeight:700,color:'#fff'}}>+</button>
-                    <span style={{fontSize:12,color:sub,marginLeft:4}}>{item.unite}</span>
+
+          {/* Info pièce trouvée */}
+          {skuInfo && (
+            <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}33`,borderRadius:10,padding:'12px 16px',marginBottom:16}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:8}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:14,color:C.green,marginBottom:3}}>✅ Pièce trouvée</div>
+                  <div style={{fontWeight:600,fontSize:15}}>{skuInfo.desc}</div>
+                  <div style={{fontSize:12,color:sub,marginTop:3}}>
+                    <span style={{marginRight:12}}>🏢 {skuInfo.fournisseur}</span>
+                    <span style={{marginRight:12}}>📦 Stock actuel: <strong>{skuInfo.stock}</strong></span>
+                    <span style={{background:skuInfo.classeABC==='A'?C.green:skuInfo.classeABC==='B'?C.yellow:sub,color:'#fff',padding:'1px 6px',borderRadius:4,fontSize:11}}>{skuInfo.classeABC}</span>
                   </div>
                 </div>
-              ))
-            }
-          </div>
-          {panier.length > 0 && (
-            <div style={{padding:'16px 24px',borderTop:`1px solid ${bdr}`}}>
-              <div style={{fontSize:13,color:sub,marginBottom:12,textAlign:'center'}}>{nbPanier} article{nbPanier>1?'s':''} · Demandé par <strong>{employe}</strong></div>
-              <button onClick={envoyerPanier} disabled={loading}
-                style={{width:'100%',background:C.green,color:'#fff',border:'none',borderRadius:12,padding:'14px 0',fontSize:15,fontWeight:700,cursor:'pointer'}}>
-                {loading ? 'Envoi...' : `✅ Envoyer la commande (${nbPanier})`}
-              </button>
+                {besoin2mois > 0 && (
+                  <div style={{background:dark?'#1a233a':'#dbeafe',border:`1px solid ${C.blue}33`,borderRadius:8,padding:'8px 14px',textAlign:'center'}}>
+                    <div style={{fontSize:11,color:C.blue,fontWeight:700,textTransform:'uppercase'}}>Besoin 2 mois</div>
+                    <div style={{fontSize:22,fontWeight:900,color:C.blue}}>{besoin2mois.toFixed(1)}</div>
+                    <div style={{fontSize:10,color:sub}}>basé sur historique</div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
-        </div>
-      </div>
-    )}
 
-    {/* Modal demande manuelle */}
-    {showManuel && (
-      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
-        <div style={{background:card,borderRadius:16,padding:28,width:500,border:`1px solid ${bdr}`,boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
-          <h3 style={{margin:'0 0 4px',fontSize:18}}>✏️ Demande manuelle</h3>
-          <p style={{color:sub,fontSize:13,margin:'0 0 20px'}}>Article non trouvé dans le catalogue</p>
-          <form onSubmit={soumettreManuel}>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-              <div>
-                <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>SKU (optionnel)</label>
-                <input value={mSku} onChange={e=>setMSku(e.target.value)} placeholder="Ex: 83-6016" style={S}/>
-              </div>
-              <div>
-                <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Quantité</label>
-                <input type="number" value={mQte} onChange={e=>setMQte(Number(e.target.value))} min={1} style={S}/>
+          {skuErreur && <div style={{color:C.red,fontSize:12,marginBottom:12}}>⚠️ {skuErreur}</div>}
+
+          {/* Quantité + Note */}
+          <div style={{display:'grid',gridTemplateColumns:'160px 1fr',gap:12,marginBottom:16}}>
+            <div>
+              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>
+                Quantité demandée
+                {besoin2mois > 0 && <span style={{color:C.blue,fontWeight:400,marginLeft:6,textTransform:'none'}}>({besoin2mois.toFixed(0)} suggérée)</span>}
+              </label>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <button type="button" onClick={()=>setQte(q=>Math.max(1,q-1))} style={{width:34,height:34,borderRadius:8,border:`1px solid ${bdr}`,background:'none',cursor:'pointer',fontSize:18,fontWeight:700,color:sub}}>−</button>
+                <input type="number" value={qte} onChange={e=>setQte(Math.max(1,Number(e.target.value)))} min={1} style={{...S,textAlign:'center',width:60,fontWeight:700,fontSize:16}}/>
+                <button type="button" onClick={()=>setQte(q=>q+1)} style={{width:34,height:34,borderRadius:8,border:`1px solid ${bdr}`,background:C.blue,cursor:'pointer',fontSize:18,fontWeight:700,color:'#fff'}}>+</button>
               </div>
             </div>
-            <div style={{marginBottom:12}}>
-              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Description *</label>
-              <input value={mDesc} onChange={e=>setMDesc(e.target.value)} placeholder="Ex: Gants nitrile large, Tie wraps 8 po..." required style={S}/>
+            <div>
+              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Note (optionnel)</label>
+              <input value={note} onChange={e=>setNote(e.target.value)} placeholder="Ex: Urgent, pour le client X..." style={S}/>
             </div>
-            <div style={{marginBottom:12}}>
-              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Fournisseur (optionnel)</label>
-              <input value={mFourn} onChange={e=>setMFourn(e.target.value)} placeholder="Ex: NAPA, Kimpex..." style={S}/>
-            </div>
-            <div style={{marginBottom:20}}>
-              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Note (optionnel)</label>
-              <input value={mNote} onChange={e=>setMNote(e.target.value)} placeholder="Ex: Urgent, couleur bleue..." style={S}/>
-            </div>
-            <div style={{display:'flex',gap:10}}>
-              <button type="button" onClick={()=>setShowManuel(false)} style={{flex:1,background:'none',border:`1px solid ${bdr}`,borderRadius:10,padding:'11px 0',cursor:'pointer',color:sub,fontWeight:600}}>Annuler</button>
-              <button type="submit" style={{flex:2,background:C.blue,color:'#fff',border:'none',borderRadius:10,padding:'11px 0',fontWeight:700,cursor:'pointer',fontSize:14}}>Envoyer →</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    )}
-
-    {/* Header */}
-    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,flexWrap:'wrap',gap:12}}>
-      <div>
-        <h2 style={{margin:0,fontSize:22,fontWeight:800}}>🔧 Fournitures d'atelier</h2>
-        <p style={{color:sub,fontSize:13,margin:'4px 0 0'}}>{catalogue.length} articles disponibles</p>
-      </div>
-      <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
-        {employe
-          ? <div style={{background:dark?'#1a1a2e':'#f0f4ff',border:`1px solid ${C.blue}22`,borderRadius:20,padding:'6px 14px',fontSize:13}}>
-              👤 <strong>{employe}</strong>
-              <button onClick={()=>setShowEmployeModal(true)} style={{fontSize:11,color:C.blue,background:'none',border:'none',cursor:'pointer',marginLeft:6,textDecoration:'underline'}}>changer</button>
-            </div>
-          : <button onClick={()=>setShowEmployeModal(true)} style={{background:C.blue,color:'#fff',border:'none',borderRadius:20,padding:'8px 18px',cursor:'pointer',fontWeight:700,fontSize:13}}>👤 S'identifier</button>
-        }
-        <button onClick={()=>setShowManuel(true)} style={{background:'none',border:`1px solid ${bdr}`,borderRadius:20,padding:'8px 16px',cursor:'pointer',fontSize:13,fontWeight:600,color:sub}}>✏️ Article non trouvé?</button>
-        <button onClick={()=>setShowPanier(true)} style={{position:'relative',background:C.green,color:'#fff',border:'none',borderRadius:20,padding:'8px 20px',cursor:'pointer',fontWeight:700,fontSize:14}}>
-          🛒 Panier
-          {nbPanier > 0 && <span style={{position:'absolute',top:-6,right:-6,background:C.red,color:'#fff',borderRadius:'50%',width:20,height:20,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:900}}>{nbPanier}</span>}
-        </button>
-      </div>
-    </div>
-
-    {/* Message succès */}
-    {msgOk && <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}`,borderRadius:10,padding:'12px 18px',marginBottom:16,color:C.green,fontWeight:700,fontSize:14}}>{msgOk}</div>}
-
-    {/* Mes demandes en attente */}
-    {mesDemandesPending.length > 0 && (
-      <div style={{background:card,borderRadius:12,border:`2px solid ${C.yellow}33`,padding:'14px 18px',marginBottom:20}}>
-        <div style={{fontSize:13,fontWeight:700,marginBottom:10,color:C.yellow}}>⏳ Mes demandes en attente ({mesDemandesPending.length})</div>
-        <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
-          {mesDemandesPending.map((d:any) => (
-            <div key={d.id} style={{background:dark?'#1a1a1a':'#fafafa',borderRadius:8,padding:'8px 12px',border:`1px solid ${bdr}`,display:'flex',alignItems:'center',gap:10,fontSize:13}}>
-              <span>{d.description}</span>
-              <span style={{color:sub,fontSize:11}}>×{d.quantite}</span>
-              <button onClick={()=>annulerDemande(d.id)} style={{background:'none',border:'none',color:C.red,cursor:'pointer',fontSize:12,fontWeight:700,padding:0}}>✕</button>
-            </div>
-          ))}
-        </div>
-      </div>
-    )}
-
-    {/* Filtres */}
-    <div style={{display:'flex',gap:10,marginBottom:20,flexWrap:'wrap',alignItems:'center'}}>
-      <div style={{position:'relative',flex:2,minWidth:220}}>
-        <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:sub,fontSize:16}}>🔍</span>
-        <input value={recherche} onChange={e=>setRecherche(e.target.value)} placeholder="Rechercher une fourniture, SKU..." style={{...S,paddingLeft:36}}/>
-      </div>
-      <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-        <button onClick={()=>setFiltCat('ALL')} style={{padding:'7px 14px',borderRadius:20,border:`2px solid ${filtCat==='ALL'?C.blue:bdr}`,background:filtCat==='ALL'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:filtCat==='ALL'?C.blue:sub,fontSize:12,fontWeight:700,cursor:'pointer'}}>
-          Tout ({catalogue.length})
-        </button>
-        {categories.map((cat:string) => {
-          const n = catalogue.filter((c:any) => c.categorie === cat).length
-          const icone = iconesCat[cat] || '📦'
-          const couleur = couleursCat[cat] || '#64748b'
-          return (
-            <button key={cat} onClick={()=>setFiltCat(filtCat===cat?'ALL':cat)}
-              style={{padding:'7px 14px',borderRadius:20,border:`2px solid ${filtCat===cat?couleur:bdr}`,background:filtCat===cat?couleur+'22':'transparent',color:filtCat===cat?couleur:sub,fontSize:12,fontWeight:700,cursor:'pointer'}}>
-              {icone} {cat.split(' ')[0]} ({n})
-            </button>
-          )
-        })}
-      </div>
-    </div>
-
-    {/* Grille produits */}
-    {categories.filter(c => filtCat === 'ALL' || c === filtCat).map((cat:string) => {
-      const items = catalogueFiltré.filter((c:any) => c.categorie === cat)
-      if (items.length === 0) return null
-      const couleur = couleursCat[cat] || '#64748b'
-      const icone = iconesCat[cat] || '📦'
-      return (
-        <div key={cat} style={{marginBottom:28}}>
-          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
-            <div style={{width:32,height:32,borderRadius:8,background:couleur+'22',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}}>{icone}</div>
-            <h3 style={{margin:0,fontSize:16,fontWeight:700}}>{cat}</h3>
-            <span style={{fontSize:12,color:sub,background:dark?'#222':'#f1f5f9',padding:'2px 8px',borderRadius:10}}>{items.length} articles</span>
           </div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))',gap:10}}>
-            {items.map((item:any) => {
-              const dansPanier = estDansPanier(item.description)
-              const qtePanier = panier.find(p=>p.item.description===item.description)?.qte || 0
-              return (
-                <div key={item.id||item.description}
-                  style={{background:card,borderRadius:14,padding:'14px 16px',border:`2px solid ${dansPanier?couleur:bdr}`,transition:'all .15s',cursor:'pointer',position:'relative'}}
-                  onMouseEnter={e=>(e.currentTarget.style.boxShadow='0 4px 16px rgba(0,0,0,.1)')}
-                  onMouseLeave={e=>(e.currentTarget.style.boxShadow='none')}>
-                  {dansPanier && <div style={{position:'absolute',top:8,right:8,background:couleur,color:'#fff',borderRadius:'50%',width:22,height:22,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:900}}>{qtePanier}</div>}
-                  <div style={{fontSize:22,marginBottom:8}}>{icone}</div>
-                  <div style={{fontWeight:600,fontSize:13,marginBottom:4,lineHeight:1.3}} title={item.description}>
-                    {item.description.length > 45 ? item.description.slice(0,45)+'...' : item.description}
-                  </div>
-                  {item.sku && <div style={{fontSize:11,color:sub,marginBottom:2}}>#{item.sku}</div>}
-                  {item.fournisseur && <div style={{fontSize:11,color:sub,marginBottom:10}}>{item.fournisseur}</div>}
-                  <button onClick={()=>ajouterPanier(item)}
-                    style={{width:'100%',background:dansPanier?couleur:dark?'#1a1a2e':'#f0f4ff',color:dansPanier?'#fff':C.blue,border:`1px solid ${dansPanier?couleur:C.blue+'44'}`,borderRadius:8,padding:'8px 0',fontSize:12,fontWeight:700,cursor:'pointer',transition:'all .15s'}}>
-                    {dansPanier ? `✅ Dans le panier (${qtePanier})` : '+ Ajouter au panier'}
-                  </button>
-                </div>
-              )
+
+          <button type="submit" disabled={loading||!sku.trim()}
+            style={{width:'100%',background:(!sku.trim())?sub:C.blue,color:'#fff',border:'none',borderRadius:10,padding:'13px 0',fontSize:15,fontWeight:700,cursor:sku.trim()?'pointer':'not-allowed',opacity:sku.trim()?1:0.6}}>
+            {loading ? 'Envoi...' : '💡 Envoyer la suggestion → Commandes du Jour'}
+          </button>
+        </form>
+      </div>
+
+      {/* Rapport par employé */}
+      <div style={{background:card,borderRadius:14,border:`1px solid ${bdr}`,padding:'20px 24px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,flexWrap:'wrap',gap:10}}>
+          <h3 style={{margin:0,fontSize:16,fontWeight:700}}>📊 Registre des suggestions</h3>
+          <select value={rapportEmploye} onChange={e=>setRapportEmploye(e.target.value)} style={{...S,minWidth:180}}>
+            <option value="ALL">Tous les employés ({demandes.length})</option>
+            {employes.map((emp:string) => {
+              const n = demandes.filter((d:any)=>d.employe===emp).length
+              return <option key={emp} value={emp}>{emp} ({n})</option>
             })}
-          </div>
+          </select>
         </div>
-      )
-    })}
 
-    {catalogueFiltré.length === 0 && (
-      <div style={{textAlign:'center',padding:60,color:sub}}>
-        <div style={{fontSize:48,marginBottom:12}}>🔍</div>
-        <p style={{fontWeight:600}}>Aucun article trouvé</p>
-        <p style={{fontSize:13}}>Essaie un autre mot-clé ou <button onClick={()=>setShowManuel(true)} style={{color:C.blue,background:'none',border:'none',cursor:'pointer',textDecoration:'underline',fontSize:13}}>fais une demande manuelle</button></p>
+        {demandesFiltrees.length === 0
+          ? <div style={{textAlign:'center',padding:40,color:sub}}>
+              <div style={{fontSize:32,marginBottom:8}}>📋</div>
+              <p>Aucune suggestion pour le moment</p>
+            </div>
+          : <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                <thead><tr style={{background:thBg}}>
+                  <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Employé</th>
+                  <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>SKU</th>
+                  <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Description</th>
+                  <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Fournisseur</th>
+                  <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Qté</th>
+                  <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Statut</th>
+                  <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Date</th>
+                  <th style={{padding:'9px',borderBottom:`2px solid ${bdr}`}}></th>
+                </tr></thead>
+                <tbody>
+                  {demandesFiltrees.map((d:any) => (
+                    <tr key={d.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:600}}>{d.employe}</td>
+                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:12}}>{d.sku||'—'}</td>
+                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={d.description}>{d.description}</td>
+                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{d.fournisseur||'—'}</td>
+                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{d.quantite}</td>
+                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                        <span style={{background:d.statut==='en_attente'?C.yellow+'22':d.statut==='annulée'?C.red+'22':C.green+'22',color:d.statut==='en_attente'?C.yellow:d.statut==='annulée'?C.red:C.green,padding:'3px 8px',borderRadius:20,fontSize:11,fontWeight:700}}>
+                          {d.statut==='en_attente'?'⏳ En attente':d.statut==='annulée'?'✕ Annulée':'✅ Traitée'}
+                        </span>
+                      </td>
+                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{new Date(d.date_demande).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
+                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`}}>
+                        {d.statut==='en_attente' && <button onClick={()=>annuler(d.id)} style={{background:C.red+'22',color:C.red,border:'none',borderRadius:6,padding:'4px 8px',fontSize:11,cursor:'pointer',fontWeight:700}}>Annuler</button>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+        }
       </div>
-    )}
+    </div>
   </>
 }
 
