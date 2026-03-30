@@ -59,15 +59,26 @@ export async function POST() {
     const mapPol = new Map<string, { nom: string; jours: number }>()
     for (const p of pols || []) mapPol.set(String(p.id_fournisseur), { nom: p.nom_fournisseur, jours: p.jours_retour })
 
-    // 4. Stock hier
-    const { data: hierRows } = await supabaseAdmin.from('stock_hier').select('code_piece, quantite')
+    // 4. Stock hier — pagination complète
     const mapHier = new Map<string, number>()
-    for (const r of hierRows || []) mapHier.set(r.code_piece, Number(r.quantite))
+    let hierFrom = 0
+    while (true) {
+      const { data: hierRows } = await supabaseAdmin.from('stock_hier').select('code_piece, quantite').range(hierFrom, hierFrom + 4999)
+      for (const r of hierRows || []) mapHier.set(r.code_piece, Number(r.quantite))
+      if (!hierRows || hierRows.length < 5000) break
+      hierFrom += 5000
+    }
     const modeInit = mapHier.size === 0
 
-    // 5. Lots actifs
-    const { data: lotsRows } = await supabaseAdmin.from('lots_retournables').select('*').gt('qte_restante', 0).gte('date_limite', todayStr)
-    const lotsActifs: any[] = (lotsRows || []).map(l => ({ ...l, qte_restante: Number(l.qte_restante) }))
+    // 5. Lots actifs — pagination complète
+    let lotsActifs: any[] = []
+    let lotsFrom = 0
+    while (true) {
+      const { data: lotsRows } = await supabaseAdmin.from('lots_retournables').select('*').gt('qte_restante', 0).gte('date_limite', todayStr).range(lotsFrom, lotsFrom + 4999)
+      lotsActifs = lotsActifs.concat((lotsRows || []).map((l: any) => ({ ...l, qte_restante: Number(l.qte_restante) })))
+      if (!lotsRows || lotsRows.length < 5000) break
+      lotsFrom += 5000
+    }
 
     const addDays = (d: Date, n: number) => { const r = new Date(d); r.setDate(r.getDate() + n); return r.toISOString().split('T')[0] }
     const nouveauStock: any[] = []
