@@ -606,7 +606,11 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap}: an
     const besoin = getBesoin4Semaines(it)
     if (besoin < BESOIN_MIN) return false
     // Exclure si une alternative couvre la demande
-    const altCodesC:string[] = (altsMap&&altsMap.get&&altsMap.get(it.pk))||[]
+    const suiviItem = getSuivi(it.pk)
+    const altCodesC:string[] = [
+      ...((altsMap&&altsMap.get&&altsMap.get(it.pk))||[]),
+      ...(suiviItem?.piece_alternative ? [suiviItem.piece_alternative] : [])
+    ]
     const normalize = (s:string) => s.trim().toLowerCase().replace(/\s+/g,'')
     const allItems:any[] = data?.liste_complete || []
     const altCouvreC = altCodesC.some((ac:string)=>{
