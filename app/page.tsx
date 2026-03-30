@@ -167,8 +167,10 @@ export default function Dashboard() {
     if (cov>0) {
       const altCodes = (alts as Map<string,string[]>).get(it.pk) || []
       const besoin = getBesoin(it)
+      const normC = (s:string) => s.trim().toLowerCase().replace(/\s+/g,'')
       for (const altCode of altCodes) {
-        const altItem = items.find((x:Item) => x.pk === altCode)
+        const altCodeN = normC(altCode)
+        const altItem = items.find((x:Item) => normC(x.pk) === altCodeN)
         if (altItem && Math.max(0, altItem.stock) >= besoin) return false
       }
     }
@@ -603,6 +605,16 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap}: an
     if (filtFourn !== 'ALL' && it.fournisseur !== filtFourn) return false
     const besoin = getBesoin4Semaines(it)
     if (besoin < BESOIN_MIN) return false
+    // Exclure si une alternative couvre la demande
+    const altCodesC:string[] = (altsMap&&altsMap.get&&altsMap.get(it.pk))||[]
+    const normalize = (s:string) => s.trim().toLowerCase().replace(/\s+/g,'')
+    const allItems:any[] = data?.liste_complete || []
+    const altCouvreC = altCodesC.some((ac:string)=>{
+      const acNorm = normalize(ac)
+      const ai = allItems.find((x:any)=>normalize(x.pk)===acNorm)
+      return ai&&Math.max(0,ai.stock)>=besoin
+    })
+    if (altCouvreC) return false
     return Math.max(0, it.stock) < besoin
   }).map(it => {
     const besoin = getBesoin4Semaines(it)
@@ -765,7 +777,6 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap}: an
                             </td>
                             <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>
                               {it.pk}
-                              {alternatives.get(it.pk) && <div style={{fontSize:10,color:C.blue,marginTop:2}}>🔄 Alt: {alternatives.get(it.pk)}</div>}
                               {suivi?.piece_alternative && <div style={{fontSize:10,color:C.green,marginTop:2}}>✅ Alt choisie: {suivi.piece_alternative}</div>}
                               {!suivi?.piece_alternative && altsMap && altsMap.get(it.pk) && <div style={{fontSize:10,color:C.blue,marginTop:2}}>🔄 Alt: {(altsMap.get(it.pk)||[]).join(', ')}</div>}
                             </td>
@@ -945,6 +956,15 @@ function BookingTab({data,dark,card,bdr,sub,thBg,S,alts}: any) {
       if(it.fournisseur!==fournisseur||it.classeABC==='C')return
       let v=0; mois.forEach((m:number)=>{v+=it.moyMois*(it.indiceSaison?.[m]??1)})
       if(v<=3)return
+      // Exclure si une alternative couvre la demande
+      const altCodesB:string[] = (alts&&alts.get&&alts.get(it.pk))||[]
+      const normB = (s:string) => s.trim().toLowerCase().replace(/\s+/g,'')
+      const altCouvreB = altCodesB.some((ac:string)=>{
+        const acN=normB(ac)
+        const ai=data.liste_complete.find((x:any)=>normB(x.pk)===acN)
+        return ai&&Math.max(0,ai.stock)>=v
+      })
+      if(altCouvreB)return
       const saf=it.stockSecurite||Math.ceil(v*(it.classeABC==='A'?.2:.1))
       const q=Math.ceil(v+saf-Math.max(0,it.stock))
       if(q>0&&it.saison!=='Sur Commande')sugg.push({...it,vp:v.toFixed(1),saf,vs:it.stock,qb:q})
