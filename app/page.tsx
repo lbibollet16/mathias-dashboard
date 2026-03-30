@@ -59,7 +59,8 @@ export default function Dashboard() {
   const ddRef = useRef<HTMLDivElement>(null)
 
   // Import
-  const [alts, setAlts] = useState<Map<string,string[]>>(new Map()) // principal -> [alternatifs]
+  const [alts, setAlts] = useState<Map<string,string[]>>(new Map())
+  const [fournituresData, setFournituresData] = useState<{catalogue:any[],demandes:any[]}>({catalogue:[],demandes:[]}) // principal -> [alternatifs]
   const [altReverse, setAltReverse] = useState<Map<string,string>>(new Map()) // alternatif -> principal
   const [iFile, setIFile]   = useState<File|null>(null)
   const [iMois, setIMois]   = useState('')
@@ -77,13 +78,15 @@ export default function Dashboard() {
   async function fetchAll() {
     setLoading(true)
     try {
-      const [d, l, n, a] = await Promise.all([
+      const [d, l, n, a, f] = await Promise.all([
         fetch('/api/calculateur').then(r=>r.json()),
         fetch('/api/lots').then(r=>r.json()),
         fetch('/api/negatifs').then(r=>r.json()),
         fetch('/api/alternatives').then(r=>r.json()),
+        fetch('/api/fournitures').then(r=>r.json()),
       ])
       setData(d); setLots(Array.isArray(l)?l:[]); setNegs(Array.isArray(n)?n:[])
+      if(f&&f.catalogue) setFournituresData(f)
       // Construire les maps d'alternatives
       if (Array.isArray(a)) {
         const fwd = new Map<string,string[]>()
@@ -237,7 +240,7 @@ export default function Dashboard() {
 
       {/* TABS */}
       <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,padding:'0 20px',display:'flex'}}>
-        {[{id:'calc',l:'Calculateur Achats'},{id:'import',l:'Importer Ventes'},{id:'retours',l:'Retours RMA'},{id:'booking',l:'Booking'},{id:'negatifs',l:'Pièces Négatives',d:true},{id:'commandes',l:'📋 Commandes du Jour'}].map(t=>(
+        {[{id:'calc',l:'Calculateur Achats'},{id:'import',l:'Importer Ventes'},{id:'retours',l:'Retours RMA'},{id:'booking',l:'Booking'},{id:'negatifs',l:'Pièces Négatives',d:true},{id:'commandes',l:'📋 Commandes du Jour'},{id:'fournitures',l:'🔧 Fournitures'}].map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:'12px 16px',border:'none',background:'transparent',cursor:'pointer',fontSize:13,fontWeight:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',transition:'all .15s'}}>
             {t.l}
           </button>
@@ -492,6 +495,7 @@ export default function Dashboard() {
         {/* ── NÉGATIFS ────────────────────────────────────────────── */}
         {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts}/>}
         {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts}/>}
+        {tab==='fournitures' && <FournituresTab fournituresData={fournituresData} setFournituresData={setFournituresData} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
       </div>
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-thumb{background:${dark?'#444':'#ccc'};border-radius:3px}`}</style>
     </div>
@@ -826,6 +830,231 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap}: an
 }
 
 
+
+
+// ── Fournitures Tab ───────────────────────────────────────────────────────────
+function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, sub, thBg, S, C, hvr}: any) {
+  const [employe, setEmploye] = useState(() => { try { return localStorage.getItem('employe_nom') || '' } catch { return '' } })
+  const [showEmployeModal, setShowEmployeModal] = useState(false)
+  const [nomTemp, setNomTemp] = useState('')
+  const [filtCat, setFiltCat] = useState('ALL')
+  const [recherche, setRecherche] = useState('')
+  const [showManuel, setShowManuel] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [msgOk, setMsgOk] = useState('')
+
+  // Formulaire manuel
+  const [mSku, setMSku] = useState('')
+  const [mDesc, setMDesc] = useState('')
+  const [mFourn, setMFourn] = useState('')
+  const [mQte, setMQte] = useState(1)
+  const [mNote, setMNote] = useState('')
+
+  const catalogue: any[] = fournituresData?.catalogue || []
+  const demandes: any[] = fournituresData?.demandes || []
+
+  const categories = Array.from(new Set(catalogue.map((c:any) => c.categorie))).sort() as string[]
+
+  const catalogueFiltré = catalogue.filter((c:any) => {
+    if (filtCat !== 'ALL' && c.categorie !== filtCat) return false
+    if (recherche && !c.description.toLowerCase().includes(recherche.toLowerCase()) && !c.sku?.toLowerCase().includes(recherche.toLowerCase())) return false
+    return true
+  })
+
+  async function demanderCatalogue(item: any) {
+    if (!employe) { setShowEmployeModal(true); return }
+    setLoading(true)
+    await fetch('/api/fournitures', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        employe, sku: item.sku, description: item.description,
+        fournisseur: item.fournisseur, categorie: item.categorie,
+        quantite: 1, unite: item.unite
+      })
+    })
+    await recharger()
+    setMsgOk(`✅ Demande envoyée pour "${item.description}"`)
+    setTimeout(() => setMsgOk(''), 3000)
+    setLoading(false)
+  }
+
+  async function soumettreManuel(e: any) {
+    e.preventDefault()
+    if (!employe) { setShowEmployeModal(true); return }
+    if (!mDesc) return
+    setLoading(true)
+    await fetch('/api/fournitures', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        employe, sku: mSku, description: mDesc,
+        fournisseur: mFourn, categorie: 'Demande manuelle',
+        quantite: mQte, note: mNote
+      })
+    })
+    setMSku(''); setMDesc(''); setMFourn(''); setMQte(1); setMNote('')
+    setShowManuel(false)
+    await recharger()
+    setMsgOk('✅ Demande manuelle envoyée!')
+    setTimeout(() => setMsgOk(''), 3000)
+    setLoading(false)
+  }
+
+  async function recharger() {
+    const r = await fetch('/api/fournitures')
+    if (r.ok) setFournituresData(await r.json())
+  }
+
+  async function annulerDemande(id: number) {
+    await fetch('/api/fournitures', {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ id, statut: 'annulée' })
+    })
+    await recharger()
+  }
+
+  // Demandes de cet employé
+  const mesDemandesPending = demandes.filter((d:any) => d.employe === employe)
+
+  return <>
+    {/* Modal employé */}
+    {showEmployeModal && (
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <div style={{background:card,borderRadius:14,padding:32,width:360,border:`1px solid ${bdr}`}}>
+          <h3 style={{margin:'0 0 8px'}}>Qui es-tu ?</h3>
+          <p style={{color:sub,fontSize:13,margin:'0 0 16px'}}>Entre ton prénom pour les demandes.</p>
+          <input value={nomTemp} onChange={e=>setNomTemp(e.target.value)} placeholder="Ex: Marie, Jean..." style={{...S,marginBottom:14,fontSize:15}}
+            onKeyDown={e=>{if(e.key==='Enter'&&nomTemp.trim()){const n=nomTemp.trim();setEmploye(n);try{localStorage.setItem('employe_nom',n)}catch{};setShowEmployeModal(false)}}}/>
+          <button onClick={()=>{const n=nomTemp.trim();if(n){setEmploye(n);try{localStorage.setItem('employe_nom',n)}catch{};setShowEmployeModal(false)}}}
+            style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 0',width:'100%',fontSize:14,fontWeight:700,cursor:'pointer'}}>Confirmer</button>
+        </div>
+      </div>
+    )}
+
+    {/* Modal demande manuelle */}
+    {showManuel && (
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <div style={{background:card,borderRadius:14,padding:28,width:480,border:`1px solid ${bdr}`}}>
+          <h3 style={{margin:'0 0 16px',fontSize:17}}>✏️ Demande manuelle</h3>
+          <form onSubmit={soumettreManuel}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+              <div>
+                <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>SKU (optionnel)</label>
+                <input value={mSku} onChange={e=>setMSku(e.target.value)} placeholder="Ex: 83-6016" style={S}/>
+              </div>
+              <div>
+                <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Quantité</label>
+                <input type="number" value={mQte} onChange={e=>setMQte(Number(e.target.value))} min={1} style={S}/>
+              </div>
+            </div>
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Description *</label>
+              <input value={mDesc} onChange={e=>setMDesc(e.target.value)} placeholder="Ex: Gants nitrile large, Tie wraps 8 po..." required style={S}/>
+            </div>
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Fournisseur (optionnel)</label>
+              <input value={mFourn} onChange={e=>setMFourn(e.target.value)} placeholder="Ex: NAPA, Kimpex..." style={S}/>
+            </div>
+            <div style={{marginBottom:16}}>
+              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Note (optionnel)</label>
+              <input value={mNote} onChange={e=>setMNote(e.target.value)} placeholder="Ex: Urgent, couleur bleue..." style={S}/>
+            </div>
+            <div style={{display:'flex',gap:10}}>
+              <button type="button" onClick={()=>setShowManuel(false)} style={{flex:1,background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 0',cursor:'pointer',color:sub}}>Annuler</button>
+              <button type="submit" style={{flex:2,background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 0',fontWeight:700,cursor:'pointer'}}>Envoyer la demande</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )}
+
+    {/* Header */}
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:10}}>
+      <div>
+        <h2 style={{margin:0,fontSize:18}}>🔧 Fournitures d'atelier</h2>
+        <p style={{color:sub,fontSize:13,margin:'4px 0 0'}}>{catalogue.length} articles au catalogue • {demandes.length} demandes en attente</p>
+      </div>
+      <div style={{display:'flex',gap:10,alignItems:'center'}}>
+        {employe
+          ? <span style={{fontSize:13,color:sub}}>👤 <strong>{employe}</strong> <button onClick={()=>setShowEmployeModal(true)} style={{fontSize:11,color:C.blue,background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>changer</button></span>
+          : <button onClick={()=>setShowEmployeModal(true)} style={{fontSize:13,color:C.blue,background:'none',border:`1px solid ${C.blue}`,borderRadius:8,padding:'6px 14px',cursor:'pointer',fontWeight:700}}>👤 S'identifier</button>
+        }
+        <button onClick={()=>setShowManuel(true)} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontSize:13,fontWeight:700,cursor:'pointer'}}>✏️ Demande manuelle</button>
+      </div>
+    </div>
+
+    {/* Message succès */}
+    {msgOk && <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}`,borderRadius:8,padding:'10px 16px',marginBottom:12,color:C.green,fontWeight:600}}>{msgOk}</div>}
+
+    {/* Mes demandes en attente */}
+    {mesDemandesPending.length > 0 && (
+      <div style={{background:card,borderRadius:12,border:`2px solid ${C.yellow}`,padding:16,marginBottom:14}}>
+        <div style={{fontSize:13,fontWeight:700,marginBottom:10,color:C.yellow}}>⏳ Mes demandes en attente ({mesDemandesPending.length})</div>
+        <div style={{display:'flex',flexDirection:'column',gap:6}}>
+          {mesDemandesPending.map((d:any) => (
+            <div key={d.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:dark?'#1a1a1a':'#fafafa',borderRadius:8,border:`1px solid ${bdr}`}}>
+              <div>
+                <strong style={{fontSize:13}}>{d.description}</strong>
+                {d.sku && <span style={{fontSize:11,color:sub,marginLeft:8}}>SKU: {d.sku}</span>}
+                <span style={{fontSize:11,color:sub,marginLeft:8}}>Qté: {d.quantite}</span>
+                {d.fournisseur && <span style={{fontSize:11,color:sub,marginLeft:8}}>{d.fournisseur}</span>}
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <span style={{fontSize:11,color:sub}}>{new Date(d.date_demande).toLocaleDateString('fr-CA')}</span>
+                <button onClick={()=>annulerDemande(d.id)} style={{background:C.red+'22',color:C.red,border:'none',borderRadius:6,padding:'4px 8px',fontSize:11,cursor:'pointer',fontWeight:700}}>✕ Annuler</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+
+    {/* Filtres catalogue */}
+    <div style={{background:card,borderRadius:12,padding:'12px 16px',marginBottom:12,display:'flex',gap:10,flexWrap:'wrap',alignItems:'center',border:`1px solid ${bdr}`}}>
+      <input value={recherche} onChange={e=>setRecherche(e.target.value)} placeholder="🔍 Rechercher une fourniture..." style={{...S,flex:2,minWidth:200}}/>
+      <select value={filtCat} onChange={e=>setFiltCat(e.target.value)} style={{...S,flex:1,minWidth:180}}>
+        <option value="ALL">Toutes les catégories</option>
+        {categories.map((c:string) => <option key={c} value={c}>{c}</option>)}
+      </select>
+      <span style={{fontSize:12,color:sub}}>{catalogueFiltré.length} articles</span>
+    </div>
+
+    {/* Catalogue par catégorie */}
+    {categories.filter(c => filtCat === 'ALL' || c === filtCat).map((cat:string) => {
+      const items = catalogueFiltré.filter((c:any) => c.categorie === cat)
+      if (items.length === 0) return null
+      return (
+        <div key={cat} style={{marginBottom:16}}>
+          <div style={{fontSize:13,fontWeight:700,color:sub,textTransform:'uppercase',marginBottom:8,padding:'4px 0',borderBottom:`1px solid ${bdr}`}}>{cat} ({items.length})</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))',gap:8}}>
+            {items.map((item:any) => {
+              const dejaDemandeAujourd = demandes.some((d:any) => d.sku === item.sku && d.employe === employe && new Date(d.date_demande).toDateString() === new Date().toDateString())
+              return (
+                <div key={item.id} style={{background:card,borderRadius:10,padding:'12px 14px',border:`1px solid ${dejaDemandeAujourd?C.green:bdr}`,display:'flex',justifyContent:'space-between',alignItems:'center',gap:10}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:600,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={item.description}>{item.description}</div>
+                    <div style={{fontSize:11,color:sub,marginTop:2}}>
+                      {item.sku && <span style={{marginRight:8}}>#{item.sku}</span>}
+                      {item.fournisseur && <span>{item.fournisseur}</span>}
+                    </div>
+                  </div>
+                  <button
+                    onClick={()=>demanderCatalogue(item)}
+                    disabled={loading}
+                    style={{background:dejaDemandeAujourd?C.green:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'6px 12px',fontSize:12,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',minWidth:80}}>
+                    {dejaDemandeAujourd?'✅ Envoyé':'+ Demander'}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )
+    })}
+  </>
+}
 
 // ── Négatifs Tab ────────────────────────────────────────────────────────────
 function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts}: any) {
