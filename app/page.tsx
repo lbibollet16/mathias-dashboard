@@ -485,7 +485,7 @@ export default function Dashboard() {
         </>}
 
         {/* ── BOOKING ─────────────────────────────────────────────── */}
-        {tab==='booking' && <BookingTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S}/>}
+        {tab==='booking' && <BookingTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} alts={alts}/>}
 
         {/* ── NÉGATIFS ────────────────────────────────────────────── */}
         {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts}/>}
@@ -921,7 +921,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts}: any) {
 }
 
 
-function BookingTab({data,dark,card,bdr,sub,thBg,S}: any) {
+function BookingTab({data,dark,card,bdr,sub,thBg,S,alts}: any) {
   const C = { blue:'#1a73e8', green:'#188038', yellow:'#f9ab00', red:'#d93025', bgG:'#e6f4ea' }
   const [fourn,setFourn]=[useState(''),s=>useState(s)[1]]
   const [fournisseur,setFournisseur] = useState('')
@@ -1020,7 +1020,7 @@ function BookingTab({data,dark,card,bdr,sub,thBg,S}: any) {
                 <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}><span style={{background:it.classeABC==='A'?C.green:C.yellow,color:'#fff',padding:'3px 6px',borderRadius:4,fontSize:11,fontWeight:700}}>{it.classeABC}</span></td>
                 <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>
                   {it.pk}
-                  {(alts as Map<string,string[]>).get(it.pk) && <div style={{fontSize:10,color:C.blue,marginTop:2}}>🔄 Alt: {((alts as Map<string,string[]>).get(it.pk)||[]).join(', ')}</div>}
+                  {alts && alts.get && alts.get(it.pk) && <div style={{fontSize:10,color:'#1a73e8',marginTop:2}}>🔄 Alt: {(alts.get(it.pk)||[]).join(', ')}</div>}
                 </td>
                 <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:sub}}>{it.desc}</td>
                 <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.blue,fontWeight:700}}>{it.vp}</td>
