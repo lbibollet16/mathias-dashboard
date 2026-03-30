@@ -476,80 +476,117 @@ export default function Dashboard() {
 // ── Commandes du Jour ────────────────────────────────────────────────────────
 function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr}: any) {
   const [filtFourn, setFiltFourn] = useState('ALL')
+  const [employe, setEmploye] = useState(() => { try { return localStorage.getItem('employe_nom') || '' } catch { return '' } })
+  const [showEmployeModal, setShowEmployeModal] = useState(false)
+  const [nomTemp, setNomTemp] = useState('')
+  const [suivis, setSuivis] = useState<any[]>([])
+  const [actionModal, setActionModal] = useState<{item: any, type: string} | null>(null)
+  const [pieceAlt, setPieceAlt] = useState('')
+  const [filtreStatut, setFiltreStatut] = useState('actif') // actif | attente | verifie | tout
   const aujourd = new Date()
-  const moisNow = aujourd.getMonth() // 0-indexed
+  const moisNow = aujourd.getMonth()
 
-  // Calcul du besoin 4 semaines basé sur l'historique réel
-  // Logique : aujourd'hui = 30 mars 2026
-  // Les 4 prochaines semaines = 30 mars → 27 avril
-  // On regarde dans 2024 et 2025 ce qui s'est vendu sur cette période exacte
+  // Charger les suivis depuis Supabase au montage
+  useEffect(() => {
+    chargerSuivis()
+    // Rafraîchir toutes les 30 secondes (multi-employés)
+    const interval = setInterval(chargerSuivis, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  async function chargerSuivis() {
+    try {
+      const r = await fetch('/api/suivi-commandes')
+      if (r.ok) setSuivis(await r.json())
+    } catch {}
+  }
+
+  function getSuivi(pk: string) {
+    return suivis.find((s: any) => s.code_piece === pk)
+  }
+
+  function estCache(pk: string): boolean {
+    const s = getSuivi(pk)
+    if (!s) return false
+    if (s.statut === 'pas_besoin') {
+      return !s.date_expiry || new Date(s.date_expiry) > new Date()
+    }
+    if (s.statut === 'commande_faite') return true
+    return false
+  }
+
+  function estVerifie(pk: string): boolean {
+    const s = getSuivi(pk)
+    return s?.statut === 'verifie'
+  }
+
+  async function faireAction(item: any, type: string, extra?: any) {
+    if (!employe) { setShowEmployeModal(true); return }
+    const body: any = {
+      code_piece: item.pk,
+      fournisseur: item.fournisseur,
+      qte_suggeree: item.qteACommander,
+      statut: type,
+      stock_au_moment: item.stock,
+      employe,
+      ...extra
+    }
+    if (type === 'pas_besoin') {
+      const exp = new Date()
+      exp.setMonth(exp.getMonth() + 3)
+      body.date_expiry = exp.toISOString()
+    }
+    await fetch('/api/suivi-commandes', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
+    await chargerSuivis()
+    setActionModal(null)
+    setPieceAlt('')
+  }
+
   function getBesoin4Semaines(it: any): number {
-    if (!it.ventesMoyParMois) return it.moyMois * 1
-
-    // Jours restants dans le mois actuel
+    if (!it.ventesMoyParMois) return it.moyMois
     const dernierJourMois = new Date(aujourd.getFullYear(), moisNow + 1, 0).getDate()
     const jourActuel = aujourd.getDate()
-    const joursRestantsMoisActuel = dernierJourMois - jourActuel + 1
-
-    // Les 4 semaines = 28 jours
-    const JOURS_COUVERTURE = 28
-    const joursRestants = Math.min(joursRestantsMoisActuel, JOURS_COUVERTURE)
-    const joursDebordMoisSuivant = Math.max(0, JOURS_COUVERTURE - joursRestants)
-
-    // Proportion du mois actuel et du mois suivant
-    const propMoisActuel = joursRestants / dernierJourMois
+    const joursRestants = Math.min(dernierJourMois - jourActuel + 1, 28)
+    const joursDebord = Math.max(0, 28 - joursRestants)
+    const propM1 = joursRestants / dernierJourMois
     const moisSuivant = (moisNow + 1) % 12
-    const nbJoursMoisSuivant = new Date(aujourd.getFullYear(), moisSuivant + 1, 0).getDate()
-    const propMoisSuivant = joursDebordMoisSuivant / nbJoursMoisSuivant
-
-    // Ventes historiques réelles pour ces mois (moyenne 2024+2025)
-    const ventesMoisActuel = it.ventesMoyParMois[moisNow] ?? it.moyMois
-    const ventesMoisSuivant = it.ventesMoyParMois[moisSuivant] ?? it.moyMois
-
-    // Besoin = portion du mois actuel + portion du mois suivant
-    return ventesMoisActuel * propMoisActuel + ventesMoisSuivant * propMoisSuivant
+    const propM2 = joursDebord / new Date(aujourd.getFullYear(), moisSuivant + 1, 0).getDate()
+    return (it.ventesMoyParMois[moisNow] ?? it.moyMois) * propM1 + (it.ventesMoyParMois[moisSuivant] ?? it.moyMois) * propM2
   }
 
   const items: any[] = data?.liste_complete || []
+  const BESOIN_MIN = 3
+  const VALEUR_MIN = 10
 
-  // ── Règles commande du jour ──────────────────────────────────────────
-  // R1: ABC = A ou B seulement
-  // R2: Besoin 4 semaines ≥ 3 unités (basé sur historique réel)
-  // R3: Stock actuel < besoin 4 semaines (pas assez pour couvrir)
-  // R4: Valeur ligne ≥ 10$
-  // R5: Exclure "Sur Commande"
-  const BESOIN_MIN = 3         // besoin minimum 4 sem pour apparaître
-  const VALEUR_MIN_LIGNE = 10  // $ minimum par ligne
-
-  const suggestions = items.filter(it => {
-    if (it.classeABC === 'C') return false                          // R1
-    if (it.saison === 'Sur Commande') return false                  // R5
+  const toutesLignes = items.filter(it => {
+    if (it.classeABC === 'C') return false
+    if (it.saison === 'Sur Commande') return false
     if (filtFourn !== 'ALL' && it.fournisseur !== filtFourn) return false
-    const besoin4sem = getBesoin4Semaines(it)
-    if (besoin4sem < BESOIN_MIN) return false                       // R2
-    const stockEff = Math.max(0, it.stock)
-    return stockEff < besoin4sem                                    // R3 - stock insuffisant
+    const besoin = getBesoin4Semaines(it)
+    if (besoin < BESOIN_MIN) return false
+    return Math.max(0, it.stock) < besoin
   }).map(it => {
-    const besoin4sem = getBesoin4Semaines(it)
+    const besoin = getBesoin4Semaines(it)
     const stockEff = Math.max(0, it.stock)
-    // Commander pour couvrir 4 semaines + stock sécu
-    const qteACommander = Math.max(1, Math.ceil(besoin4sem - stockEff + (it.stockSecurite || 0)))
-    const totalLigne = qteACommander * it.cost
-    return { ...it, besoin4sem, qteACommander, totalLigne }
-  }).filter(it => it.totalLigne >= VALEUR_MIN_LIGNE)                // R4
-  .sort((a: any, b: any) => {
-    if (a.fournisseur !== b.fournisseur) return a.fournisseur.localeCompare(b.fournisseur)
-    return b.scoreUrgence - a.scoreUrgence
+    const qteACommander = Math.max(1, Math.ceil(besoin - stockEff + (it.stockSecurite || 0)))
+    return { ...it, besoin4sem: besoin, qteACommander, totalLigne: qteACommander * it.cost }
+  }).filter(it => it.totalLigne >= VALEUR_MIN)
+  .sort((a: any, b: any) => a.fournisseur.localeCompare(b.fournisseur))
+
+  // Filtrer selon statut
+  const suggestions = toutesLignes.filter(it => {
+    const s = getSuivi(it.pk)
+    if (filtreStatut === 'actif') return !estCache(it.pk) && !estVerifie(it.pk)
+    if (filtreStatut === 'attente') return s?.statut === 'commande_faite'
+    if (filtreStatut === 'verifie') return s?.statut === 'verifie'
+    return true
   })
 
-  const fournisseurs = Array.from(new Set(
-    items.filter(it => it.classeABC !== 'C').map(it => it.fournisseur)
-  )).sort() as string[]
-
+  const fournisseurs = Array.from(new Set(toutesLignes.map(it => it.fournisseur))).sort() as string[]
   const totalCommande = suggestions.reduce((s: number, it: any) => s + it.totalLigne, 0)
-  const nbFournisseurs = new Set(suggestions.map((it: any) => it.fournisseur)).size
+  const nbAttente = toutesLignes.filter(it => getSuivi(it.pk)?.statut === 'commande_faite').length
+  const nbVerifie = toutesLignes.filter(it => getSuivi(it.pk)?.statut === 'verifie').length
 
-  // Grouper par fournisseur pour l'affichage
   const parFournisseur = new Map<string, any[]>()
   for (const it of suggestions) {
     if (!parFournisseur.has(it.fournisseur)) parFournisseur.set(it.fournisseur, [])
@@ -559,125 +596,181 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr}: any) {
   const dateStr = aujourd.toLocaleDateString('fr-CA', { weekday:'long', year:'numeric', month:'long', day:'numeric' })
 
   return <>
-    {/* Règles appliquées */}
-    <div style={{background:dark?'#1a1a2e':'#f0f4ff',border:`1px solid ${dark?'#2a2a4a':'#c7d4f0'}`,borderRadius:10,padding:'10px 18px',marginBottom:12,display:'flex',gap:20,flexWrap:'wrap',alignItems:'center'}}>
-      <span style={{fontSize:12,fontWeight:700,color:dark?'#90cdf4':'#1a56db'}}>Règles actives :</span>
-      <span style={{fontSize:12,color:sub}}>✅ ABC = A ou B</span>
-      <span style={{fontSize:12,color:sub}}>✅ Vélocité ≥ 3 unités/mois</span>
-      <span style={{fontSize:12,color:sub}}>✅ Stock &lt; 1 semaine de ventes</span>
-      <span style={{fontSize:12,color:sub}}>✅ Valeur ligne ≥ 10 $</span>
-      <span style={{fontSize:12,color:sub}}>✅ Exclut "Sur Commande"</span>
+    {/* Modal nom employé */}
+    {showEmployeModal && (
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <div style={{background:card,borderRadius:14,padding:32,width:360,border:`1px solid ${bdr}`}}>
+          <h3 style={{margin:'0 0 8px',fontSize:18}}>Qui es-tu ?</h3>
+          <p style={{color:sub,fontSize:13,margin:'0 0 16px'}}>Entre ton prénom pour les suivis de commande.</p>
+          <input value={nomTemp} onChange={e=>setNomTemp(e.target.value)} placeholder="Ex: Marie, Jean..." style={{...S,marginBottom:14,fontSize:15}} onKeyDown={e=>{if(e.key==='Enter'&&nomTemp.trim()){const n=nomTemp.trim();setEmploye(n);try{localStorage.setItem('employe_nom',n)}catch{};setShowEmployeModal(false)}}}/>
+          <button onClick={()=>{const n=nomTemp.trim();if(n){setEmploye(n);try{localStorage.setItem('employe_nom',n)}catch{};setShowEmployeModal(false)}}} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 0',width:'100%',fontSize:14,fontWeight:700,cursor:'pointer'}}>Confirmer</button>
+        </div>
+      </div>
+    )}
+
+    {/* Modal action */}
+    {actionModal && (
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <div style={{background:card,borderRadius:14,padding:28,width:420,border:`1px solid ${bdr}`}}>
+          <h3 style={{margin:'0 0 6px',fontSize:16}}>{actionModal.type === 'alternative' ? '🔄 Pièce Alternative' : actionModal.type === 'pas_besoin' ? '🚫 Pas besoin' : '✅ Commande Faite'}</h3>
+          <p style={{color:sub,fontSize:13,margin:'0 0 16px'}}><strong>{actionModal.item.pk}</strong> — {actionModal.item.desc}</p>
+          {actionModal.type === 'alternative' && <>
+            <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:5}}>Code SKU alternatif</label>
+            <input value={pieceAlt} onChange={e=>setPieceAlt(e.target.value)} placeholder="Ex: 8M0060005" style={{...S,marginBottom:14}} autoFocus/>
+          </>}
+          {actionModal.type === 'pas_besoin' && <p style={{color:C.yellow,fontSize:13,marginBottom:14}}>Cette pièce sera cachée pendant <strong>3 mois</strong>.</p>}
+          {actionModal.type === 'commande_faite' && <p style={{color:C.green,fontSize:13,marginBottom:14}}>Si le stock ne bouge pas dans <strong>5 jours</strong>, la pièce réapparaîtra en statut ⚠️ Vérifié.</p>}
+          <div style={{display:'flex',gap:10}}>
+            <button onClick={()=>{setActionModal(null);setPieceAlt('')}} style={{flex:1,background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 0',cursor:'pointer',color:sub}}>Annuler</button>
+            <button onClick={()=>faireAction(actionModal.item, actionModal.type, actionModal.type==='alternative'?{piece_alternative:pieceAlt}:{})}
+              style={{flex:2,background:actionModal.type==='commande_faite'?C.green:actionModal.type==='pas_besoin'?C.red:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 0',fontWeight:700,cursor:'pointer'}}>
+              Confirmer
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Règles */}
+    <div style={{background:dark?'#1a1a2e':'#f0f4ff',border:`1px solid ${dark?'#2a2a4a':'#c7d4f0'}`,borderRadius:10,padding:'10px 18px',marginBottom:12,display:'flex',gap:20,flexWrap:'wrap',alignItems:'center',justifyContent:'space-between'}}>
+      <div style={{display:'flex',gap:16,flexWrap:'wrap',alignItems:'center'}}>
+        <span style={{fontSize:12,fontWeight:700,color:dark?'#90cdf4':'#1a56db'}}>Règles :</span>
+        <span style={{fontSize:12,color:sub}}>✅ ABC = A ou B</span>
+        <span style={{fontSize:12,color:sub}}>✅ Besoin ≥ 3 unités</span>
+        <span style={{fontSize:12,color:sub}}>✅ Stock &lt; besoin 4 sem.</span>
+        <span style={{fontSize:12,color:sub}}>✅ Valeur ≥ 10$</span>
+      </div>
+      {employe
+        ? <span style={{fontSize:12,color:sub}}>👤 <strong style={{color:dark?'#e8e8e8':'#1a1a1a'}}>{employe}</strong> <button onClick={()=>setShowEmployeModal(true)} style={{fontSize:11,color:C.blue,background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>changer</button></span>
+        : <button onClick={()=>setShowEmployeModal(true)} style={{fontSize:12,color:C.blue,background:'none',border:'none',cursor:'pointer',fontWeight:700}}>👤 Identifier mon nom</button>
+      }
     </div>
-    {/* Header filtres + total */}
+
+    {/* Onglets statut */}
+    <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap'}}>
+      {[
+        {id:'actif', label:`📋 À commander (${toutesLignes.filter(it=>!estCache(it.pk)&&!estVerifie(it.pk)).length})`, color:C.blue},
+        {id:'attente', label:`⏳ En attente (${nbAttente})`, color:C.yellow},
+        {id:'verifie', label:`⚠️ Vérifié (${nbVerifie})`, color:C.red},
+        {id:'tout', label:`Tout (${toutesLignes.length})`, color:sub},
+      ].map(t => (
+        <button key={t.id} onClick={()=>setFiltreStatut(t.id)}
+          style={{padding:'7px 14px',borderRadius:20,border:`2px solid ${filtreStatut===t.id?t.color:bdr}`,background:filtreStatut===t.id?(dark?'#1a1a2e':'#f0f4ff'):'transparent',color:filtreStatut===t.id?t.color:sub,fontSize:12,fontWeight:700,cursor:'pointer'}}>
+          {t.label}
+        </button>
+      ))}
+    </div>
+
+    {/* Header */}
     <div style={{background:card,borderRadius:12,padding:'14px 18px',marginBottom:14,display:'flex',gap:12,flexWrap:'wrap',alignItems:'flex-end',border:`1px solid ${bdr}`}}>
       <div style={{flex:2,minWidth:200}}>
         <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Fournisseur</div>
         <select value={filtFourn} onChange={e=>setFiltFourn(e.target.value)} style={S}>
-          <option value="ALL">Tous les fournisseurs ({nbFournisseurs})</option>
-          {fournisseurs.map((f:string) => {
-            const n = suggestions.filter((it:any) => it.fournisseur === f).length
-            return n > 0 ? <option key={f} value={f}>{f} ({n} pièces)</option> : null
-          })}
+          <option value="ALL">Tous ({fournisseurs.length})</option>
+          {fournisseurs.map((f:string) => <option key={f} value={f}>{f}</option>)}
         </select>
       </div>
-      <div style={{flex:1,minWidth:200,fontSize:13,color:sub,padding:'8px 0'}}>
+      <div style={{flex:1,fontSize:13,color:sub,padding:'8px 0'}}>
         <div>📅 {dateStr}</div>
-        <div style={{marginTop:4}}>
-          <strong style={{color:dark?'#e8e8e8':'#1a1a1a'}}>{suggestions.length}</strong> pièces à commander
-          {filtFourn === 'ALL' && <> chez <strong style={{color:dark?'#e8e8e8':'#1a1a1a'}}>{nbFournisseurs}</strong> fournisseurs</>}
-        </div>
+        <div style={{marginTop:4}}><strong style={{color:dark?'#e8e8e8':'#1a1a1a'}}>{suggestions.length}</strong> pièces affichées</div>
       </div>
       <div style={{background:dark?'#1a233a':'#e8f0fe',border:`2px solid ${C.blue}`,borderRadius:10,padding:'10px 18px',textAlign:'right',minWidth:200}}>
-        <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,marginBottom:3}}>Total à commander</div>
-        <div style={{fontSize:24,fontWeight:900,color:C.blue}}>
-          {totalCommande.toLocaleString('fr-CA',{minimumFractionDigits:2})} $
-        </div>
+        <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,marginBottom:3}}>Total affiché</div>
+        <div style={{fontSize:24,fontWeight:900,color:C.blue}}>{totalCommande.toLocaleString('fr-CA',{minimumFractionDigits:2})} $</div>
       </div>
     </div>
 
-    {/* Contenu */}
+    {/* Liste */}
     {suggestions.length === 0
       ? <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,textAlign:'center',padding:60,color:sub}}>
-          <div style={{fontSize:32,marginBottom:10}}>✅</div>
-          <div style={{fontWeight:600,marginBottom:6}}>Aucune commande nécessaire aujourd'hui</div>
-          <div style={{fontSize:13}}>Tous les stocks A et B sont suffisants pour les 4 prochaines semaines.</div>
+          <div style={{fontSize:32,marginBottom:10}}>{filtreStatut==='attente'?'⏳':filtreStatut==='verifie'?'⚠️':'✅'}</div>
+          <div style={{fontWeight:600,marginBottom:6}}>
+            {filtreStatut==='attente'?'Aucune commande en attente':filtreStatut==='verifie'?'Aucune commande à vérifier':'Aucune commande nécessaire'}
+          </div>
         </div>
-      : filtFourn !== 'ALL'
-        // Vue fournisseur unique — tableau simple
-        ? <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
-            <TableauCommandes items={suggestions} dark={dark} bdr={bdr} sub={sub} thBg={thBg} C={C} hvr={hvr}/>
-          </div>
-        // Vue tous fournisseurs — groupé par fournisseur
-        : <div style={{display:'flex',flexDirection:'column',gap:12}}>
-            {Array.from(parFournisseur.entries()).map(([fourn, pieces]) => {
-              const totalF = pieces.reduce((s:number,it:any)=>s+it.totalLigne,0)
-              return (
-                <div key={fourn} style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
-                  {/* Header fournisseur */}
-                  <div style={{padding:'12px 18px',background:dark?'#111':'#f4f6f8',borderBottom:`1px solid ${bdr}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                    <div>
-                      <strong style={{fontSize:15,color:dark?'#e8e8e8':'#1a1a1a'}}>{fourn}</strong>
-                      <span style={{marginLeft:10,fontSize:12,color:sub}}>{pieces.length} pièce{pieces.length>1?'s':''}</span>
-                    </div>
-                    <strong style={{color:C.blue,fontSize:16}}>{totalF.toLocaleString('fr-CA',{minimumFractionDigits:2})} $</strong>
-                  </div>
-                  <TableauCommandes items={pieces} dark={dark} bdr={bdr} sub={sub} thBg={thBg} C={C} hvr={hvr}/>
+      : <div style={{display:'flex',flexDirection:'column',gap:12}}>
+          {Array.from(parFournisseur.entries()).map(([fourn, pieces]) => {
+            const totalF = pieces.reduce((s:number,it:any)=>s+it.totalLigne,0)
+            return (
+              <div key={fourn} style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+                <div style={{padding:'12px 18px',background:dark?'#111':'#f4f6f8',borderBottom:`1px solid ${bdr}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <div><strong style={{fontSize:15}}>{fourn}</strong><span style={{marginLeft:10,fontSize:12,color:sub}}>{pieces.length} pièce{pieces.length>1?'s':''}</span></div>
+                  <strong style={{color:C.blue,fontSize:16}}>{totalF.toLocaleString('fr-CA',{minimumFractionDigits:2})} $</strong>
                 </div>
-              )
-            })}
-          </div>
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                    <thead><tr style={{background:thBg}}>
+                      <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>ABC</th>
+                      <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code Pièce</th>
+                      <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Description</th>
+                      <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Ligne</th>
+                      <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Besoin 4 sem.</th>
+                      <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Stock</th>
+                      <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Couverture</th>
+                      <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'right'}}>Coût Un.</th>
+                      <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`2px solid ${bdr}`,textAlign:'center',background:dark?'#0d2a18':'#e6f4ea'}}>À COMMANDER</th>
+                      <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'right'}}>Total $</th>
+                      <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Action</th>
+                    </tr></thead>
+                    <tbody>
+                      {pieces.map((it: any) => {
+                        const suivi = getSuivi(it.pk)
+                        const estVerif = suivi?.statut === 'verifie'
+                        const estCmd = suivi?.statut === 'commande_faite'
+                        return (
+                          <tr key={it.pk} style={{background:estVerif?(dark?'#2b1a00':'#fff8e1'):estCmd?(dark?'#0d2a18':'#f0fff4'):'transparent'}}
+                            onMouseEnter={e=>e.currentTarget.style.background=estVerif?(dark?'#3a2400':'#fff3cd'):estCmd?(dark?'#0f3020':'#e6f4ea'):hvr}
+                            onMouseLeave={e=>e.currentTarget.style.background=estVerif?(dark?'#2b1a00':'#fff8e1'):estCmd?(dark?'#0d2a18':'#f0fff4'):'transparent'}>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                              <span style={{background:it.classeABC==='A'?C.green:C.yellow,color:'#fff',padding:'3px 6px',borderRadius:4,fontSize:11,fontWeight:700}}>{it.classeABC}</span>
+                            </td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>
+                              {it.pk}
+                              {suivi?.piece_alternative && <div style={{fontSize:10,color:C.blue,marginTop:2}}>→ Alt: {suivi.piece_alternative}</div>}
+                            </td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:sub}} title={it.desc}>{it.desc}</td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                              <span style={{background:dark?'#333':'#e2e8f0',color:dark?'#ccc':'#475569',padding:'2px 8px',borderRadius:4,fontSize:12,fontWeight:600}}>{it.ligne}</span>
+                            </td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.blue,fontWeight:700}}>{it.besoin4sem.toFixed(1)}</td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:it.stock<0?C.red:it.stock===0?C.yellow:'inherit',fontWeight:700}}>{it.stock}</td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                              {it.besoin4sem > 0
+                                ? <span style={{background:C.red+'22',color:C.red,padding:'2px 8px',borderRadius:20,fontSize:12,fontWeight:700}}>{Math.round((Math.max(0,it.stock)/it.besoin4sem)*28)} j</span>
+                                : '—'}
+                            </td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{it.cost.toFixed(2)} $</td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',background:dark?'#0d2a18':'#e6f4ea',color:C.green,fontSize:17,fontWeight:900}}>{it.qteACommander}</td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700}}>{it.totalLigne.toFixed(2)} $</td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',minWidth:160}}>
+                              {estVerif
+                                ? <span style={{background:C.red+'22',color:C.red,padding:'4px 8px',borderRadius:6,fontSize:11,fontWeight:700}}>⚠️ Vérifié — commande non reçue</span>
+                                : estCmd
+                                  ? <span style={{background:C.green+'22',color:C.green,padding:'4px 8px',borderRadius:6,fontSize:11,fontWeight:700}}>⏳ Commandé par {suivi?.employe}</span>
+                                  : <div style={{display:'flex',gap:4,justifyContent:'center',flexWrap:'wrap'}}>
+                                      <button onClick={()=>setActionModal({item:it,type:'commande_faite'})}
+                                        style={{background:C.green,color:'#fff',border:'none',borderRadius:6,padding:'5px 8px',fontSize:11,fontWeight:700,cursor:'pointer'}}>✅ Commandé</button>
+                                      <button onClick={()=>setActionModal({item:it,type:'pas_besoin'})}
+                                        style={{background:C.red,color:'#fff',border:'none',borderRadius:6,padding:'5px 8px',fontSize:11,fontWeight:700,cursor:'pointer'}}>🚫 Pas besoin</button>
+                                      <button onClick={()=>setActionModal({item:it,type:'alternative'})}
+                                        style={{background:C.blue,color:'#fff',border:'none',borderRadius:6,padding:'5px 8px',fontSize:11,fontWeight:700,cursor:'pointer'}}>🔄 Alternatif</button>
+                                    </div>
+                              }
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          })}
+        </div>
     }
   </>
 }
 
-function TableauCommandes({items, dark, bdr, sub, thBg, C, hvr}: any) {
-  return (
-    <div style={{overflowX:'auto'}}>
-      <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-        <thead><tr style={{background:thBg}}>
-          <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>ABC</th>
-          <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code Pièce</th>
-          <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Description</th>
-          <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Ligne</th>
-          <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Besoin 4 sem.</th>
-          <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Stock</th>
-          <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Couverture</th>
-          <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'right'}}>Coût Un.</th>
-          <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`2px solid ${bdr}`,textAlign:'center',background:dark?'#0d2a18':'#e6f4ea'}}>À COMMANDER</th>
-          <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'right'}}>Total $</th>
-        </tr></thead>
-        <tbody>
-          {items.map((it: any) => (
-            <tr key={it.pk}
-              onMouseEnter={e=>e.currentTarget.style.background=hvr}
-              onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-              <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                <span style={{background:it.classeABC==='A'?C.green:C.yellow,color:'#fff',padding:'3px 6px',borderRadius:4,fontSize:11,fontWeight:700}}>{it.classeABC}</span>
-              </td>
-              <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{it.pk}</td>
-              <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:sub}} title={it.desc}>{it.desc}</td>
-              <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                <span style={{background:dark?'#333':'#e2e8f0',color:dark?'#ccc':'#475569',padding:'2px 8px',borderRadius:4,fontSize:12,fontWeight:600}}>{it.ligne}</span>
-              </td>
-              <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.blue,fontWeight:700}}>{it.besoin4sem.toFixed(1)}</td>
-              <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:it.stock<0?C.red:it.stock===0?C.yellow:'inherit',fontWeight:700}}>{it.stock}</td>
-              <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                {it.besoin4sem > 0
-                  ? <span style={{background:C.red+'22',color:C.red,padding:'2px 8px',borderRadius:20,fontSize:12,fontWeight:700}}>
-                      {Math.round((Math.max(0,it.stock)/it.besoin4sem)*28)} j
-                    </span>
-                  : '—'}
-              </td>
-              <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{it.cost.toFixed(2)} $</td>
-              <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',background:dark?'#0d2a18':'#e6f4ea',color:C.green,fontSize:17,fontWeight:900}}>{it.qteACommander}</td>
-              <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700}}>{it.totalLigne.toFixed(2)} $</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
 
 
 // ── Négatifs Tab ────────────────────────────────────────────────────────────
