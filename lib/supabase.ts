@@ -157,12 +157,35 @@ export function calculerInventaire(
   const setF = new Set<string>()
   const setL = new Set<string>()
 
+  // Calculer le mois le plus récent dans les données (pour filtre récence)
+  const tousLesMoisTries = Array.from(tousLesMois).sort()
+  const dernierMoisDonnees = tousLesMoisTries[tousLesMoisTries.length - 1] || '2026-01'
+  const [anneeRef, moisRef] = dernierMoisDonnees.split('-').map(Number)
+  // Mois il y a 6 mois par rapport aux dernières données
+  const dateRef = new Date(anneeRef, moisRef - 1, 1)
+  dateRef.setMonth(dateRef.getMonth() - 6)
+  const moisRecenceMin = `${dateRef.getFullYear()}-${String(dateRef.getMonth() + 1).padStart(2, '0')}`
+
   for (const [pkClean, historique] of historiqueMap.entries()) {
     const totalQty = Object.values(historique).reduce((s, v) => s + v, 0)
     if (totalQty <= 0) continue
 
     // ── EMA chronologique ──────────────────────────────────────────
     const moisTries = Object.keys(historique).sort()
+
+    // ── Règles de qualité des données ─────────────────────────────
+    // R1: Fréquence minimum — au moins 4 mois distincts avec ventes
+    const moisAvecVentes = moisTries.filter(m => (historique[m] || 0) > 0)
+    if (moisAvecVentes.length < 4) continue
+
+    // R2: Récence — doit avoir vendu dans les 6 derniers mois
+    const derniereMomsVente = moisAvecVentes[moisAvecVentes.length - 1]
+    if (derniereMomsVente < moisRecenceMin) continue
+
+    // R3: Volume minimum — moyenne sur mois avec ventes ≥ 3 unités/mois
+    const qteTotaleAvecVentes = moisAvecVentes.reduce((s, m) => s + (historique[m] || 0), 0)
+    const moyenneSurMoisActifs = qteTotaleAvecVentes / moisAvecVentes.length
+    if (moyenneSurMoisActifs < 3) continue
     let ema: number | null = null
     for (const m of moisTries) {
       const v = historique[m]
@@ -190,14 +213,24 @@ export function calculerInventaire(
 
     // ── Ventes moyennes réelles par mois calendaire ─────────────────
     // ventesMoyParMois[0] = moyenne de janvier sur toutes les années
+    // RÈGLE COHÉRENCE: si vendu dans 1 seule année pour ce mois → besoin = 0 (commande ponctuelle)
     const ventesTotalesParMois = new Array(12).fill(0)
+    const anneesVentesParMoisPiece: Record<number, Set<string>> = {}
+    for (let i = 0; i < 12; i++) anneesVentesParMoisPiece[i] = new Set()
     for (const [moisKey, qte] of Object.entries(historique)) {
-      const mNum = parseInt(moisKey.split('-')[1], 10) - 1
-      if (mNum >= 0 && mNum < 12) ventesTotalesParMois[mNum] += qte
+      const parts = moisKey.split('-')
+      const annee = parts[0]
+      const mNum = parseInt(parts[1], 10) - 1
+      if (mNum >= 0 && mNum < 12 && qte > 0) {
+        ventesTotalesParMois[mNum] += qte
+        anneesVentesParMoisPiece[mNum].add(annee)
+      }
     }
-    const ventesMoyParMois = ventesTotalesParMois.map((total, i) =>
-      total / nbAnneesParMois[i + 1]
-    )
+    const ventesMoyParMois = ventesTotalesParMois.map((total, i) => {
+      // Si vendu dans 1 seule année pour ce mois = commande ponctuelle → 0
+      if (anneesVentesParMoisPiece[i].size < 2) return 0
+      return total / nbAnneesParMois[i + 1]
+    })
 
     // ── XYZ : coefficient de variation sur ventes mensuelles ────────
     // CV = écart-type / moyenne sur tous les mois de données
