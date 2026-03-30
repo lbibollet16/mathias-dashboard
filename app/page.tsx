@@ -839,11 +839,11 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
   const [nomTemp, setNomTemp] = useState('')
   const [filtCat, setFiltCat] = useState('ALL')
   const [recherche, setRecherche] = useState('')
+  const [panier, setPanier] = useState<{item:any, qte:number}[]>([])
+  const [showPanier, setShowPanier] = useState(false)
   const [showManuel, setShowManuel] = useState(false)
   const [loading, setLoading] = useState(false)
   const [msgOk, setMsgOk] = useState('')
-
-  // Formulaire manuel
   const [mSku, setMSku] = useState('')
   const [mDesc, setMDesc] = useState('')
   const [mFourn, setMFourn] = useState('')
@@ -852,30 +852,77 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
 
   const catalogue: any[] = fournituresData?.catalogue || []
   const demandes: any[] = fournituresData?.demandes || []
-
   const categories = Array.from(new Set(catalogue.map((c:any) => c.categorie))).sort() as string[]
+
+  const iconesCat: Record<string,string> = {
+    'Électrique': '⚡',
+    'Fixations': '🔩',
+    'Nettoyants & Produits': '🧴',
+    'Fluides': '🛢️',
+    'Protection & Sécurité': '🦺',
+    'Fournitures atelier': '🔧',
+    'Traction': '📦',
+    'Demande manuelle': '✏️',
+    'Autre': '📦',
+  }
+
+  const couleursCat: Record<string,string> = {
+    'Électrique': '#f59e0b',
+    'Fixations': '#6366f1',
+    'Nettoyants & Produits': '#10b981',
+    'Fluides': '#3b82f6',
+    'Protection & Sécurité': '#ef4444',
+    'Fournitures atelier': '#8b5cf6',
+    'Traction': '#64748b',
+    'Autre': '#64748b',
+  }
 
   const catalogueFiltré = catalogue.filter((c:any) => {
     if (filtCat !== 'ALL' && c.categorie !== filtCat) return false
-    if (recherche && !c.description.toLowerCase().includes(recherche.toLowerCase()) && !c.sku?.toLowerCase().includes(recherche.toLowerCase())) return false
+    if (recherche && !c.description.toLowerCase().includes(recherche.toLowerCase()) && !(c.sku||'').toLowerCase().includes(recherche.toLowerCase())) return false
     return true
   })
 
-  async function demanderCatalogue(item: any) {
+  function ajouterPanier(item: any) {
     if (!employe) { setShowEmployeModal(true); return }
-    setLoading(true)
-    await fetch('/api/fournitures', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        employe, sku: item.sku, description: item.description,
-        fournisseur: item.fournisseur, categorie: item.categorie,
-        quantite: 1, unite: item.unite
-      })
+    setPanier(prev => {
+      const exist = prev.find(p => p.item.sku === item.sku && p.item.description === item.description)
+      if (exist) return prev.map(p => p.item.description === item.description ? {...p, qte: p.qte + 1} : p)
+      return [...prev, {item, qte: 1}]
     })
+  }
+
+  function modifierQte(desc: string, delta: number) {
+    setPanier(prev => prev.map(p => p.item.description === desc ? {...p, qte: Math.max(1, p.qte + delta)} : p).filter(p => p.qte > 0))
+  }
+
+  function retirerPanier(desc: string) {
+    setPanier(prev => prev.filter(p => p.item.description !== desc))
+  }
+
+  function estDansPanier(desc: string) {
+    return panier.some(p => p.item.description === desc)
+  }
+
+  async function envoyerPanier() {
+    if (!employe || panier.length === 0) return
+    setLoading(true)
+    for (const {item, qte} of panier) {
+      await fetch('/api/fournitures', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          employe, sku: item.sku, description: item.description,
+          fournisseur: item.fournisseur, categorie: item.categorie,
+          quantite: qte, unite: item.unite
+        })
+      })
+    }
+    setPanier([])
+    setShowPanier(false)
     await recharger()
-    setMsgOk(`✅ Demande envoyée pour "${item.description}"`)
-    setTimeout(() => setMsgOk(''), 3000)
+    setMsgOk(`✅ ${panier.length} article${panier.length>1?'s':''} commandé${panier.length>1?'s':''}!`)
+    setTimeout(() => setMsgOk(''), 4000)
     setLoading(false)
   }
 
@@ -887,11 +934,7 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
     await fetch('/api/fournitures', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        employe, sku: mSku, description: mDesc,
-        fournisseur: mFourn, categorie: 'Demande manuelle',
-        quantite: mQte, note: mNote
-      })
+      body: JSON.stringify({ employe, sku: mSku, description: mDesc, fournisseur: mFourn, categorie: 'Demande manuelle', quantite: mQte, note: mNote })
     })
     setMSku(''); setMDesc(''); setMFourn(''); setMQte(1); setMNote('')
     setShowManuel(false)
@@ -907,28 +950,72 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
   }
 
   async function annulerDemande(id: number) {
-    await fetch('/api/fournitures', {
-      method: 'PATCH',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ id, statut: 'annulée' })
-    })
+    await fetch('/api/fournitures', { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id, statut: 'annulée' }) })
     await recharger()
   }
 
-  // Demandes de cet employé
   const mesDemandesPending = demandes.filter((d:any) => d.employe === employe)
+  const nbPanier = panier.reduce((s,p) => s + p.qte, 0)
 
   return <>
     {/* Modal employé */}
     {showEmployeModal && (
       <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
-        <div style={{background:card,borderRadius:14,padding:32,width:360,border:`1px solid ${bdr}`}}>
-          <h3 style={{margin:'0 0 8px'}}>Qui es-tu ?</h3>
-          <p style={{color:sub,fontSize:13,margin:'0 0 16px'}}>Entre ton prénom pour les demandes.</p>
-          <input value={nomTemp} onChange={e=>setNomTemp(e.target.value)} placeholder="Ex: Marie, Jean..." style={{...S,marginBottom:14,fontSize:15}}
-            onKeyDown={e=>{if(e.key==='Enter'&&nomTemp.trim()){const n=nomTemp.trim();setEmploye(n);try{localStorage.setItem('employe_nom',n)}catch{};setShowEmployeModal(false)}}}/>
+        <div style={{background:card,borderRadius:16,padding:36,width:380,border:`1px solid ${bdr}`,boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+          <div style={{fontSize:40,textAlign:'center',marginBottom:12}}>👤</div>
+          <h3 style={{margin:'0 0 6px',textAlign:'center',fontSize:20}}>Identifie-toi</h3>
+          <p style={{color:sub,fontSize:13,margin:'0 0 20px',textAlign:'center'}}>Entre ton prénom pour tes demandes</p>
+          <input value={nomTemp} onChange={e=>setNomTemp(e.target.value)} placeholder="Ton prénom..." style={{...S,marginBottom:14,fontSize:15,textAlign:'center'}}
+            onKeyDown={e=>{if(e.key==='Enter'&&nomTemp.trim()){const n=nomTemp.trim();setEmploye(n);try{localStorage.setItem('employe_nom',n)}catch{};setShowEmployeModal(false)}}} autoFocus/>
           <button onClick={()=>{const n=nomTemp.trim();if(n){setEmploye(n);try{localStorage.setItem('employe_nom',n)}catch{};setShowEmployeModal(false)}}}
-            style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 0',width:'100%',fontSize:14,fontWeight:700,cursor:'pointer'}}>Confirmer</button>
+            style={{background:C.blue,color:'#fff',border:'none',borderRadius:10,padding:'12px 0',width:'100%',fontSize:15,fontWeight:700,cursor:'pointer'}}>Continuer →</button>
+        </div>
+      </div>
+    )}
+
+    {/* Panier slide-in */}
+    {showPanier && (
+      <div style={{position:'fixed',inset:0,zIndex:9998}} onClick={()=>setShowPanier(false)}>
+        <div style={{position:'fixed',top:0,right:0,bottom:0,width:420,background:card,boxShadow:'-4px 0 30px rgba(0,0,0,.2)',display:'flex',flexDirection:'column',zIndex:9999}} onClick={e=>e.stopPropagation()}>
+          <div style={{padding:'20px 24px',borderBottom:`1px solid ${bdr}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <h3 style={{margin:0,fontSize:18}}>🛒 Mon panier</h3>
+            <button onClick={()=>setShowPanier(false)} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:sub}}>✕</button>
+          </div>
+          <div style={{flex:1,overflowY:'auto',padding:'16px 24px'}}>
+            {panier.length === 0
+              ? <div style={{textAlign:'center',color:sub,padding:40}}>
+                  <div style={{fontSize:48,marginBottom:12}}>🛒</div>
+                  <p>Ton panier est vide</p>
+                </div>
+              : panier.map(({item, qte}) => (
+                <div key={item.description} style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:12,padding:'14px 16px',marginBottom:10,border:`1px solid ${bdr}`}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:600,fontSize:13,marginBottom:3}}>{item.description}</div>
+                      {item.sku && <div style={{fontSize:11,color:sub}}>SKU: {item.sku}</div>}
+                      {item.fournisseur && <div style={{fontSize:11,color:sub}}>{item.fournisseur}</div>}
+                    </div>
+                    <button onClick={()=>retirerPanier(item.description)} style={{background:'none',border:'none',color:C.red,cursor:'pointer',fontSize:16,padding:0}}>✕</button>
+                  </div>
+                  <div style={{display:'flex',alignItems:'center',gap:10,marginTop:10}}>
+                    <button onClick={()=>modifierQte(item.description,-1)} style={{width:32,height:32,borderRadius:8,border:`1px solid ${bdr}`,background:'none',cursor:'pointer',fontSize:16,fontWeight:700,color:sub}}>−</button>
+                    <span style={{fontWeight:700,fontSize:15,minWidth:30,textAlign:'center'}}>{qte}</span>
+                    <button onClick={()=>modifierQte(item.description,1)} style={{width:32,height:32,borderRadius:8,border:`1px solid ${bdr}`,background:C.blue,cursor:'pointer',fontSize:16,fontWeight:700,color:'#fff'}}>+</button>
+                    <span style={{fontSize:12,color:sub,marginLeft:4}}>{item.unite}</span>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+          {panier.length > 0 && (
+            <div style={{padding:'16px 24px',borderTop:`1px solid ${bdr}`}}>
+              <div style={{fontSize:13,color:sub,marginBottom:12,textAlign:'center'}}>{nbPanier} article{nbPanier>1?'s':''} · Demandé par <strong>{employe}</strong></div>
+              <button onClick={envoyerPanier} disabled={loading}
+                style={{width:'100%',background:C.green,color:'#fff',border:'none',borderRadius:12,padding:'14px 0',fontSize:15,fontWeight:700,cursor:'pointer'}}>
+                {loading ? 'Envoi...' : `✅ Envoyer la commande (${nbPanier})`}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     )}
@@ -936,8 +1023,9 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
     {/* Modal demande manuelle */}
     {showManuel && (
       <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
-        <div style={{background:card,borderRadius:14,padding:28,width:480,border:`1px solid ${bdr}`}}>
-          <h3 style={{margin:'0 0 16px',fontSize:17}}>✏️ Demande manuelle</h3>
+        <div style={{background:card,borderRadius:16,padding:28,width:500,border:`1px solid ${bdr}`,boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+          <h3 style={{margin:'0 0 4px',fontSize:18}}>✏️ Demande manuelle</h3>
+          <p style={{color:sub,fontSize:13,margin:'0 0 20px'}}>Article non trouvé dans le catalogue</p>
           <form onSubmit={soumettreManuel}>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
               <div>
@@ -957,13 +1045,13 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
               <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Fournisseur (optionnel)</label>
               <input value={mFourn} onChange={e=>setMFourn(e.target.value)} placeholder="Ex: NAPA, Kimpex..." style={S}/>
             </div>
-            <div style={{marginBottom:16}}>
+            <div style={{marginBottom:20}}>
               <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Note (optionnel)</label>
               <input value={mNote} onChange={e=>setMNote(e.target.value)} placeholder="Ex: Urgent, couleur bleue..." style={S}/>
             </div>
             <div style={{display:'flex',gap:10}}>
-              <button type="button" onClick={()=>setShowManuel(false)} style={{flex:1,background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 0',cursor:'pointer',color:sub}}>Annuler</button>
-              <button type="submit" style={{flex:2,background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 0',fontWeight:700,cursor:'pointer'}}>Envoyer la demande</button>
+              <button type="button" onClick={()=>setShowManuel(false)} style={{flex:1,background:'none',border:`1px solid ${bdr}`,borderRadius:10,padding:'11px 0',cursor:'pointer',color:sub,fontWeight:600}}>Annuler</button>
+              <button type="submit" style={{flex:2,background:C.blue,color:'#fff',border:'none',borderRadius:10,padding:'11px 0',fontWeight:700,cursor:'pointer',fontSize:14}}>Envoyer →</button>
             </div>
           </form>
         </div>
@@ -971,80 +1059,102 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
     )}
 
     {/* Header */}
-    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:10}}>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,flexWrap:'wrap',gap:12}}>
       <div>
-        <h2 style={{margin:0,fontSize:18}}>🔧 Fournitures d'atelier</h2>
-        <p style={{color:sub,fontSize:13,margin:'4px 0 0'}}>{catalogue.length} articles au catalogue • {demandes.length} demandes en attente</p>
+        <h2 style={{margin:0,fontSize:22,fontWeight:800}}>🔧 Fournitures d'atelier</h2>
+        <p style={{color:sub,fontSize:13,margin:'4px 0 0'}}>{catalogue.length} articles disponibles</p>
       </div>
-      <div style={{display:'flex',gap:10,alignItems:'center'}}>
+      <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
         {employe
-          ? <span style={{fontSize:13,color:sub}}>👤 <strong>{employe}</strong> <button onClick={()=>setShowEmployeModal(true)} style={{fontSize:11,color:C.blue,background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>changer</button></span>
-          : <button onClick={()=>setShowEmployeModal(true)} style={{fontSize:13,color:C.blue,background:'none',border:`1px solid ${C.blue}`,borderRadius:8,padding:'6px 14px',cursor:'pointer',fontWeight:700}}>👤 S'identifier</button>
+          ? <div style={{background:dark?'#1a1a2e':'#f0f4ff',border:`1px solid ${C.blue}22`,borderRadius:20,padding:'6px 14px',fontSize:13}}>
+              👤 <strong>{employe}</strong>
+              <button onClick={()=>setShowEmployeModal(true)} style={{fontSize:11,color:C.blue,background:'none',border:'none',cursor:'pointer',marginLeft:6,textDecoration:'underline'}}>changer</button>
+            </div>
+          : <button onClick={()=>setShowEmployeModal(true)} style={{background:C.blue,color:'#fff',border:'none',borderRadius:20,padding:'8px 18px',cursor:'pointer',fontWeight:700,fontSize:13}}>👤 S'identifier</button>
         }
-        <button onClick={()=>setShowManuel(true)} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontSize:13,fontWeight:700,cursor:'pointer'}}>✏️ Demande manuelle</button>
+        <button onClick={()=>setShowManuel(true)} style={{background:'none',border:`1px solid ${bdr}`,borderRadius:20,padding:'8px 16px',cursor:'pointer',fontSize:13,fontWeight:600,color:sub}}>✏️ Article non trouvé?</button>
+        <button onClick={()=>setShowPanier(true)} style={{position:'relative',background:C.green,color:'#fff',border:'none',borderRadius:20,padding:'8px 20px',cursor:'pointer',fontWeight:700,fontSize:14}}>
+          🛒 Panier
+          {nbPanier > 0 && <span style={{position:'absolute',top:-6,right:-6,background:C.red,color:'#fff',borderRadius:'50%',width:20,height:20,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:900}}>{nbPanier}</span>}
+        </button>
       </div>
     </div>
 
     {/* Message succès */}
-    {msgOk && <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}`,borderRadius:8,padding:'10px 16px',marginBottom:12,color:C.green,fontWeight:600}}>{msgOk}</div>}
+    {msgOk && <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}`,borderRadius:10,padding:'12px 18px',marginBottom:16,color:C.green,fontWeight:700,fontSize:14}}>{msgOk}</div>}
 
     {/* Mes demandes en attente */}
     {mesDemandesPending.length > 0 && (
-      <div style={{background:card,borderRadius:12,border:`2px solid ${C.yellow}`,padding:16,marginBottom:14}}>
+      <div style={{background:card,borderRadius:12,border:`2px solid ${C.yellow}33`,padding:'14px 18px',marginBottom:20}}>
         <div style={{fontSize:13,fontWeight:700,marginBottom:10,color:C.yellow}}>⏳ Mes demandes en attente ({mesDemandesPending.length})</div>
-        <div style={{display:'flex',flexDirection:'column',gap:6}}>
+        <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
           {mesDemandesPending.map((d:any) => (
-            <div key={d.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:dark?'#1a1a1a':'#fafafa',borderRadius:8,border:`1px solid ${bdr}`}}>
-              <div>
-                <strong style={{fontSize:13}}>{d.description}</strong>
-                {d.sku && <span style={{fontSize:11,color:sub,marginLeft:8}}>SKU: {d.sku}</span>}
-                <span style={{fontSize:11,color:sub,marginLeft:8}}>Qté: {d.quantite}</span>
-                {d.fournisseur && <span style={{fontSize:11,color:sub,marginLeft:8}}>{d.fournisseur}</span>}
-              </div>
-              <div style={{display:'flex',alignItems:'center',gap:8}}>
-                <span style={{fontSize:11,color:sub}}>{new Date(d.date_demande).toLocaleDateString('fr-CA')}</span>
-                <button onClick={()=>annulerDemande(d.id)} style={{background:C.red+'22',color:C.red,border:'none',borderRadius:6,padding:'4px 8px',fontSize:11,cursor:'pointer',fontWeight:700}}>✕ Annuler</button>
-              </div>
+            <div key={d.id} style={{background:dark?'#1a1a1a':'#fafafa',borderRadius:8,padding:'8px 12px',border:`1px solid ${bdr}`,display:'flex',alignItems:'center',gap:10,fontSize:13}}>
+              <span>{d.description}</span>
+              <span style={{color:sub,fontSize:11}}>×{d.quantite}</span>
+              <button onClick={()=>annulerDemande(d.id)} style={{background:'none',border:'none',color:C.red,cursor:'pointer',fontSize:12,fontWeight:700,padding:0}}>✕</button>
             </div>
           ))}
         </div>
       </div>
     )}
 
-    {/* Filtres catalogue */}
-    <div style={{background:card,borderRadius:12,padding:'12px 16px',marginBottom:12,display:'flex',gap:10,flexWrap:'wrap',alignItems:'center',border:`1px solid ${bdr}`}}>
-      <input value={recherche} onChange={e=>setRecherche(e.target.value)} placeholder="🔍 Rechercher une fourniture..." style={{...S,flex:2,minWidth:200}}/>
-      <select value={filtCat} onChange={e=>setFiltCat(e.target.value)} style={{...S,flex:1,minWidth:180}}>
-        <option value="ALL">Toutes les catégories</option>
-        {categories.map((c:string) => <option key={c} value={c}>{c}</option>)}
-      </select>
-      <span style={{fontSize:12,color:sub}}>{catalogueFiltré.length} articles</span>
+    {/* Filtres */}
+    <div style={{display:'flex',gap:10,marginBottom:20,flexWrap:'wrap',alignItems:'center'}}>
+      <div style={{position:'relative',flex:2,minWidth:220}}>
+        <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:sub,fontSize:16}}>🔍</span>
+        <input value={recherche} onChange={e=>setRecherche(e.target.value)} placeholder="Rechercher une fourniture, SKU..." style={{...S,paddingLeft:36}}/>
+      </div>
+      <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+        <button onClick={()=>setFiltCat('ALL')} style={{padding:'7px 14px',borderRadius:20,border:`2px solid ${filtCat==='ALL'?C.blue:bdr}`,background:filtCat==='ALL'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:filtCat==='ALL'?C.blue:sub,fontSize:12,fontWeight:700,cursor:'pointer'}}>
+          Tout ({catalogue.length})
+        </button>
+        {categories.map((cat:string) => {
+          const n = catalogue.filter((c:any) => c.categorie === cat).length
+          const icone = iconesCat[cat] || '📦'
+          const couleur = couleursCat[cat] || '#64748b'
+          return (
+            <button key={cat} onClick={()=>setFiltCat(filtCat===cat?'ALL':cat)}
+              style={{padding:'7px 14px',borderRadius:20,border:`2px solid ${filtCat===cat?couleur:bdr}`,background:filtCat===cat?couleur+'22':'transparent',color:filtCat===cat?couleur:sub,fontSize:12,fontWeight:700,cursor:'pointer'}}>
+              {icone} {cat.split(' ')[0]} ({n})
+            </button>
+          )
+        })}
+      </div>
     </div>
 
-    {/* Catalogue par catégorie */}
+    {/* Grille produits */}
     {categories.filter(c => filtCat === 'ALL' || c === filtCat).map((cat:string) => {
       const items = catalogueFiltré.filter((c:any) => c.categorie === cat)
       if (items.length === 0) return null
+      const couleur = couleursCat[cat] || '#64748b'
+      const icone = iconesCat[cat] || '📦'
       return (
-        <div key={cat} style={{marginBottom:16}}>
-          <div style={{fontSize:13,fontWeight:700,color:sub,textTransform:'uppercase',marginBottom:8,padding:'4px 0',borderBottom:`1px solid ${bdr}`}}>{cat} ({items.length})</div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))',gap:8}}>
+        <div key={cat} style={{marginBottom:28}}>
+          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
+            <div style={{width:32,height:32,borderRadius:8,background:couleur+'22',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}}>{icone}</div>
+            <h3 style={{margin:0,fontSize:16,fontWeight:700}}>{cat}</h3>
+            <span style={{fontSize:12,color:sub,background:dark?'#222':'#f1f5f9',padding:'2px 8px',borderRadius:10}}>{items.length} articles</span>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))',gap:10}}>
             {items.map((item:any) => {
-              const dejaDemandeAujourd = demandes.some((d:any) => d.sku === item.sku && d.employe === employe && new Date(d.date_demande).toDateString() === new Date().toDateString())
+              const dansPanier = estDansPanier(item.description)
+              const qtePanier = panier.find(p=>p.item.description===item.description)?.qte || 0
               return (
-                <div key={item.id} style={{background:card,borderRadius:10,padding:'12px 14px',border:`1px solid ${dejaDemandeAujourd?C.green:bdr}`,display:'flex',justifyContent:'space-between',alignItems:'center',gap:10}}>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontWeight:600,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={item.description}>{item.description}</div>
-                    <div style={{fontSize:11,color:sub,marginTop:2}}>
-                      {item.sku && <span style={{marginRight:8}}>#{item.sku}</span>}
-                      {item.fournisseur && <span>{item.fournisseur}</span>}
-                    </div>
+                <div key={item.id||item.description}
+                  style={{background:card,borderRadius:14,padding:'14px 16px',border:`2px solid ${dansPanier?couleur:bdr}`,transition:'all .15s',cursor:'pointer',position:'relative'}}
+                  onMouseEnter={e=>(e.currentTarget.style.boxShadow='0 4px 16px rgba(0,0,0,.1)')}
+                  onMouseLeave={e=>(e.currentTarget.style.boxShadow='none')}>
+                  {dansPanier && <div style={{position:'absolute',top:8,right:8,background:couleur,color:'#fff',borderRadius:'50%',width:22,height:22,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:900}}>{qtePanier}</div>}
+                  <div style={{fontSize:22,marginBottom:8}}>{icone}</div>
+                  <div style={{fontWeight:600,fontSize:13,marginBottom:4,lineHeight:1.3}} title={item.description}>
+                    {item.description.length > 45 ? item.description.slice(0,45)+'...' : item.description}
                   </div>
-                  <button
-                    onClick={()=>demanderCatalogue(item)}
-                    disabled={loading}
-                    style={{background:dejaDemandeAujourd?C.green:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'6px 12px',fontSize:12,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',minWidth:80}}>
-                    {dejaDemandeAujourd?'✅ Envoyé':'+ Demander'}
+                  {item.sku && <div style={{fontSize:11,color:sub,marginBottom:2}}>#{item.sku}</div>}
+                  {item.fournisseur && <div style={{fontSize:11,color:sub,marginBottom:10}}>{item.fournisseur}</div>}
+                  <button onClick={()=>ajouterPanier(item)}
+                    style={{width:'100%',background:dansPanier?couleur:dark?'#1a1a2e':'#f0f4ff',color:dansPanier?'#fff':C.blue,border:`1px solid ${dansPanier?couleur:C.blue+'44'}`,borderRadius:8,padding:'8px 0',fontSize:12,fontWeight:700,cursor:'pointer',transition:'all .15s'}}>
+                    {dansPanier ? `✅ Dans le panier (${qtePanier})` : '+ Ajouter au panier'}
                   </button>
                 </div>
               )
@@ -1053,6 +1163,14 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
         </div>
       )
     })}
+
+    {catalogueFiltré.length === 0 && (
+      <div style={{textAlign:'center',padding:60,color:sub}}>
+        <div style={{fontSize:48,marginBottom:12}}>🔍</div>
+        <p style={{fontWeight:600}}>Aucun article trouvé</p>
+        <p style={{fontSize:13}}>Essaie un autre mot-clé ou <button onClick={()=>setShowManuel(true)} style={{color:C.blue,background:'none',border:'none',cursor:'pointer',textDecoration:'underline',fontSize:13}}>fais une demande manuelle</button></p>
+      </div>
+    )}
   </>
 }
 
