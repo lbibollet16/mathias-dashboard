@@ -52,7 +52,8 @@ export default function Dashboard() {
   const [fourn, setFourn]   = useState('ALL')
   const [xyz, setXyz]       = useState('ALL')
   const [tend, setTend]     = useState('ALL')
-  const [cov, setCov]       = useState(0)
+  const [cov, setCov]       = useState(3)
+  const [filtABC, setFiltABC] = useState('A')
   const [lignes, setLignes] = useState<string[]>([])
   const [ddOpen, setDdOpen] = useState(false)
   const ddRef = useRef<HTMLDivElement>(null)
@@ -136,6 +137,9 @@ export default function Dashboard() {
   }
 
   const filtered = items.filter(it => {
+    // Filtre ABC — par défaut A seulement
+    if (filtABC === 'A' && it.classeABC !== 'A') return false
+    if (filtABC === 'AB' && it.classeABC === 'C') return false
     if (fourn!=='ALL' && it.fournisseur!==fourn) return false
     if (xyz!=='ALL' && it.xyz!==xyz) return false
     if (lignes.length>0 && !lignes.includes(it.ligne)) return false
@@ -220,6 +224,16 @@ export default function Dashboard() {
         {/* ── CALCULATEUR ─────────────────────────────────────────── */}
         {tab==='calc' && <>
           <div style={{background:card,borderRadius:12,padding:'14px 18px',marginBottom:14,display:'flex',gap:12,flexWrap:'wrap',alignItems:'flex-start',border:`1px solid ${bdr}`}}>
+
+            {/* ABC */}
+            <div style={{flex:1,minWidth:130}}>
+              <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Priorité ABC</div>
+              <select value={filtABC} onChange={e=>setFiltABC(e.target.value)} style={{...S,border:`2px solid ${filtABC==='A'?C.green:C.yellow}`,fontWeight:700}}>
+                <option value="A">🟢 A seulement — Top 20% CA</option>
+                <option value="AB">🟡 A + B — 95% du CA</option>
+                <option value="ALL">Tous — A, B et C</option>
+              </select>
+            </div>
 
             {/* Fournisseur */}
             <div style={{flex:1,minWidth:140}}>
