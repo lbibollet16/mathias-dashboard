@@ -165,7 +165,7 @@ export default function Dashboard() {
     if (cov>0 && getBesoin(it) < 3) return false
     // Exclure si une alternative couvre le besoin (stock alt >= besoin)
     if (cov>0) {
-      const altCodes = alts.get(it.pk) || []
+      const altCodes = (alts as Map<string,string[]>).get(it.pk) || []
       const besoin = getBesoin(it)
       for (const altCode of altCodes) {
         const altItem = items.find((x:Item) => x.pk === altCode)
@@ -1020,7 +1020,7 @@ function BookingTab({data,dark,card,bdr,sub,thBg,S}: any) {
                 <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}><span style={{background:it.classeABC==='A'?C.green:C.yellow,color:'#fff',padding:'3px 6px',borderRadius:4,fontSize:11,fontWeight:700}}>{it.classeABC}</span></td>
                 <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>
                   {it.pk}
-                  {alts.get(it.pk) && <div style={{fontSize:10,color:C.blue,marginTop:2}}>🔄 Alt: {(alts.get(it.pk)||[]).join(', ')}</div>}
+                  {(alts as Map<string,string[]>).get(it.pk) && <div style={{fontSize:10,color:C.blue,marginTop:2}}>🔄 Alt: {((alts as Map<string,string[]>).get(it.pk)||[]).join(', ')}</div>}
                 </td>
                 <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:sub}}>{it.desc}</td>
                 <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.blue,fontWeight:700}}>{it.vp}</td>
