@@ -3,14 +3,15 @@ import { supabaseAdmin, calculerInventaire } from '@/lib/supabase'
 
 export async function POST() {
   try {
-    // 1. Lire toutes les ventes depuis Supabase (pagination par batch de 5000)
+    // 1. Lire toutes les ventes depuis Supabase (pagination 1000 par 1000)
     let ventesData: any[] = []
     let from = 0
-    const BATCH = 5000
+    const BATCH = 1000
     while (true) {
       const { data, error } = await supabaseAdmin
         .from('historique_ventes')
         .select('code_piece, mois, quantite')
+        .order('id', { ascending: true })
         .range(from, from + BATCH - 1)
       if (error) throw new Error('Erreur lecture ventes: ' + error.message)
       if (!data || data.length === 0) break
@@ -46,6 +47,7 @@ export async function POST() {
     return NextResponse.json({
       success: true,
       nb_pieces: resultat.liste_complete.length,
+      nb_ventes_lues: ventesData.length,
       calcule_le: new Date().toISOString()
     })
   } catch (e: any) {
