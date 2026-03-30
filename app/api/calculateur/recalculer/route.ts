@@ -3,13 +3,23 @@ import { supabaseAdmin, calculerInventaire } from '@/lib/supabase'
 
 export async function POST() {
   try {
-    // 1. Lire toutes les ventes depuis Supabase
-    const { data: ventesData, error: ventesError } = await supabaseAdmin
-      .from('historique_ventes')
-      .select('code_piece, mois, quantite')
+    // 1. Lire toutes les ventes depuis Supabase (pagination par batch de 5000)
+    let ventesData: any[] = []
+    let from = 0
+    const BATCH = 5000
+    while (true) {
+      const { data, error } = await supabaseAdmin
+        .from('historique_ventes')
+        .select('code_piece, mois, quantite')
+        .range(from, from + BATCH - 1)
+      if (error) throw new Error('Erreur lecture ventes: ' + error.message)
+      if (!data || data.length === 0) break
+      ventesData = ventesData.concat(data)
+      if (data.length < BATCH) break
+      from += BATCH
+    }
 
-    if (ventesError) throw new Error('Erreur lecture ventes: ' + ventesError.message)
-    if (!ventesData || ventesData.length === 0) {
+    if (ventesData.length === 0) {
       return NextResponse.json({ erreur: 'Aucune vente en base. Importez des données.' }, { status: 200 })
     }
 
