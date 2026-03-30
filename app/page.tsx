@@ -864,16 +864,26 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
     return (item.ventesMoyParMois[m1] || 0) + (item.ventesMoyParMois[m2] || 0)
   }
 
-  function onSkuChange(val: string) {
+  async function onSkuChange(val: string) {
     setSku(val)
     setSkuErreur('')
     setSkuInfo(null)
     if (val.trim().length >= 3) {
+      // D'abord chercher dans le cache local
       const found = chercherSku(val.trim())
       if (found) {
         setSkuInfo(found)
         const besoin = calculerBesoin2Mois(found)
         if (besoin > 0) setQte(Math.ceil(besoin))
+      } else {
+        // Sinon chercher dans Traction via API
+        try {
+          const r = await fetch('/api/sku-lookup?sku=' + encodeURIComponent(val.trim()))
+          const j = await r.json()
+          if (j.found) {
+            setSkuInfo({ pk: j.pk, desc: j.desc, fournisseur: j.fournisseur, stock: j.stock, cost: j.cost, ligne: j.ligne, classeABC: '—', ventesMoyParMois: null })
+          }
+        } catch {}
       }
     }
   }
@@ -890,8 +900,8 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
       body: JSON.stringify({
         employe,
         sku: sku.trim(),
-        description: item?.desc || sku.trim(),
-        fournisseur: item?.fournisseur || '',
+        description: skuInfo?.desc || sku.trim(),
+        fournisseur: skuInfo?.fournisseur || '',
         categorie: 'Suggestion',
         quantite: qte,
         unite: 'unité',
