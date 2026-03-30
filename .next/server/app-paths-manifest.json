@@ -1,7 +1,0 @@
-{
-  "/_not-found/page": "app/_not-found/page.js",
-  "/api/calculateur/route": "app/api/calculateur/route.js",
-  "/api/lots/route": "app/api/lots/route.js",
-  "/page": "app/page.js",
-  "/api/negatifs/route": "app/api/negatifs/route.js"
-}
