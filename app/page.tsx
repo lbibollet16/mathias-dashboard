@@ -143,6 +143,8 @@ export default function Dashboard() {
     if (tend==='baisse' && it.iconeTendance!=='bas') return false
     if (tend==='stable' && it.iconeTendance!=='stable') return false
     if (cov>0 && getQte(it)<=0) return false
+    // Exclure les pièces dont le besoin est < 3 unités sur la période
+    if (cov>0 && getBesoin(it) < 3) return false
     return true
   })
 
@@ -284,7 +286,6 @@ export default function Dashboard() {
               <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,marginBottom:5}}>🎯 Couverture Stock</div>
               <select value={cov} onChange={e=>setCov(Number(e.target.value))} style={{...S,border:`2px solid ${C.blue}`,color:C.blue,fontWeight:700,background:dark?'#1a233a':'#e8f0fe'}}>
                 <option value={0}>Sélectionner...</option>
-                <option value={1}>1 Mois</option>
                 <option value={3}>3 Mois</option>
                 <option value={6}>6 Mois</option>
                 <option value={12}>12 Mois</option>
@@ -499,30 +500,28 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr}: any) {
 
   // ── Règles commande du jour ──────────────────────────────────────────
   // R1: ABC = A ou B seulement
-  // R2: Vélocité EMA ≥ 3 unités/mois
-  // R3: Stock actuel < 1 semaine de ventes (besoin4sem / 4)
+  // R2: Besoin 4 semaines ≥ 3 unités (basé sur historique réel)
+  // R3: Stock actuel < besoin 4 semaines (pas assez pour couvrir)
   // R4: Valeur ligne ≥ 10$
   // R5: Exclure "Sur Commande"
-  const VELOCITE_MIN = 3       // unités/mois minimum
-  const SEMAINES_SEUIL = 1     // commander si stock < N semaines
+  const BESOIN_MIN = 3         // besoin minimum 4 sem pour apparaître
   const VALEUR_MIN_LIGNE = 10  // $ minimum par ligne
 
   const suggestions = items.filter(it => {
     if (it.classeABC === 'C') return false                          // R1
     if (it.saison === 'Sur Commande') return false                  // R5
-    if (it.moyMois < VELOCITE_MIN) return false                     // R2
     if (filtFourn !== 'ALL' && it.fournisseur !== filtFourn) return false
     const besoin4sem = getBesoin4Semaines(it)
-    const seuil1sem = besoin4sem / 4                                // 1 semaine de stock
+    if (besoin4sem < BESOIN_MIN) return false                       // R2
     const stockEff = Math.max(0, it.stock)
-    return stockEff < seuil1sem                                     // R3
+    return stockEff < besoin4sem                                    // R3 - stock insuffisant
   }).map(it => {
     const besoin4sem = getBesoin4Semaines(it)
     const stockEff = Math.max(0, it.stock)
     // Commander pour couvrir 4 semaines + stock sécu
-    const qteACommander = Math.ceil(besoin4sem - stockEff + (it.stockSecurite || 0))
+    const qteACommander = Math.max(1, Math.ceil(besoin4sem - stockEff + (it.stockSecurite || 0)))
     const totalLigne = qteACommander * it.cost
-    return { ...it, besoin4sem, seuil1sem: besoin4sem/4, qteACommander, totalLigne }
+    return { ...it, besoin4sem, qteACommander, totalLigne }
   }).filter(it => it.totalLigne >= VALEUR_MIN_LIGNE)                // R4
   .sort((a: any, b: any) => {
     if (a.fournisseur !== b.fournisseur) return a.fournisseur.localeCompare(b.fournisseur)
