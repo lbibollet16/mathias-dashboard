@@ -59,6 +59,8 @@ export default function Dashboard() {
   const ddRef = useRef<HTMLDivElement>(null)
 
   // Import
+  const [alts, setAlts] = useState<Map<string,string[]>>(new Map()) // principal -> [alternatifs]
+  const [altReverse, setAltReverse] = useState<Map<string,string>>(new Map()) // alternatif -> principal
   const [iFile, setIFile]   = useState<File|null>(null)
   const [iMois, setIMois]   = useState('')
   const [iStatus, setIStatus] = useState('')
@@ -75,12 +77,24 @@ export default function Dashboard() {
   async function fetchAll() {
     setLoading(true)
     try {
-      const [d, l, n] = await Promise.all([
+      const [d, l, n, a] = await Promise.all([
         fetch('/api/calculateur').then(r=>r.json()),
         fetch('/api/lots').then(r=>r.json()),
         fetch('/api/negatifs').then(r=>r.json()),
+        fetch('/api/alternatives').then(r=>r.json()),
       ])
       setData(d); setLots(Array.isArray(l)?l:[]); setNegs(Array.isArray(n)?n:[])
+      // Construire les maps d'alternatives
+      if (Array.isArray(a)) {
+        const fwd = new Map<string,string[]>()
+        const rev = new Map<string,string>()
+        for (const p of a) {
+          if (!fwd.has(p.code_principal)) fwd.set(p.code_principal, [])
+          fwd.get(p.code_principal)!.push(p.code_alternatif)
+          rev.set(p.code_alternatif, p.code_principal)
+        }
+        setAlts(fwd); setAltReverse(rev)
+      }
     } catch { setData({erreur:'Erreur connexion'}) }
     setLoading(false)
   }
@@ -149,6 +163,15 @@ export default function Dashboard() {
     if (cov>0 && getQte(it)<=0) return false
     // Exclure les pièces dont le besoin est < 3 unités sur la période
     if (cov>0 && getBesoin(it) < 3) return false
+    // Exclure si une alternative couvre le besoin (stock alt >= besoin)
+    if (cov>0) {
+      const altCodes = alts.get(it.pk) || []
+      const besoin = getBesoin(it)
+      for (const altCode of altCodes) {
+        const altItem = items.find((x:Item) => x.pk === altCode)
+        if (altItem && Math.max(0, altItem.stock) >= besoin) return false
+      }
+    }
     return true
   })
 
@@ -465,8 +488,8 @@ export default function Dashboard() {
         {tab==='booking' && <BookingTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S}/>}
 
         {/* ── NÉGATIFS ────────────────────────────────────────────── */}
-        {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
-        {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
+        {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts}/>}
+        {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts}/>}
       </div>
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-thumb{background:${dark?'#444':'#ccc'};border-radius:3px}`}</style>
     </div>
@@ -474,12 +497,13 @@ export default function Dashboard() {
 }
 
 // ── Commandes du Jour ────────────────────────────────────────────────────────
-function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr}: any) {
+function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap}: any) {
   const [filtFourn, setFiltFourn] = useState('ALL')
   const [employe, setEmploye] = useState(() => { try { return localStorage.getItem('employe_nom') || '' } catch { return '' } })
   const [showEmployeModal, setShowEmployeModal] = useState(false)
   const [nomTemp, setNomTemp] = useState('')
   const [suivis, setSuivis] = useState<any[]>([])
+  const [alternatives, setAlternatives] = useState<Map<string,string>>(new Map())
   const [actionModal, setActionModal] = useState<{item: any, type: string} | null>(null)
   const [pieceAlt, setPieceAlt] = useState('')
   const [filtreStatut, setFiltreStatut] = useState('actif') // actif | attente | verifie | tout
@@ -489,10 +513,25 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr}: any) {
   // Charger les suivis depuis Supabase au montage
   useEffect(() => {
     chargerSuivis()
-    // Rafraîchir toutes les 30 secondes (multi-employés)
+    chargerAlternatives()
     const interval = setInterval(chargerSuivis, 30000)
     return () => clearInterval(interval)
   }, [])
+
+  async function chargerAlternatives() {
+    try {
+      const r = await fetch('/api/alternatives')
+      if (r.ok) {
+        const data = await r.json()
+        const map = new Map<string,string>()
+        for (const a of data) {
+          map.set(a.code_principal, a.code_alternatif)
+          map.set(a.code_alternatif, a.code_principal)
+        }
+        setAlternatives(map)
+      }
+    } catch {}
+  }
 
   async function chargerSuivis() {
     try {
@@ -726,7 +765,9 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr}: any) {
                             </td>
                             <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>
                               {it.pk}
-                              {suivi?.piece_alternative && <div style={{fontSize:10,color:C.blue,marginTop:2}}>→ Alt: {suivi.piece_alternative}</div>}
+                              {alternatives.get(it.pk) && <div style={{fontSize:10,color:C.blue,marginTop:2}}>🔄 Alt: {alternatives.get(it.pk)}</div>}
+                              {suivi?.piece_alternative && <div style={{fontSize:10,color:C.green,marginTop:2}}>✅ Alt choisie: {suivi.piece_alternative}</div>}
+                              {!suivi?.piece_alternative && altsMap && altsMap.get(it.pk) && <div style={{fontSize:10,color:C.blue,marginTop:2}}>🔄 Alt: {(altsMap.get(it.pk)||[]).join(', ')}</div>}
                             </td>
                             <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:sub}} title={it.desc}>{it.desc}</td>
                             <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
@@ -774,7 +815,7 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr}: any) {
 
 
 // ── Négatifs Tab ────────────────────────────────────────────────────────────
-function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr}: any) {
+function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts}: any) {
   const [filtFourn, setFiltFourn] = useState('ALL')
   const [filtLigne, setFiltLigne] = useState('ALL')
 
@@ -854,7 +895,15 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr}: any) {
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`}}>
                         <span style={{background:dark?'#333':'#e2e8f0',color:dark?'#ccc':'#475569',padding:'2px 8px',borderRadius:4,fontSize:12,fontWeight:600}}>{n.ligne}</span>
                       </td>
-                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{n.code_piece}</td>
+                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>
+                        {n.code_piece}
+                        {alts && alts.get && alts.get(n.code_piece) && (() => {
+                          const altCodes: string[] = alts.get(n.code_piece) || []
+                          return altCodes.length > 0
+                            ? <div style={{fontSize:10,color:C.green,marginTop:2,fontWeight:400}}>✅ Alt dispo: {altCodes.join(', ')}</div>
+                            : null
+                        })()}
+                      </td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:sub}}>{n.description}</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.red,fontWeight:900,fontSize:17}}>{n.stock_negatif}</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{n.cout_unitaire.toFixed(2)} $</td>
@@ -969,7 +1018,10 @@ function BookingTab({data,dark,card,bdr,sub,thBg,S}: any) {
             : res.map((it,i)=>(
               <tr key={i}>
                 <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}><span style={{background:it.classeABC==='A'?C.green:C.yellow,color:'#fff',padding:'3px 6px',borderRadius:4,fontSize:11,fontWeight:700}}>{it.classeABC}</span></td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{it.pk}</td>
+                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>
+                  {it.pk}
+                  {alts.get(it.pk) && <div style={{fontSize:10,color:C.blue,marginTop:2}}>🔄 Alt: {(alts.get(it.pk)||[]).join(', ')}</div>}
+                </td>
                 <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:sub}}>{it.desc}</td>
                 <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.blue,fontWeight:700}}>{it.vp}</td>
                 <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.yellow,fontWeight:700}}>+{it.saf}</td>
