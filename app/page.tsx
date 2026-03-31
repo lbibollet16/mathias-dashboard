@@ -545,9 +545,9 @@ export default function Dashboard() {
 
         {/* ── NÉGATIFS ────────────────────────────────────────────── */}
         {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts}/>}
-        {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts} fournituresData={fournituresData} setFournituresData={setFournituresData}/>}
+        {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts} fournituresData={fournituresData} setFournituresData={setFournituresData} profil={profil}/>}
         {tab==='utilisateurs' && <UtilisateursTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
-        {tab==='fournitures' && <FournituresTab fournituresData={fournituresData} setFournituresData={setFournituresData} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} data={data}/>}
+        {tab==='fournitures' && <FournituresTab fournituresData={fournituresData} setFournituresData={setFournituresData} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} data={data} profil={profil}/>}
       </div>
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-thumb{background:${dark?'#444':'#ccc'};border-radius:3px}`}</style>
     </div>
@@ -555,11 +555,9 @@ export default function Dashboard() {
 }
 
 // ── Commandes du Jour ────────────────────────────────────────────────────────
-function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fournituresData, setFournituresData}: any) {
+function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fournituresData, setFournituresData, profil}: any) {
   const [filtFourn, setFiltFourn] = useState('ALL')
-  const [employe, setEmploye] = useState(() => { try { return localStorage.getItem('employe_nom') || '' } catch { return '' } })
-  const [showEmployeModal, setShowEmployeModal] = useState(false)
-  const [nomTemp, setNomTemp] = useState('')
+  const employe = profil?.nom || profil?.email || 'Inconnu'
   const [suivis, setSuivis] = useState<any[]>([])
   const [alternatives, setAlternatives] = useState<Map<string,string>>(new Map())
   const [actionModal, setActionModal] = useState<{item: any, type: string} | null>(null)
@@ -618,7 +616,6 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
   }
 
   async function faireAction(item: any, type: string, extra?: any) {
-    if (!employe) { setShowEmployeModal(true); return }
     const body: any = {
       code_piece: item.pk,
       fournisseur: item.fournisseur,
@@ -707,17 +704,7 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
   const dateStr = aujourd.toLocaleDateString('fr-CA', { weekday:'long', year:'numeric', month:'long', day:'numeric' })
 
   return <>
-    {/* Modal nom employé */}
-    {showEmployeModal && (
-      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
-        <div style={{background:card,borderRadius:14,padding:32,width:360,border:`1px solid ${bdr}`}}>
-          <h3 style={{margin:'0 0 8px',fontSize:18}}>Qui es-tu ?</h3>
-          <p style={{color:sub,fontSize:13,margin:'0 0 16px'}}>Entre ton prénom pour les suivis de commande.</p>
-          <input value={nomTemp} onChange={e=>setNomTemp(e.target.value)} placeholder="Ex: Marie, Jean..." style={{...S,marginBottom:14,fontSize:15}} onKeyDown={e=>{if(e.key==='Enter'&&nomTemp.trim()){const n=nomTemp.trim();setEmploye(n);try{localStorage.setItem('employe_nom',n)}catch{};setShowEmployeModal(false)}}}/>
-          <button onClick={()=>{const n=nomTemp.trim();if(n){setEmploye(n);try{localStorage.setItem('employe_nom',n)}catch{};setShowEmployeModal(false)}}} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 0',width:'100%',fontSize:14,fontWeight:700,cursor:'pointer'}}>Confirmer</button>
-        </div>
-      </div>
-    )}
+
 
     {/* Modal action */}
     {actionModal && (
@@ -927,10 +914,8 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
 
 
 // ── Suggestions de Commande Tab ──────────────────────────────────────────────
-function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, sub, thBg, S, C, hvr, data}: any) {
-  const [employe, setEmploye] = useState(() => { try { return localStorage.getItem('employe_nom') || '' } catch { return '' } })
-  const [showEmployeModal, setShowEmployeModal] = useState(false)
-  const [nomTemp, setNomTemp] = useState('')
+function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, sub, thBg, S, C, hvr, data, profil}: any) {
+  const employe = profil?.nom || profil?.email || 'Inconnu'
   const [sku, setSku] = useState('')
   const [qte, setQte] = useState(1)
   const [note, setNote] = useState('')
@@ -984,7 +969,6 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
 
   async function soumettre(e: any) {
     e.preventDefault()
-    if (!employe) { setShowEmployeModal(true); return }
     if (!sku.trim()) return
     setLoading(true)
     const item = chercherSku(sku.trim())
@@ -1024,19 +1008,7 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
   const besoin2mois = skuInfo ? calculerBesoin2Mois(skuInfo) : 0
 
   return <>
-    {/* Modal employé */}
-    {showEmployeModal && (
-      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
-        <div style={{background:card,borderRadius:14,padding:32,width:360,border:`1px solid ${bdr}`}}>
-          <h3 style={{margin:'0 0 8px',textAlign:'center'}}>👤 Qui es-tu?</h3>
-          <p style={{color:sub,fontSize:13,margin:'0 0 16px',textAlign:'center'}}>Entre ton prénom</p>
-          <input value={nomTemp} onChange={e=>setNomTemp(e.target.value)} placeholder="Ton prénom..." style={{...S,marginBottom:14,fontSize:15}} autoFocus
-            onKeyDown={e=>{if(e.key==='Enter'&&nomTemp.trim()){const n=nomTemp.trim();setEmploye(n);try{localStorage.setItem('employe_nom',n)}catch{};setShowEmployeModal(false)}}}/>
-          <button onClick={()=>{const n=nomTemp.trim();if(n){setEmploye(n);try{localStorage.setItem('employe_nom',n)}catch{};setShowEmployeModal(false)}}}
-            style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'11px 0',width:'100%',fontWeight:700,cursor:'pointer',fontSize:14}}>Confirmer</button>
-        </div>
-      </div>
-    )}
+
 
     <div style={{maxWidth:900,margin:'0 auto'}}>
 
@@ -1046,13 +1018,9 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
           <h2 style={{margin:0,fontSize:20,fontWeight:800}}>💡 Suggestions de Commande</h2>
           <p style={{color:sub,fontSize:13,margin:'4px 0 0'}}>Entre un SKU pour suggérer une commande à la réception</p>
         </div>
-        {employe
-          ? <div style={{background:dark?'#1a1a2e':'#f0f4ff',border:`1px solid ${C.blue}33`,borderRadius:20,padding:'7px 16px',fontSize:13}}>
-              👤 <strong>{employe}</strong>
-              <button onClick={()=>setShowEmployeModal(true)} style={{fontSize:11,color:C.blue,background:'none',border:'none',cursor:'pointer',marginLeft:8,textDecoration:'underline'}}>changer</button>
-            </div>
-          : <button onClick={()=>setShowEmployeModal(true)} style={{background:C.blue,color:'#fff',border:'none',borderRadius:20,padding:'8px 18px',cursor:'pointer',fontWeight:700}}>👤 S'identifier</button>
-        }
+        <div style={{background:dark?'#1a1a2e':'#f0f4ff',border:`1px solid ${C.blue}33`,borderRadius:20,padding:'7px 16px',fontSize:13}}>
+          👤 <strong>{employe}</strong>
+        </div>
       </div>
 
       {/* Message succès */}
