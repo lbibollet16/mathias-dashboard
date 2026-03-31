@@ -57,6 +57,9 @@ export default function Dashboard() {
   const [negs, setNegs]     = useState<Negatif[]>([])
   const [loading, setLoading] = useState(true)
   const [dark, setDark]     = useState(false)
+  const [user, setUser]     = useState<any>(null)
+  const [profil, setProfil] = useState<any>(null)
+  const [authLoading, setAuthLoading] = useState(true)
   const [tip, setTip]       = useState<string|null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncLog, setSyncLog] = useState('')
@@ -106,7 +109,9 @@ export default function Dashboard() {
       if (event === 'SIGNED_OUT') { window.location.href = '/login' }
     })
     return () => subscription.unsubscribe()
-    // Fermer dropdown en cliquant ailleurs
+  }, [])
+
+  useEffect(() => {
     const h = (e: MouseEvent) => { if (ddRef.current && !ddRef.current.contains(e.target as Node)) setDdOpen(false) }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
