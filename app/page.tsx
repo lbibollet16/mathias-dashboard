@@ -1271,7 +1271,7 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
             <div style={{display:'flex',gap:10}}>
               <button type="button" onClick={()=>{setShowInvite(false);setErreur('')}} style={{flex:1,background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 0',cursor:'pointer',color:sub,fontWeight:600}}>Annuler</button>
               <button type="submit" disabled={invLoading} style={{flex:2,background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 0',fontWeight:700,cursor:'pointer',fontSize:14}}>
-                {invLoading ? 'Envoi...' : '📧 Envoyer l'invitation'}
+                {invLoading ? 'Envoi...' : '📧 Envoyer invitation'}
               </button>
             </div>
           </form>
