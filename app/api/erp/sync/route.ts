@@ -145,10 +145,21 @@ export async function POST() {
     if (lotsAAjouter.length > 0) await supabaseAdmin.from('lots_retournables').insert(lotsAAjouter)
     for (const m of lotsAMaj) await supabaseAdmin.from('lots_retournables').update({ qte_restante: m.qte_restante }).eq('id', m.id)
 
-    // 9. Négatifs — vider et réinsérer par batch
+    // 9. Négatifs — upsert pour conserver la date d'apparition originale
+    // Lire les dates existantes
+    const { data: negExistants } = await supabaseAdmin.from('memoire_negatifs').select('code_piece, date_apparition')
+    const mapDatesNeg = new Map<string, string>()
+    for (const n of negExistants || []) mapDatesNeg.set(n.code_piece, n.date_apparition)
+
+    // Conserver la date d'apparition originale si la pièce était déjà négative
+    const negAvecDates = nouveauxNegatifs.map((n: any) => ({
+      ...n,
+      date_apparition: mapDatesNeg.get(n.code_piece) || todayStr
+    }))
+
     await supabaseAdmin.from('memoire_negatifs').delete().neq('id', 0)
-    for (let i = 0; i < nouveauxNegatifs.length; i += 500)
-      await supabaseAdmin.from('memoire_negatifs').insert(nouveauxNegatifs.slice(i, i + 500))
+    for (let i = 0; i < negAvecDates.length; i += 500)
+      await supabaseAdmin.from('memoire_negatifs').insert(negAvecDates.slice(i, i + 500))
 
     // 10. Recalcul cache
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'

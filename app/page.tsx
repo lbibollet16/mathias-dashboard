@@ -1334,11 +1334,19 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts}: any) {
   const [filtFourn, setFiltFourn] = useState('ALL')
   const [filtLigne, setFiltLigne] = useState('ALL')
 
-  // Listes uniques pour les filtres
-  const fournisseurs = Array.from(new Set(negs.map((n: any) => n.fournisseur))).sort() as string[]
-  const lignes = Array.from(new Set(negs.map((n: any) => n.ligne))).sort() as string[]
+  // Dédupliquer par code_piece — garder seulement le plus récent
+  const dedup = new Map<string, any>()
+  for (const n of negs) {
+    if (!dedup.has(n.code_piece) || new Date(n.date_apparition) > new Date(dedup.get(n.code_piece).date_apparition)) {
+      dedup.set(n.code_piece, n)
+    }
+  }
+  const negsUniques = Array.from(dedup.values())
 
-  const filtered = negs.filter((n: any) => {
+  const fournisseurs = Array.from(new Set(negsUniques.map((n: any) => n.fournisseur))).sort() as string[]
+  const lignes = Array.from(new Set(negsUniques.map((n: any) => n.ligne))).sort() as string[]
+
+  const filtered = negsUniques.filter((n: any) => {
     if (filtFourn !== 'ALL' && n.fournisseur !== filtFourn) return false
     if (filtLigne !== 'ALL' && n.ligne !== filtLigne) return false
     return true
@@ -1352,9 +1360,9 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts}: any) {
       <div style={{flex:1,minWidth:180}}>
         <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Fournisseur</div>
         <select value={filtFourn} onChange={e=>setFiltFourn(e.target.value)} style={S}>
-          <option value="ALL">Tous ({negs.length})</option>
+          <option value="ALL">Tous ({negsUniques.length})</option>
           {fournisseurs.map((f: string)=>(
-            <option key={f} value={f}>{f} ({negs.filter((n:any)=>n.fournisseur===f).length})</option>
+            <option key={f} value={f}>{f} ({negsUniques.filter((n:any)=>n.fournisseur===f).length})</option>
           ))}
         </select>
       </div>
@@ -1386,28 +1394,31 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts}: any) {
 
     {/* Tableau */}
     <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
-      {filtered.length===0
-        ? <div style={{textAlign:'center',padding:50,color:C.green,fontWeight:700}}>
-            <div style={{fontSize:30,marginBottom:8}}>✅</div>
-            Aucune pièce négative avec ces filtres
-          </div>
-        : <div style={{overflowX:'auto',maxHeight:'65vh',overflowY:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-              <thead><tr style={{background:thBg}}>
-                {['Fournisseur','Ligne','Code Pièce','Description','Stock Négatif','Coût Un.','Hémorragie ($)','Depuis'].map((h,i)=>(
-                  <th key={i} style={{padding:'11px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:i>=4?'center':'left',position:'sticky',top:0,zIndex:10,background:thBg}}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {filtered.map((n: any)=>{
-                  const val=Math.abs(n.stock_negatif*n.cout_unitaire)
-                  const bgR=val>500?(dark?'#2b1113':'#fff8f8'):val>100?(dark?'#2b2411':'#fffcf5'):'transparent'
+      <div style={{overflowX:'auto'}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+          <thead><tr style={{background:thBg}}>
+            <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Fournisseur</th>
+            <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Ligne</th>
+            <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code Pièce</th>
+            <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Description</th>
+            <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Stock</th>
+            <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'right'}}>Coût Un.</th>
+            <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`2px solid ${bdr}`,textAlign:'right'}}>Valeur</th>
+            <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Détecté le</th>
+          </tr></thead>
+          <tbody>
+            {filtered.length === 0
+              ? <tr><td colSpan={8} style={{textAlign:'center',padding:60,color:sub}}>Aucune pièce négative avec ces filtres</td></tr>
+              : filtered.map((n: any) => {
+                  const val = Math.abs(n.stock_negatif * n.cout_unitaire)
+                  const bgR = val>500?(dark?'#2b1113':'#fff8f8'):val>100?(dark?'#2b2411':'#fffcf5'):'transparent'
+                  const dateStr = n.date_apparition ? new Date(n.date_apparition).toLocaleDateString('fr-CA', {year:'numeric',month:'short',day:'numeric'}) : '—'
                   return (
-                    <tr key={n.id} style={{background:bgR,borderLeft:val>500?`4px solid ${C.red}`:val>100?`4px solid ${C.yellow}`:'none'}}
+                    <tr key={n.code_piece} style={{background:bgR,borderLeft:val>500?`4px solid ${C.red}`:val>100?`4px solid ${C.yellow}`:'none'}}
                       onMouseEnter={e=>e.currentTarget.style.background=hvr}
                       onMouseLeave={e=>e.currentTarget.style.background=bgR}>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:600}}>{n.fournisseur}</td>
-                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`}}>
+                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                         <span style={{background:dark?'#333':'#e2e8f0',color:dark?'#ccc':'#475569',padding:'2px 8px',borderRadius:4,fontSize:12,fontWeight:600}}>{n.ligne}</span>
                       </td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>
@@ -1419,145 +1430,19 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts}: any) {
                             : null
                         })()}
                       </td>
-                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:sub}}>{n.description}</td>
+                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:sub}} title={n.description}>{n.description}</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.red,fontWeight:900,fontSize:17}}>{n.stock_negatif}</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{n.cout_unitaire.toFixed(2)} $</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:C.red,fontWeight:700}}>− {val.toFixed(2)} $</td>
-                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:sub,fontSize:12}}>{n.date_apparition}</td>
+                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:sub,fontSize:12}}>{dateStr}</td>
                     </tr>
                   )
-                })}
-              </tbody>
-            </table>
-          </div>
-      }
-    </div>
-  </>
-}
-
-
-function BookingTab({data,dark,card,bdr,sub,thBg,S,alts}: any) {
-  const C = { blue:'#1a73e8', green:'#188038', yellow:'#f9ab00', red:'#d93025', bgG:'#e6f4ea' }
-  const [fourn,setFourn]=[useState(''),s=>useState(s)[1]]
-  const [fournisseur,setFournisseur] = useState('')
-  const [debut,setDebut]=useState('')
-  const [fin,setFin]=useState('')
-  const [recep,setRecep]=useState('')
-  const [termes,setTermes]=useState(90)
-  const [budget,setBudget]=useState(15000)
-  const [res,setRes]=useState<any[]>([])
-  const [cf,setCf]=useState<any>(null)
-  const [calc,setCalc]=useState(false)
-
-  function optimiser(e: React.FormEvent) {
-    e.preventDefault()
-    if (!data?.liste_complete) return
-    const mDeb=parseInt(debut.split('-')[1])-1, mFin=parseInt(fin.split('-')[1])-1
-    const mois:number[]=[]
-    if (mDeb<=mFin){for(let i=mDeb;i<=mFin;i++)mois.push(i)}else{for(let i=mDeb;i<=11;i++)mois.push(i);for(let i=0;i<=mFin;i++)mois.push(i)}
-    let sugg:any[]=[],coutTot=0
-    data.liste_complete.forEach((it:any)=>{
-      if(it.fournisseur!==fournisseur||it.classeABC==='C')return
-      let v=0; mois.forEach((m:number)=>{v+=it.moyMois*(it.indiceSaison?.[m]??1)})
-      if(v<=3)return
-      // Exclure si une alternative couvre la demande
-      const altCodesB:string[] = (alts&&alts.get&&alts.get(it.pk))||[]
-      const normB = (s:string) => s.trim().toLowerCase().replace(/\s+/g,'')
-      const altCouvreB = altCodesB.some((ac:string)=>{
-        const acN=normB(ac)
-        const ai=data.liste_complete.find((x:any)=>normB(x.pk)===acN)
-        return ai&&Math.max(0,ai.stock)>=v
-      })
-      if(altCouvreB)return
-      const saf=it.stockSecurite||Math.ceil(v*(it.classeABC==='A'?.2:.1))
-      const q=Math.ceil(v+saf-Math.max(0,it.stock))
-      if(q>0&&it.saison!=='Sur Commande')sugg.push({...it,vp:v.toFixed(1),saf,vs:it.stock,qb:q})
-    })
-    sugg.sort((a:any,b:any)=>((b.scoreUrgence||0)-(a.scoreUrgence||0))||((b.qb*b.cost)-(a.qb*a.cost)))
-    const final:any[]=[]
-    for(const it of sugg){
-      const c=it.qb*it.cost
-      if(coutTot+c>budget){const r=Math.floor((budget-coutTot)/it.cost);if(r>0){it.qb=r;it.tl=r*it.cost;coutTot+=it.tl;final.push(it)}break}
-      it.tl=c;coutTot+=c;final.push(it)
-    }
-    const dPay=new Date(recep);dPay.setDate(dPay.getDate()+termes)
-    const dS=new Date(debut+'-01'),aF=parseInt(fin.split('-')[0]),mF=parseInt(fin.split('-')[1])
-    const dE=new Date(aF,mF,0),mid=new Date(dS.getTime()+(dE.getTime()-dS.getTime())/2)
-    const ecart=Math.round((mid.getTime()-dPay.getTime())/86400000)
-    setCf({coutTot,ecart,payF:dPay.toLocaleDateString('fr-CA'),encF:mid.toLocaleDateString('fr-CA',{month:'long',year:'numeric'})})
-    setRes(final);setCalc(true)
-  }
-
-  return <>
-    <div style={{background:card,borderRadius:12,padding:'14px 18px',marginBottom:16,border:`1px solid ${bdr}`}}>
-      <form onSubmit={optimiser} style={{display:'flex',flexWrap:'wrap',gap:12,alignItems:'flex-end'}}>
-        <div style={{flex:1.5,minWidth:160}}>
-          <label style={{display:'block',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Fournisseur</label>
-          <select value={fournisseur} onChange={e=>setFournisseur(e.target.value)} required style={S}>
-            <option value="">Sélectionner...</option>
-            {(data?.fournisseurs||[]).map((f:string)=><option key={f} value={f}>{f}</option>)}
-          </select>
-        </div>
-        <div style={{flex:1,minWidth:125}}>
-          <label style={{display:'block',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Ventes De</label>
-          <input type="month" value={debut} onChange={e=>setDebut(e.target.value)} required style={S}/>
-        </div>
-        <div style={{flex:1,minWidth:125}}>
-          <label style={{display:'block',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Ventes À</label>
-          <input type="month" value={fin} onChange={e=>setFin(e.target.value)} required style={S}/>
-        </div>
-        <div style={{flex:1,minWidth:140}}>
-          <label style={{display:'block',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,marginBottom:5}}>Réception</label>
-          <input type="date" value={recep} onChange={e=>setRecep(e.target.value)} required style={S}/>
-        </div>
-        <div style={{flex:1,minWidth:125}}>
-          <label style={{display:'block',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Termes (jours)</label>
-          <input type="number" value={termes} onChange={e=>setTermes(Number(e.target.value))} min={0} style={S}/>
-        </div>
-        <div style={{flex:1.2,minWidth:140}}>
-          <label style={{display:'block',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Budget Max ($)</label>
-          <input type="number" value={budget} onChange={e=>setBudget(Number(e.target.value))} min={0} step={100} style={S}/>
-        </div>
-        <button type="submit" style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'0 18px',height:39,fontSize:13,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>🧠 Optimiser</button>
-      </form>
-    </div>
-    {calc&&cf&&<div style={{background:cf.ecart<=0?(dark?'#0d2a18':'#e6f4ea'):(dark?'#2b2411':'#fef7e0'),border:`2px solid ${cf.ecart<=0?C.green:C.yellow}`,borderRadius:10,padding:'12px 18px',marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:10}}>
-      <div><div style={{fontSize:11,fontWeight:700,color:sub,textTransform:'uppercase',marginBottom:3}}>Total</div><strong style={{fontSize:24,color:C.blue}}>{cf.coutTot.toLocaleString('fr-CA',{minimumFractionDigits:2})} $</strong></div>
-      <div style={{color:cf.ecart<=0?C.green:'#92400e',fontWeight:600,fontSize:13,maxWidth:'60%',textAlign:'right'}}>
-        {cf.ecart<=0?`✅ Trésorerie OK — Facture le ${cf.payF}, ventes vers ${cf.encF}.`:`⚠️ Paiement le ${cf.payF} mais ventes vers ${cf.encF}. Financer ${cf.ecart} jours.`}
+                })
+            }
+          </tbody>
+        </table>
       </div>
-    </div>}
-    <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
-      <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-        <thead><tr style={{background:thBg}}>
-          {['Matrice','Code Pièce','Description','Ventes Prédites','Stock Sécu.','Stock Actuel','Coût Un.','QTÉ BOOKING','Total $'].map((h,i)=>(
-            <th key={i} style={{padding:'11px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:i>=3?'center':'left',background:i===7?(dark?'#0d2a18':'#e6f4ea'):thBg}}>{h}</th>
-          ))}
-        </tr></thead>
-        <tbody>
-          {!calc
-            ? <tr><td colSpan={9} style={{textAlign:'center',padding:50,color:sub}}>Remplissez les informations et cliquez Optimiser.</td></tr>
-            : res.length===0
-            ? <tr><td colSpan={9} style={{textAlign:'center',padding:50,color:sub}}>Aucune pièce A ou B valide pour ce budget.</td></tr>
-            : res.map((it,i)=>(
-              <tr key={i}>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}><span style={{background:it.classeABC==='A'?C.green:C.yellow,color:'#fff',padding:'3px 6px',borderRadius:4,fontSize:11,fontWeight:700}}>{it.classeABC}</span></td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>
-                  {it.pk}
-                  {alts && alts.get && alts.get(it.pk) && <div style={{fontSize:10,color:'#1a73e8',marginTop:2}}>🔄 Alt: {(alts.get(it.pk)||[]).join(', ')}</div>}
-                </td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:sub}}>{it.desc}</td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.blue,fontWeight:700}}>{it.vp}</td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.yellow,fontWeight:700}}>+{it.saf}</td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:it.vs<0?C.red:sub,fontWeight:600}}>{it.vs}</td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{it.cost.toFixed(2)}$</td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',background:dark?'#0d2a18':'#e6f4ea',color:C.green,fontSize:17,fontWeight:900}}>{it.qb}</td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700}}>{it.tl.toFixed(2)}$</td>
-              </tr>
-            ))
-          }
-        </tbody>
-      </table>
     </div>
   </>
 }
+
