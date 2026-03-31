@@ -738,10 +738,7 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
         <span style={{fontSize:12,color:sub}}>✅ Stock &lt; besoin 4 sem.</span>
         <span style={{fontSize:12,color:sub}}>✅ Valeur ≥ 10$</span>
       </div>
-      {employe
-        ? <span style={{fontSize:12,color:sub}}>👤 <strong style={{color:dark?'#e8e8e8':'#1a1a1a'}}>{employe}</strong> <button onClick={()=>setShowEmployeModal(true)} style={{fontSize:11,color:C.blue,background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>changer</button></span>
-        : <button onClick={()=>setShowEmployeModal(true)} style={{fontSize:12,color:C.blue,background:'none',border:'none',cursor:'pointer',fontWeight:700}}>👤 Identifier mon nom</button>
-      }
+      <span style={{fontSize:12,color:sub}}>👤 <strong style={{color:dark?'#e8e8e8':'#1a1a1a'}}>{employe}</strong></span>
     </div>
 
     {/* Onglets statut */}
