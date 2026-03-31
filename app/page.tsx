@@ -1464,8 +1464,11 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
   const ddLigneRef = useRef<HTMLDivElement>(null)
   const [sousOnglet, setSousOnglet] = useState<'actif'|'verifie'>('actif')
   const [noteModal, setNoteModal] = useState<any>(null)
-  const [noteTexte, setNoteTexte] = useState('')
   const [loading, setLoading] = useState(false)
+  const [form, setForm] = useState({
+    serv_detail: '', serv_interne: '', serv_gar: '', pce_detail: '',
+    recept_comm: '', dec_physique: '', autre: '', qte_reelle: '', commentaire: ''
+  })
 
   const employe = profil?.nom || profil?.email || 'Inconnu'
 
@@ -1494,22 +1497,60 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
 
   const totalErreur = filtered.reduce((s: number, n: any) => s + Math.abs(n.stock_negatif * n.cout_unitaire), 0)
 
-  async function marquerVerifie(n: any) {
+  const champs = [
+    {key:'serv_detail', label:'Serv. détail'},
+    {key:'serv_interne', label:'Serv. interne'},
+    {key:'serv_gar', label:'Serv. gar.'},
+    {key:'pce_detail', label:'Pce détail'},
+    {key:'recept_comm', label:'Récept. comm.'},
+    {key:'dec_physique', label:'Déc. physique'},
+    {key:'autre', label:'Autre'},
+  ]
+
+  function getAjustement() {
+    const somme = champs.reduce((s, c) => s + (parseFloat((form as any)[c.key]) || 0), 0)
+    const reelle = parseFloat(form.qte_reelle) || 0
+    const stockNeg = noteModal ? Number(noteModal.stock_negatif) : 0
+    // Ajustement = qté réelle tablette - (stock système + transactions)
+    return reelle - (stockNeg + somme)
+  }
+
+  function formComplet() {
+    return champs.every(c => (form as any)[c.key] !== '') && form.qte_reelle !== ''
+  }
+
+  async function marquerVerifie(e: any) {
+    e.preventDefault()
+    if (!formComplet()) return
+    const n = noteModal
     const val = Math.abs(n.stock_negatif * n.cout_unitaire)
+    const ajustement = getAjustement()
     setLoading(true)
     await fetch('/api/negatifs-verifies', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
         code_piece: n.code_piece, employe,
-        note: noteTexte || null,
         stock_au_moment: n.stock_negatif,
-        valeur_au_moment: val
+        valeur_au_moment: val,
+        serv_detail: parseFloat(form.serv_detail) || 0,
+        serv_interne: parseFloat(form.serv_interne) || 0,
+        serv_gar: parseFloat(form.serv_gar) || 0,
+        pce_detail: parseFloat(form.pce_detail) || 0,
+        recept_comm: parseFloat(form.recept_comm) || 0,
+        dec_physique: parseFloat(form.dec_physique) || 0,
+        autre: parseFloat(form.autre) || 0,
+        qte_reelle: parseFloat(form.qte_reelle) || 0,
+        ajustement,
+        commentaire: form.commentaire || null,
+        note: null
       })
     })
     const r = await fetch('/api/negatifs-verifies')
     if (r.ok) setNegsVerifies(await r.json())
-    setNoteModal(null); setNoteTexte(''); setLoading(false)
+    setNoteModal(null)
+    setForm({serv_detail:'',serv_interne:'',serv_gar:'',pce_detail:'',recept_comm:'',dec_physique:'',autre:'',qte_reelle:'',commentaire:''})
+    setLoading(false)
   }
 
   async function retablir(code_piece: string) {
@@ -1523,21 +1564,84 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
   }
 
   return <>
-    {/* Modal note */}
+    {/* Modal formulaire ajustement */}
     {noteModal && (
-      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
-        <div style={{background:card,borderRadius:14,padding:28,width:420,border:`1px solid ${bdr}`}}>
-          <h3 style={{margin:'0 0 6px',fontSize:16}}>✅ Marquer comme vérifié</h3>
-          <p style={{color:sub,fontSize:13,margin:'0 0 16px'}}><strong>{noteModal.code_piece}</strong> — {noteModal.description}</p>
-          <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Note (optionnel)</label>
-          <input value={noteTexte} onChange={e=>setNoteTexte(e.target.value)} placeholder="Ex: Erreur corrigée, En attente ajustement..." style={{...S,marginBottom:16}}/>
-          <div style={{display:'flex',gap:10}}>
-            <button onClick={()=>{setNoteModal(null);setNoteTexte('')}} style={{flex:1,background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 0',cursor:'pointer',color:sub}}>Annuler</button>
-            <button onClick={()=>marquerVerifie(noteModal)} disabled={loading}
-              style={{flex:2,background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'10px 0',fontWeight:700,cursor:'pointer'}}>
-              {loading?'...':'✅ Confirmer'}
-            </button>
-          </div>
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+        <div style={{background:card,borderRadius:16,padding:28,width:'100%',maxWidth:560,border:`1px solid ${bdr}`,boxShadow:'0 20px 60px rgba(0,0,0,.4)',maxHeight:'90vh',overflowY:'auto'}}>
+          <h3 style={{margin:'0 0 4px',fontSize:17}}>✅ Vérification inventaire</h3>
+          <p style={{color:sub,fontSize:13,margin:'0 0 4px'}}><strong>{noteModal.code_piece}</strong> — {noteModal.description}</p>
+          <p style={{color:C.red,fontSize:13,margin:'0 0 20px',fontWeight:700}}>Stock système actuel: {noteModal.stock_negatif}</p>
+
+          <form onSubmit={marquerVerifie}>
+            {/* Champs transactions */}
+            <div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:10,padding:'14px 16px',marginBottom:16}}>
+              <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:12}}>Transactions à comptabiliser</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                {[
+                  {key:'serv_detail', label:'Serv. détail'},
+                  {key:'serv_interne', label:'Serv. interne'},
+                  {key:'serv_gar', label:'Serv. gar.'},
+                  {key:'pce_detail', label:'Pce détail'},
+                  {key:'recept_comm', label:'Récept. comm.'},
+                  {key:'dec_physique', label:'Déc. physique'},
+                  {key:'autre', label:'Autre'},
+                ].map(c => (
+                  <div key={c.key}>
+                    <label style={{fontSize:11,fontWeight:700,color:sub,display:'block',marginBottom:4}}>{c.label} *</label>
+                    <input type="number" step="any" required
+                      value={(form as any)[c.key]}
+                      onChange={e=>setForm(prev=>({...prev,[c.key]:e.target.value}))}
+                      placeholder="0" style={{...S,textAlign:'center'}}/>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Qté réelle tablette */}
+            <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:10,padding:'14px 16px',marginBottom:16,border:`1px solid ${C.green}33`}}>
+              <label style={{fontSize:12,fontWeight:700,textTransform:'uppercase',color:C.green,display:'block',marginBottom:6}}>
+                📦 Quantité réelle sur tablette (stock physique) *
+              </label>
+              <input type="number" step="any" required
+                value={form.qte_reelle}
+                onChange={e=>setForm(prev=>({...prev,qte_reelle:e.target.value}))}
+                placeholder="Compter les unités sur la tablette..."
+                style={{...S,fontWeight:700,fontSize:16,textAlign:'center'}}/>
+            </div>
+
+            {/* Ajustement calculé */}
+            {form.qte_reelle !== '' && (
+              <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:10,padding:'12px 16px',marginBottom:16,border:`1px solid ${C.blue}33`}}>
+                <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',color:C.blue,marginBottom:4}}>Ajustement calculé</div>
+                <div style={{fontSize:22,fontWeight:900,color:getAjustement()>=0?C.green:C.red}}>
+                  {getAjustement()>=0?'+':''}{getAjustement().toFixed(0)} unités
+                </div>
+                <div style={{fontSize:11,color:sub,marginTop:3}}>
+                  Qté réelle ({form.qte_reelle}) − (stock système {noteModal.stock_negatif} + transactions {[
+                    parseFloat(form.serv_detail)||0,parseFloat(form.serv_interne)||0,parseFloat(form.serv_gar)||0,
+                    parseFloat(form.pce_detail)||0,parseFloat(form.recept_comm)||0,parseFloat(form.dec_physique)||0,parseFloat(form.autre)||0
+                  ].reduce((a,b)=>a+b,0).toFixed(0)})
+                </div>
+              </div>
+            )}
+
+            {/* Commentaire */}
+            <div style={{marginBottom:20}}>
+              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Commentaire (optionnel)</label>
+              <input value={form.commentaire} onChange={e=>setForm(prev=>({...prev,commentaire:e.target.value}))}
+                placeholder="Ex: Trouvé en arrière-boutique, commande en transit..."
+                style={S}/>
+            </div>
+
+            <div style={{display:'flex',gap:10}}>
+              <button type="button" onClick={()=>{setNoteModal(null);setForm({serv_detail:'',serv_interne:'',serv_gar:'',pce_detail:'',recept_comm:'',dec_physique:'',autre:'',qte_reelle:'',commentaire:''})}}
+                style={{flex:1,background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'11px 0',cursor:'pointer',color:sub,fontWeight:600}}>Annuler</button>
+              <button type="submit" disabled={loading||!formComplet()}
+                style={{flex:2,background:formComplet()?C.green:'#94a3b8',color:'#fff',border:'none',borderRadius:8,padding:'11px 0',fontWeight:700,cursor:formComplet()?'pointer':'not-allowed',fontSize:14}}>
+                {loading?'Enregistrement...':'✅ Confirmer la vérification'}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     )}
@@ -1658,36 +1762,47 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
       {/* Tableau vérifié */}
       <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
         <div style={{overflowX:'auto'}}>
-          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
             <thead><tr style={{background:thBg}}>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code Pièce</th>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Stock au moment</th>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'right'}}>Valeur</th>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Note</th>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Vérifié par</th>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Date</th>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Action</th>
+              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code Pièce</th>
+              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Stock syst.</th>
+              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Serv. détail</th>
+              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Serv. interne</th>
+              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Serv. gar.</th>
+              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Pce détail</th>
+              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Récept. comm.</th>
+              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Déc. physique</th>
+              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Autre</th>
+              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Qté tablette</th>
+              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Ajustement</th>
+              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Commentaire</th>
+              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Vérifié par</th>
+              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Date</th>
             </tr></thead>
             <tbody>
               {negsVerifies.length===0
-                ? <tr><td colSpan={7} style={{textAlign:'center',padding:60,color:sub}}>Aucune pièce vérifiée</td></tr>
+                ? <tr><td colSpan={14} style={{textAlign:'center',padding:60,color:sub}}>Aucune pièce vérifiée</td></tr>
                 : negsVerifies.map((v:any)=>(
                     <tr key={v.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{v.code_piece}</td>
-                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.red,fontWeight:700}}>{v.stock_au_moment}</td>
-                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:C.red,fontWeight:700}}>− {Number(v.valeur_au_moment).toFixed(2)} $</td>
-                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{v.note||'—'}</td>
-                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:600}}>
-                        <span style={{background:C.blue+'22',color:C.blue,padding:'2px 8px',borderRadius:10,fontSize:11}}>👤 {v.employe}</span>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{v.code_piece}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.red,fontWeight:700}}>{v.stock_au_moment}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{v.serv_detail ?? '—'}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{v.serv_interne ?? '—'}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{v.serv_gar ?? '—'}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{v.pce_detail ?? '—'}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{v.recept_comm ?? '—'}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{v.dec_physique ?? '—'}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{v.autre ?? '—'}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.green,fontWeight:700}}>{v.qte_reelle ?? '—'}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:900,color:Number(v.ajustement)>=0?C.green:C.red}}>
+                        {Number(v.ajustement)>=0?'+':''}{Number(v.ajustement).toFixed(0)}
                       </td>
-                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:sub,fontSize:12}}>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11,maxWidth:150,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={v.commentaire||''}>{v.commentaire||'—'}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:600}}>
+                        <span style={{background:C.blue+'22',color:C.blue,padding:'2px 6px',borderRadius:10,fontSize:10}}>👤 {v.employe}</span>
+                      </td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:sub,fontSize:11,whiteSpace:'nowrap'}}>
                         {new Date(v.date_verification).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
-                      </td>
-                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                        <button onClick={()=>retablir(v.code_piece)}
-                          style={{background:C.yellow+'22',color:C.yellow,border:'none',borderRadius:6,padding:'4px 8px',fontSize:11,cursor:'pointer',fontWeight:700}}>
-                          ↩ Rétablir
-                        </button>
                       </td>
                     </tr>
                   ))
