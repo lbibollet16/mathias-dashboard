@@ -1526,6 +1526,8 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     const val = Math.abs(n.stock_negatif * n.cout_unitaire)
     const ajustement = getAjustement()
     setLoading(true)
+
+    // Sauvegarder la pièce principale
     await fetch('/api/negatifs-verifies', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
@@ -1546,6 +1548,41 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
         note: null
       })
     })
+
+    // Sauvegarder les pièces alternatives si remplies
+    const altCodes: string[] = (alts && alts.get && alts.get(n.code_piece)) || []
+    for (const ac of altCodes) {
+      const fKey = `alt_${ac}`
+      const altForm = (form as any)[fKey]
+      if (!altForm || altForm.qte_reelle === '') continue
+      const norm = (s:string) => s.trim().toLowerCase().replace(/\s+/g,'')
+      const altItem = (negs||[]).find((ni:any) => norm(ni.code_piece) === norm(ac))
+      const stockAlt = altItem ? Number(altItem.stock_negatif) : 0
+      const sommeAlt = ['serv_detail','serv_interne','serv_gar','pce_detail','recept_comm','dec_physique','autre']
+        .reduce((s,k) => s + (parseFloat(altForm[k])||0), 0)
+      const ajustAlt = (parseFloat(altForm.qte_reelle)||0) - (stockAlt + sommeAlt)
+      await fetch('/api/negatifs-verifies', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          code_piece: ac, employe,
+          stock_au_moment: stockAlt,
+          valeur_au_moment: 0,
+          serv_detail: parseFloat(altForm.serv_detail)||0,
+          serv_interne: parseFloat(altForm.serv_interne)||0,
+          serv_gar: parseFloat(altForm.serv_gar)||0,
+          pce_detail: parseFloat(altForm.pce_detail)||0,
+          recept_comm: parseFloat(altForm.recept_comm)||0,
+          dec_physique: parseFloat(altForm.dec_physique)||0,
+          autre: parseFloat(altForm.autre)||0,
+          qte_reelle: parseFloat(altForm.qte_reelle)||0,
+          ajustement: ajustAlt,
+          commentaire: `Alt. de ${n.code_piece}${form.commentaire ? ' — ' + form.commentaire : ''}`,
+          note: null
+        })
+      })
+    }
+
     const r = await fetch('/api/negatifs-verifies')
     if (r.ok) setNegsVerifies(await r.json())
     setNoteModal(null)
@@ -1565,88 +1602,183 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
 
   return <>
     {/* Modal formulaire ajustement */}
-    {noteModal && (
-      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
-        <div style={{background:card,borderRadius:16,padding:28,width:'100%',maxWidth:560,border:`1px solid ${bdr}`,boxShadow:'0 20px 60px rgba(0,0,0,.4)',maxHeight:'90vh',overflowY:'auto'}}>
-          <h3 style={{margin:'0 0 4px',fontSize:17}}>✅ Vérification inventaire</h3>
-          <p style={{color:sub,fontSize:13,margin:'0 0 4px'}}><strong>{noteModal.code_piece}</strong> — {noteModal.description}</p>
-          <p style={{color:C.red,fontSize:13,margin:'0 0 20px',fontWeight:700}}>Stock système actuel: {noteModal.stock_negatif}</p>
+    {noteModal && (() => {
+      // Chercher les alternatives de la pièce
+      const altCodes: string[] = (alts && alts.get && alts.get(noteModal.code_piece)) || []
+      const altItems = altCodes.map((ac:string) => {
+        const norm = (s:string) => s.trim().toLowerCase().replace(/\s+/g,'')
+        return (negs||[]).find((n:any) => norm(n.code_piece) === norm(ac))
+      }).filter(Boolean)
 
-          <form onSubmit={marquerVerifie}>
-            {/* Champs transactions */}
-            <div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:10,padding:'14px 16px',marginBottom:16}}>
-              <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:12}}>Transactions à comptabiliser</div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-                {[
-                  {key:'serv_detail', label:'Serv. détail'},
-                  {key:'serv_interne', label:'Serv. interne'},
-                  {key:'serv_gar', label:'Serv. gar.'},
-                  {key:'pce_detail', label:'Pce détail'},
-                  {key:'recept_comm', label:'Récept. comm.'},
-                  {key:'dec_physique', label:'Déc. physique'},
-                  {key:'autre', label:'Autre'},
-                ].map(c => (
-                  <div key={c.key}>
-                    <label style={{fontSize:11,fontWeight:700,color:sub,display:'block',marginBottom:4}}>{c.label} *</label>
-                    <input type="number" step="any" required
-                      value={(form as any)[c.key]}
-                      onChange={e=>setForm(prev=>({...prev,[c.key]:e.target.value}))}
-                      placeholder="0" style={{...S,textAlign:'center'}}/>
+      const champs = [
+        {key:'serv_detail', label:'Serv. détail', desc:'Ventes débitées service détail'},
+        {key:'serv_interne', label:'Serv. interne', desc:'Ventes débitées service interne'},
+        {key:'serv_gar', label:'Serv. gar.', desc:'Ventes débitées service garantie'},
+        {key:'pce_detail', label:'Pce détail', desc:'Ventes pièces au détail'},
+        {key:'recept_comm', label:'Récept. comm.', desc:'Réceptions de commandes'},
+        {key:'dec_physique', label:'Déc. physique', desc:'Ajustement prise inventaire annuelle'},
+        {key:'autre', label:'Autre', desc:'Autres ajustements/erreurs inventaire'},
+      ]
+
+      function calcAjust(stockSys: number, f: any) {
+        const somme = champs.reduce((s,c) => s + (parseFloat(f[c.key])||0), 0)
+        const reelle = parseFloat(f.qte_reelle) || 0
+        return reelle - (stockSys + somme)
+      }
+
+      const ajustPrincipal = calcAjust(Number(noteModal.stock_negatif), form)
+      const hasAlt = altItems.length > 0
+
+      return (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.75)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div style={{background:card,borderRadius:16,width:'100%',maxWidth:hasAlt?920:560,border:`1px solid ${bdr}`,boxShadow:'0 20px 60px rgba(0,0,0,.5)',maxHeight:'92vh',overflowY:'auto'}}>
+            
+            {/* Header */}
+            <div style={{padding:'20px 24px',borderBottom:`1px solid ${bdr}`,position:'sticky',top:0,background:card,zIndex:10}}>
+              <h3 style={{margin:'0 0 4px',fontSize:17}}>✅ Vérification inventaire</h3>
+              <div style={{display:'flex',gap:16,flexWrap:'wrap'}}>
+                <span style={{color:sub,fontSize:13}}><strong style={{color:dark?'#e8e8e8':'#1a1a1a'}}>{noteModal.code_piece}</strong> — {noteModal.description}</span>
+                <span style={{color:C.red,fontSize:13,fontWeight:700}}>Stock système: {noteModal.stock_negatif}</span>
+              </div>
+              {hasAlt && <div style={{marginTop:6,fontSize:12,color:C.blue}}>🔄 Pièce alternative détectée — remplis les 2 sections</div>}
+            </div>
+
+            <form onSubmit={marquerVerifie}>
+              <div style={{padding:'20px 24px',display:'grid',gridTemplateColumns:hasAlt?'1fr 1fr':'1fr',gap:20}}>
+                
+                {/* Section pièce principale */}
+                <div>
+                  <div style={{background:dark?'#1a1a2e':'#f0f4ff',borderRadius:10,padding:'10px 14px',marginBottom:14,border:`1px solid ${C.blue}33`}}>
+                    <div style={{fontSize:12,fontWeight:700,color:C.blue}}>📦 Pièce principale</div>
+                    <div style={{fontSize:13,fontWeight:700,marginTop:2}}>{noteModal.code_piece}</div>
+                    <div style={{fontSize:11,color:sub}}>{noteModal.description}</div>
                   </div>
-                ))}
-              </div>
-            </div>
 
-            {/* Qté réelle tablette */}
-            <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:10,padding:'14px 16px',marginBottom:16,border:`1px solid ${C.green}33`}}>
-              <label style={{fontSize:12,fontWeight:700,textTransform:'uppercase',color:C.green,display:'block',marginBottom:6}}>
-                📦 Quantité réelle sur tablette (stock physique) *
-              </label>
-              <input type="number" step="any" required
-                value={form.qte_reelle}
-                onChange={e=>setForm(prev=>({...prev,qte_reelle:e.target.value}))}
-                placeholder="Compter les unités sur la tablette..."
-                style={{...S,fontWeight:700,fontSize:16,textAlign:'center'}}/>
-            </div>
+                  {/* Champs transactions */}
+                  <div style={{marginBottom:14}}>
+                    <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Transactions</div>
+                    <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                      {champs.map(c => (
+                        <div key={c.key} style={{display:'flex',alignItems:'center',gap:8}}>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:12,fontWeight:600}}>{c.label}</div>
+                            <div style={{fontSize:10,color:sub}}>{c.desc}</div>
+                          </div>
+                          <input type="number" step="any" required
+                            value={(form as any)[c.key]}
+                            onChange={e=>setForm(prev=>({...prev,[c.key]:e.target.value}))}
+                            placeholder="0"
+                            style={{...S,width:80,textAlign:'center',padding:'6px 8px'}}/>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
 
-            {/* Ajustement calculé */}
-            {form.qte_reelle !== '' && (
-              <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:10,padding:'12px 16px',marginBottom:16,border:`1px solid ${C.blue}33`}}>
-                <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',color:C.blue,marginBottom:4}}>Ajustement calculé</div>
-                <div style={{fontSize:22,fontWeight:900,color:getAjustement()>=0?C.green:C.red}}>
-                  {getAjustement()>=0?'+':''}{getAjustement().toFixed(0)} unités
+                  {/* Qté réelle */}
+                  <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:10,padding:'12px 14px',marginBottom:12,border:`1px solid ${C.green}33`}}>
+                    <label style={{fontSize:12,fontWeight:700,color:C.green,display:'block',marginBottom:6}}>📦 Qté réelle sur tablette *</label>
+                    <input type="number" step="any" required value={form.qte_reelle}
+                      onChange={e=>setForm(prev=>({...prev,qte_reelle:e.target.value}))}
+                      placeholder="Compter les unités..."
+                      style={{...S,fontWeight:700,fontSize:15,textAlign:'center'}}/>
+                  </div>
+
+                  {/* Ajustement principal */}
+                  {form.qte_reelle !== '' && (
+                    <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:10,padding:'10px 14px',border:`1px solid ${C.blue}33`}}>
+                      <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,marginBottom:2}}>Ajustement à faire</div>
+                      <div style={{fontSize:24,fontWeight:900,color:ajustPrincipal>=0?C.green:C.red}}>
+                        {ajustPrincipal>=0?'+':''}{ajustPrincipal.toFixed(0)} unités
+                      </div>
+                      <div style={{fontSize:10,color:sub,marginTop:2}}>
+                        {form.qte_reelle} tablette − ({noteModal.stock_negatif} système + {champs.reduce((s,c)=>s+(parseFloat((form as any)[c.key])||0),0).toFixed(0)} transactions)
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div style={{fontSize:11,color:sub,marginTop:3}}>
-                  Qté réelle ({form.qte_reelle}) − (stock système {noteModal.stock_negatif} + transactions {[
-                    parseFloat(form.serv_detail)||0,parseFloat(form.serv_interne)||0,parseFloat(form.serv_gar)||0,
-                    parseFloat(form.pce_detail)||0,parseFloat(form.recept_comm)||0,parseFloat(form.dec_physique)||0,parseFloat(form.autre)||0
-                  ].reduce((a,b)=>a+b,0).toFixed(0)})
+
+                {/* Section pièce alternative */}
+                {hasAlt && altItems.map((altItem: any) => {
+                  const fKey = `alt_${altItem.code_piece}`
+                  const altForm = (form as any)[fKey] || {serv_detail:'',serv_interne:'',serv_gar:'',pce_detail:'',recept_comm:'',dec_physique:'',autre:'',qte_reelle:''}
+                  const ajustAlt = altForm.qte_reelle !== '' ? calcAjust(Number(altItem.stock_negatif||0), altForm) : null
+
+                  return (
+                    <div key={altItem.code_piece}>
+                      <div style={{background:dark?'#1a2a1a':'#f0fff4',borderRadius:10,padding:'10px 14px',marginBottom:14,border:`1px solid ${C.green}33`}}>
+                        <div style={{fontSize:12,fontWeight:700,color:C.green}}>🔄 Pièce alternative</div>
+                        <div style={{fontSize:13,fontWeight:700,marginTop:2}}>{altItem.code_piece}</div>
+                        <div style={{fontSize:11,color:sub}}>{altItem.description}</div>
+                        <div style={{fontSize:11,color:C.red,fontWeight:700,marginTop:2}}>Stock système: {altItem.stock_negatif||0}</div>
+                      </div>
+
+                      <div style={{marginBottom:14}}>
+                        <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Transactions</div>
+                        <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                          {champs.map(c => (
+                            <div key={c.key} style={{display:'flex',alignItems:'center',gap:8}}>
+                              <div style={{flex:1}}>
+                                <div style={{fontSize:12,fontWeight:600}}>{c.label}</div>
+                                <div style={{fontSize:10,color:sub}}>{c.desc}</div>
+                              </div>
+                              <input type="number" step="any" required
+                                value={altForm[c.key]}
+                                onChange={e=>setForm(prev=>({...prev,[fKey]:{...altForm,[c.key]:e.target.value}}))}
+                                placeholder="0"
+                                style={{...S,width:80,textAlign:'center',padding:'6px 8px'}}/>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:10,padding:'12px 14px',marginBottom:12,border:`1px solid ${C.green}33`}}>
+                        <label style={{fontSize:12,fontWeight:700,color:C.green,display:'block',marginBottom:6}}>📦 Qté réelle sur tablette *</label>
+                        <input type="number" step="any" required value={altForm.qte_reelle}
+                          onChange={e=>setForm(prev=>({...prev,[fKey]:{...altForm,qte_reelle:e.target.value}}))}
+                          placeholder="Compter les unités..."
+                          style={{...S,fontWeight:700,fontSize:15,textAlign:'center'}}/>
+                      </div>
+
+                      {altForm.qte_reelle !== '' && ajustAlt !== null && (
+                        <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:10,padding:'10px 14px',border:`1px solid ${C.blue}33`}}>
+                          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,marginBottom:2}}>Ajustement à faire</div>
+                          <div style={{fontSize:24,fontWeight:900,color:ajustAlt>=0?C.green:C.red}}>
+                            {ajustAlt>=0?'+':''}{ajustAlt.toFixed(0)} unités
+                          </div>
+                          <div style={{fontSize:10,color:sub,marginTop:2}}>
+                            {altForm.qte_reelle} tablette − ({altItem.stock_negatif||0} système + {champs.reduce((s,c)=>s+(parseFloat(altForm[c.key])||0),0).toFixed(0)} transactions)
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Commentaire + boutons */}
+              <div style={{padding:'0 24px 20px 24px'}}>
+                <div style={{marginBottom:16}}>
+                  <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Commentaire (optionnel)</label>
+                  <input value={form.commentaire} onChange={e=>setForm(prev=>({...prev,commentaire:e.target.value}))}
+                    placeholder="Ex: Trouvé en arrière-boutique, donné la pièce alternative au client..." style={S}/>
+                </div>
+                <div style={{display:'flex',gap:10}}>
+                  <button type="button" onClick={()=>{setNoteModal(null);setForm({serv_detail:'',serv_interne:'',serv_gar:'',pce_detail:'',recept_comm:'',dec_physique:'',autre:'',qte_reelle:'',commentaire:''})}}
+                    style={{flex:1,background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'11px 0',cursor:'pointer',color:sub,fontWeight:600}}>Annuler</button>
+                  <button type="submit" disabled={loading||!formComplet()}
+                    style={{flex:2,background:formComplet()?C.green:'#94a3b8',color:'#fff',border:'none',borderRadius:8,padding:'11px 0',fontWeight:700,cursor:formComplet()?'pointer':'not-allowed',fontSize:14}}>
+                    {loading?'Enregistrement...':'✅ Confirmer la vérification'}
+                  </button>
                 </div>
               </div>
-            )}
-
-            {/* Commentaire */}
-            <div style={{marginBottom:20}}>
-              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Commentaire (optionnel)</label>
-              <input value={form.commentaire} onChange={e=>setForm(prev=>({...prev,commentaire:e.target.value}))}
-                placeholder="Ex: Trouvé en arrière-boutique, commande en transit..."
-                style={S}/>
-            </div>
-
-            <div style={{display:'flex',gap:10}}>
-              <button type="button" onClick={()=>{setNoteModal(null);setForm({serv_detail:'',serv_interne:'',serv_gar:'',pce_detail:'',recept_comm:'',dec_physique:'',autre:'',qte_reelle:'',commentaire:''})}}
-                style={{flex:1,background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'11px 0',cursor:'pointer',color:sub,fontWeight:600}}>Annuler</button>
-              <button type="submit" disabled={loading||!formComplet()}
-                style={{flex:2,background:formComplet()?C.green:'#94a3b8',color:'#fff',border:'none',borderRadius:8,padding:'11px 0',fontWeight:700,cursor:formComplet()?'pointer':'not-allowed',fontSize:14}}>
-                {loading?'Enregistrement...':'✅ Confirmer la vérification'}
-              </button>
-            </div>
-          </form>
+            </form>
+          </div>
         </div>
-      </div>
-    )}
+      )
+    })()}
 
     {/* Sous-onglets */}
+    <    {/* Sous-onglets */}
     <div style={{display:'flex',gap:8,marginBottom:14}}>
       <button onClick={()=>setSousOnglet('actif')} style={{padding:'7px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='actif'?C.red:bdr}`,background:sousOnglet==='actif'?C.red+'22':'transparent',color:sousOnglet==='actif'?C.red:sub,fontSize:12,fontWeight:700,cursor:'pointer'}}>
         🔴 À vérifier ({negsActifs.length})
