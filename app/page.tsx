@@ -1459,7 +1459,9 @@ function BookingTab({data,dark,card,bdr,sub,thBg,S,alts}: any) {
 
 function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVerifies, setNegsVerifies, profil}: any) {
   const [filtFourn, setFiltFourn] = useState('ALL')
-  const [filtLigne, setFiltLigne] = useState('ALL')
+  const [filtLignes, setFiltLignes] = useState<string[]>([])
+  const [ddLigneOpen, setDdLigneOpen] = useState(false)
+  const ddLigneRef = useRef<HTMLDivElement>(null)
   const [sousOnglet, setSousOnglet] = useState<'actif'|'verifie'>('actif')
   const [noteModal, setNoteModal] = useState<any>(null)
   const [noteTexte, setNoteTexte] = useState('')
@@ -1486,7 +1488,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
   const negsActifs = negsUniques.filter((n:any) => !codesVerifies.has(n.code_piece))
   const filtered = negsActifs.filter((n: any) => {
     if (filtFourn !== 'ALL' && n.fournisseur !== filtFourn) return false
-    if (filtLigne !== 'ALL' && n.ligne !== filtLigne) return false
+    if (filtLignes.length > 0 && !filtLignes.includes(n.ligne)) return false
     return true
   }).sort((a: any, b: any) => Math.abs(b.stock_negatif * b.cout_unitaire) - Math.abs(a.stock_negatif * a.cout_unitaire))
 
@@ -1560,16 +1562,36 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
             {fournisseurs.map((f:string)=><option key={f} value={f}>{f} ({negsActifs.filter((n:any)=>n.fournisseur===f).length})</option>)}
           </select>
         </div>
-        <div style={{flex:1,minWidth:140}}>
-          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Ligne</div>
-          <select value={filtLigne} onChange={e=>setFiltLigne(e.target.value)} style={S}>
-            <option value="ALL">Toutes</option>
-            {lignes.map((l:string)=><option key={l} value={l}>{l}</option>)}
-          </select>
+        <div style={{flex:1.2,minWidth:160}} ref={ddLigneRef}>
+          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>
+            Lignes {filtLignes.length>0&&<span style={{color:C.blue}}>({filtLignes.length})</span>}
+          </div>
+          <div style={{position:'relative'}}>
+            <button onClick={()=>setDdLigneOpen(!ddLigneOpen)} style={{...S,display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer',textAlign:'left'}}>
+              <span style={{fontSize:13}}>{filtLignes.length===0?'Toutes':filtLignes.length===1?filtLignes[0]:`${filtLignes.length} sélectionnées`}</span>
+              <span style={{fontSize:10}}>{ddLigneOpen?'▲':'▼'}</span>
+            </button>
+            {ddLigneOpen && (
+              <div style={{position:'absolute',top:'105%',left:0,right:0,background:card,border:`1px solid ${bdr}`,borderRadius:8,zIndex:500,boxShadow:'0 4px 16px rgba(0,0,0,.15)',maxHeight:220,overflowY:'auto'}}>
+                <div style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:11,color:sub}}>Sélectionner lignes</span>
+                  {filtLignes.length>0&&<button onClick={()=>setFiltLignes([])} style={{fontSize:11,color:C.red,background:'none',border:'none',cursor:'pointer',padding:0}}>Tout décocher</button>}
+                </div>
+                {lignes.map((l:string)=>(
+                  <label key={l} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 12px',cursor:'pointer',fontSize:13,borderBottom:`1px solid ${dark?'#222':'#f5f5f5'}`}}
+                    onMouseEnter={e=>(e.currentTarget.style.background=hvr)}
+                    onMouseLeave={e=>(e.currentTarget.style.background='transparent')}>
+                    <input type="checkbox" checked={filtLignes.includes(l)} onChange={()=>setFiltLignes(prev=>prev.includes(l)?prev.filter(x=>x!==l):[...prev,l])} style={{accentColor:C.blue}}/>
+                    {l}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-        <div style={{flex:1,minWidth:160,display:'flex',alignItems:'center',gap:10}}>
-          {(filtFourn!=='ALL'||filtLigne!=='ALL') && (
-            <button onClick={()=>{setFiltFourn('ALL');setFiltLigne('ALL')}} style={{background:'none',border:`1px solid ${bdr}`,borderRadius:6,padding:'6px 12px',fontSize:12,color:sub,cursor:'pointer'}}>Réinitialiser</button>
+        <div style={{flex:1,minWidth:140,display:'flex',alignItems:'center',gap:10}}>
+          {(filtFourn!=='ALL'||filtLignes.length>0) && (
+            <button onClick={()=>{setFiltFourn('ALL');setFiltLignes([]);setDdLigneOpen(false)}} style={{background:'none',border:`1px solid ${bdr}`,borderRadius:6,padding:'6px 12px',fontSize:12,color:sub,cursor:'pointer'}}>Réinitialiser</button>
           )}
         </div>
         <div style={{background:dark?'#2b1113':'#fce8e6',border:`2px solid ${C.red}`,borderRadius:10,padding:'10px 18px',textAlign:'right',minWidth:200}}>
