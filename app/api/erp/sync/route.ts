@@ -161,7 +161,18 @@ export async function POST() {
     for (let i = 0; i < negAvecDates.length; i += 500)
       await supabaseAdmin.from('memoire_negatifs').insert(negAvecDates.slice(i, i + 500))
 
-    // 10. Recalcul cache
+    // 10. Remettre dans "À vérifier" les pièces encore négatives
+    const codesNegatifsAujourd = new Set(nouveauxNegatifs.map((n: any) => n.code_piece))
+    const { data: verifiesExistants } = await supabaseAdmin.from('negatifs_verifies').select('id, code_piece')
+    const aRetablir = (verifiesExistants || []).filter((v: any) => codesNegatifsAujourd.has(v.code_piece))
+    if (aRetablir.length > 0) {
+      for (const v of aRetablir) {
+        await supabaseAdmin.from('negatifs_verifies').delete().eq('id', v.id)
+      }
+      log.push(`${aRetablir.length} pièces vérifiées remises en "À vérifier" (encore négatives)`)
+    }
+
+    // 11. Recalcul cache
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
     try { await fetch(`${baseUrl}/api/calculateur/recalculer`, { method: 'POST' }) } catch {}
 
