@@ -547,7 +547,7 @@ export default function Dashboard() {
         {tab==='booking' && <BookingTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} alts={alts}/>}
 
         {/* ── NÉGATIFS ────────────────────────────────────────────── */}
-        {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts} negsVerifies={negsVerifies} setNegsVerifies={setNegsVerifies} profil={profil}/>}
+        {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts} negsVerifies={negsVerifies} setNegsVerifies={setNegsVerifies} profil={profil} data={data}/>}
         {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts} fournituresData={fournituresData} setFournituresData={setFournituresData} profil={profil}/>}
         {tab==='utilisateurs' && <UtilisateursTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
         {tab==='fournitures' && <FournituresTab fournituresData={fournituresData} setFournituresData={setFournituresData} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} data={data} profil={profil}/>}
@@ -1457,7 +1457,7 @@ function BookingTab({data,dark,card,bdr,sub,thBg,S,alts}: any) {
   </div>
 }
 
-function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVerifies, setNegsVerifies, profil}: any) {
+function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVerifies, setNegsVerifies, profil, data}: any) {
   const [filtFourn, setFiltFourn] = useState('ALL')
   const [filtLignes, setFiltLignes] = useState<string[]>([])
   const [ddLigneOpen, setDdLigneOpen] = useState(false)
@@ -1605,10 +1605,16 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     {noteModal && (() => {
       // Chercher les alternatives de la pièce
       const altCodes: string[] = (alts && alts.get && alts.get(noteModal.code_piece)) || []
+      const allItems: any[] = data?.liste_complete || []
       const altItems = altCodes.map((ac:string) => {
         const norm = (s:string) => s.trim().toLowerCase().replace(/\s+/g,'')
-        return (negs||[]).find((n:any) => norm(n.code_piece) === norm(ac))
-      }).filter(Boolean)
+        // Chercher d'abord dans les négatifs, sinon dans liste_complete
+        const inNegs = (negs||[]).find((n:any) => norm(n.code_piece) === norm(ac))
+        if (inNegs) return inNegs
+        const inAll = allItems.find((n:any) => norm(n.pk) === norm(ac))
+        if (inAll) return { code_piece: inAll.pk, description: inAll.desc, stock_negatif: inAll.stock, fournisseur: inAll.fournisseur }
+        return { code_piece: ac, description: ac, stock_negatif: 0, fournisseur: '' }
+      })
 
       const champs = [
         {key:'serv_detail', label:'Serv. détail', desc:'Ventes débitées service détail'},
@@ -1627,7 +1633,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
       }
 
       const ajustPrincipal = calcAjust(Number(noteModal.stock_negatif), form)
-      const hasAlt = altItems.length > 0
+      const hasAlt = altCodes.length > 0
 
       return (
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.75)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
