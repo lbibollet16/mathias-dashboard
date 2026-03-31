@@ -1,5 +1,18 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import { createClient } from '@supabase/supabase-js'
+
+const supabaseCli = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
+
+const ROLES_ONGLETS: Record<string, string[]> = {
+  admin:      ['calc','import','booking','retours','negatifs','commandes','fournitures','utilisateurs'],
+  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','fournitures'],
+  commis:     ['commandes','fournitures'],
+  employe_piece: ['fournitures','negatifs'],
+}
 
 interface Item {
   pk: string; desc: string; moyMois: number
@@ -68,7 +81,31 @@ export default function Dashboard() {
 
   useEffect(() => {
     try { if (localStorage.getItem('dk')==='1') setDark(true) } catch {}
-    fetchAll()
+
+    // Vérifier la session
+    supabaseCli.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) {
+        window.location.href = '/login'
+        return
+      }
+      setUser(session.user)
+      // Charger le profil
+      const { data: p } = await supabaseCli
+        .from('profils_utilisateurs')
+        .select('*')
+        .eq('id', session.user.id)
+        .single()
+      setProfil(p)
+      setAuthLoading(false)
+      fetchAll()
+    })
+
+    // Écouter les changements de session
+    const { data: { subscription } } = supabaseCli.auth.onAuthStateChange(async (event, session) => {
+      if (!session) { window.location.href = '/login'; return }
+      if (event === 'SIGNED_OUT') { window.location.href = '/login' }
+    })
+    return () => subscription.unsubscribe()
     // Fermer dropdown en cliquant ailleurs
     const h = (e: MouseEvent) => { if (ddRef.current && !ddRef.current.contains(e.target as Node)) setDdOpen(false) }
     document.addEventListener('mousedown', h)
@@ -223,6 +260,15 @@ export default function Dashboard() {
   }
 
   // ─────────────────────────────────────────────────────────────────────
+  if (authLoading) return (
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'#0f172a',fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{textAlign:'center',color:'#fff'}}>
+        <div style={{fontSize:48,marginBottom:16}}>⚓</div>
+        <p style={{color:'#94a3b8',fontSize:14}}>Chargement en cours...</p>
+      </div>
+    </div>
+  )
+
   return (
     <div style={{minHeight:'100vh',background:bg,color:txt,fontFamily:"'DM Sans','Segoe UI',sans-serif",transition:'background .2s'}}>
 
@@ -240,7 +286,7 @@ export default function Dashboard() {
 
       {/* TABS */}
       <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,padding:'0 20px',display:'flex'}}>
-        {[{id:'calc',l:'Calculateur Achats'},{id:'import',l:'Importer Ventes'},{id:'retours',l:'Retours RMA'},{id:'booking',l:'Booking'},{id:'negatifs',l:'Pièces Négatives',d:true},{id:'commandes',l:'📋 Commandes du Jour'},{id:'fournitures',l:'💡 Suggestions'}].map(t=>(
+        {[{id:'calc',l:'Calculateur Achats'},{id:'import',l:'Importer Ventes'},{id:'retours',l:'Retours RMA'},{id:'booking',l:'Booking'},{id:'negatifs',l:'Pièces Négatives',d:true},{id:'commandes',l:'📋 Commandes du Jour'},{id:'fournitures',l:'💡 Suggestions'},{id:'utilisateurs',l:'👥 Utilisateurs'}].filter(t=>(ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis']).includes(t.id)).map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:'12px 16px',border:'none',background:'transparent',cursor:'pointer',fontSize:13,fontWeight:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',transition:'all .15s'}}>
             {t.l}
           </button>
@@ -495,6 +541,7 @@ export default function Dashboard() {
         {/* ── NÉGATIFS ────────────────────────────────────────────── */}
         {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts}/>}
         {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts} fournituresData={fournituresData} setFournituresData={setFournituresData}/>}
+        {tab==='utilisateurs' && <UtilisateursTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
         {tab==='fournitures' && <FournituresTab fournituresData={fournituresData} setFournituresData={setFournituresData} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} data={data}/>}
       </div>
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-thumb{background:${dark?'#444':'#ccc'};border-radius:3px}`}</style>
@@ -1122,6 +1169,192 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
             </div>
         }
       </div>
+    </div>
+  </>
+}
+
+// ── Utilisateurs Tab ─────────────────────────────────────────────────────────
+function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
+  const [users, setUsers] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showInvite, setShowInvite] = useState(false)
+  const [invEmail, setInvEmail] = useState('')
+  const [invNom, setInvNom] = useState('')
+  const [invRole, setInvRole] = useState('commis')
+  const [invLoading, setInvLoading] = useState(false)
+  const [msgOk, setMsgOk] = useState('')
+  const [erreur, setErreur] = useState('')
+
+  const ROLES = [
+    {val:'admin', label:'Admin', desc:'Accès complet + gestion utilisateurs', color:C.red},
+    {val:'gestionnaire', label:'Gestionnaire', desc:'Tous les onglets sauf utilisateurs', color:C.blue},
+    {val:'commis', label:'Commis', desc:'Commandes du Jour + Suggestions', color:C.green},
+    {val:'employe_piece', label:'Employé pièce', desc:'Suggestions + Pièces Négatives', color:C.yellow},
+  ]
+
+  useEffect(() => { chargerUsers() }, [])
+
+  async function chargerUsers() {
+    setLoading(true)
+    const r = await fetch('/api/auth/users')
+    if (r.ok) setUsers(await r.json())
+    setLoading(false)
+  }
+
+  async function inviter(e: any) {
+    e.preventDefault()
+    setInvLoading(true); setErreur('')
+    const r = await fetch('/api/auth/invite', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ email: invEmail, nom: invNom, role: invRole })
+    })
+    const j = await r.json()
+    if (j.erreur) setErreur(j.erreur)
+    else {
+      setMsgOk(`✅ Invitation envoyée à ${invEmail}`)
+      setInvEmail(''); setInvNom(''); setInvRole('commis')
+      setShowInvite(false)
+      await chargerUsers()
+      setTimeout(() => setMsgOk(''), 4000)
+    }
+    setInvLoading(false)
+  }
+
+  async function changerRole(id: string, role: string) {
+    await fetch('/api/auth/users', { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id, role }) })
+    await chargerUsers()
+  }
+
+  async function toggleActif(id: string, actif: boolean) {
+    await fetch('/api/auth/users', { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id, actif }) })
+    await chargerUsers()
+  }
+
+  async function supprimer(id: string, nom: string) {
+    if (!confirm(`Supprimer ${nom} ?`)) return
+    await fetch('/api/auth/users', { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id }) })
+    await chargerUsers()
+  }
+
+  return <>
+    {/* Modal invitation */}
+    {showInvite && (
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <div style={{background:card,borderRadius:16,padding:32,width:480,border:`1px solid ${bdr}`,boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+          <h3 style={{margin:'0 0 6px',fontSize:18}}>📧 Inviter un utilisateur</h3>
+          <p style={{color:sub,fontSize:13,margin:'0 0 20px'}}>Un email d'invitation sera envoyé automatiquement.</p>
+          {erreur && <div style={{background:C.red+'22',border:`1px solid ${C.red}`,borderRadius:8,padding:'8px 12px',marginBottom:12,color:C.red,fontSize:13}}>{erreur}</div>}
+          <form onSubmit={inviter}>
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Nom complet *</label>
+              <input value={invNom} onChange={e=>setInvNom(e.target.value)} placeholder="Ex: Marie Tremblay" required style={S}/>
+            </div>
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Email *</label>
+              <input type="email" value={invEmail} onChange={e=>setInvEmail(e.target.value)} placeholder="marie@mathiasmarine.com" required style={S}/>
+            </div>
+            <div style={{marginBottom:20}}>
+              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:8}}>Rôle *</label>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {ROLES.map(r => (
+                  <label key={r.val} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',borderRadius:10,border:`2px solid ${invRole===r.val?r.color:bdr}`,cursor:'pointer',background:invRole===r.val?r.color+'11':'transparent'}}>
+                    <input type="radio" name="role" value={r.val} checked={invRole===r.val} onChange={()=>setInvRole(r.val)} style={{accentColor:r.color}}/>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:13,color:invRole===r.val?r.color:'inherit'}}>{r.label}</div>
+                      <div style={{fontSize:11,color:sub}}>{r.desc}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div style={{display:'flex',gap:10}}>
+              <button type="button" onClick={()=>{setShowInvite(false);setErreur('')}} style={{flex:1,background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 0',cursor:'pointer',color:sub,fontWeight:600}}>Annuler</button>
+              <button type="submit" disabled={invLoading} style={{flex:2,background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 0',fontWeight:700,cursor:'pointer',fontSize:14}}>
+                {invLoading ? 'Envoi...' : '📧 Envoyer l'invitation'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )}
+
+    {/* Header */}
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,flexWrap:'wrap',gap:10}}>
+      <div>
+        <h2 style={{margin:0,fontSize:20,fontWeight:800}}>👥 Gestion des utilisateurs</h2>
+        <p style={{color:sub,fontSize:13,margin:'4px 0 0'}}>{users.length} utilisateur{users.length>1?'s':''}</p>
+      </div>
+      <button onClick={()=>setShowInvite(true)} style={{background:C.blue,color:'#fff',border:'none',borderRadius:10,padding:'10px 20px',fontSize:14,fontWeight:700,cursor:'pointer'}}>
+        + Inviter un utilisateur
+      </button>
+    </div>
+
+    {msgOk && <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}`,borderRadius:10,padding:'12px 16px',marginBottom:16,color:C.green,fontWeight:700}}>{msgOk}</div>}
+
+    {/* Tableau utilisateurs */}
+    <div style={{background:card,borderRadius:14,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+      {loading
+        ? <div style={{textAlign:'center',padding:60,color:sub}}>Chargement...</div>
+        : users.length === 0
+          ? <div style={{textAlign:'center',padding:60,color:sub}}>
+              <div style={{fontSize:40,marginBottom:10}}>👥</div>
+              <p>Aucun utilisateur — invite le premier !</p>
+            </div>
+          : <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+              <thead><tr style={{background:thBg}}>
+                <th style={{padding:'12px 16px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Nom</th>
+                <th style={{padding:'12px 16px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Email</th>
+                <th style={{padding:'12px 16px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Rôle</th>
+                <th style={{padding:'12px 16px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Statut</th>
+                <th style={{padding:'12px 16px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Actions</th>
+              </tr></thead>
+              <tbody>
+                {users.map((u:any) => {
+                  const roleInfo = ROLES.find(r=>r.val===u.role) || ROLES[2]
+                  return (
+                    <tr key={u.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                      <td style={{padding:'12px 16px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{u.nom}</td>
+                      <td style={{padding:'12px 16px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{u.email}</td>
+                      <td style={{padding:'12px 16px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                        <select value={u.role} onChange={e=>changerRole(u.id,e.target.value)}
+                          style={{...S,fontSize:12,padding:'4px 8px',border:`1px solid ${roleInfo.color}`,color:roleInfo.color,fontWeight:700,background:'transparent',borderRadius:8,cursor:'pointer'}}>
+                          {ROLES.map(r=><option key={r.val} value={r.val}>{r.label}</option>)}
+                        </select>
+                      </td>
+                      <td style={{padding:'12px 16px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                        <span style={{background:u.actif?C.green+'22':C.red+'22',color:u.actif?C.green:C.red,padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:700}}>
+                          {u.actif?'✅ Actif':'🚫 Inactif'}
+                        </span>
+                      </td>
+                      <td style={{padding:'12px 16px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                        <div style={{display:'flex',gap:6,justifyContent:'center'}}>
+                          <button onClick={()=>toggleActif(u.id,!u.actif)}
+                            style={{background:u.actif?C.yellow+'22':C.green+'22',color:u.actif?C.yellow:C.green,border:'none',borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}}>
+                            {u.actif?'Désactiver':'Activer'}
+                          </button>
+                          <button onClick={()=>supprimer(u.id,u.nom)}
+                            style={{background:C.red+'22',color:C.red,border:'none',borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}}>
+                            Supprimer
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+      }
+    </div>
+
+    {/* Légende des rôles */}
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:10,marginTop:16}}>
+      {ROLES.map(r=>(
+        <div key={r.val} style={{background:card,borderRadius:10,padding:'12px 16px',border:`1px solid ${r.color}22`}}>
+          <div style={{fontWeight:700,fontSize:13,color:r.color,marginBottom:4}}>{r.label}</div>
+          <div style={{fontSize:12,color:sub}}>{r.desc}</div>
+        </div>
+      ))}
     </div>
   </>
 }
