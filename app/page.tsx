@@ -1778,7 +1778,6 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     })()}
 
     {/* Sous-onglets */}
-    <    {/* Sous-onglets */}
     <div style={{display:'flex',gap:8,marginBottom:14}}>
       <button onClick={()=>setSousOnglet('actif')} style={{padding:'7px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='actif'?C.red:bdr}`,background:sousOnglet==='actif'?C.red+'22':'transparent',color:sousOnglet==='actif'?C.red:sub,fontSize:12,fontWeight:700,cursor:'pointer'}}>
         🔴 À vérifier ({negsActifs.length})
