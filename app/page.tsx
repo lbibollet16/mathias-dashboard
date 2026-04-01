@@ -1268,9 +1268,9 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         : []
 
       if (autresLocs.length > 0) {
-        setErreur('🚫 Pièce "' + code + '" n'est pas dans la localisation ' + locActive.loc + '. Mettre à la bonne place : ' + autresLocs.join(', '))
+        setErreur(`🚫 Piece "${code}" pas dans localisation ${locActive.loc}. Bonne place: ${autresLocs.join(', ')}`)
       } else {
-        setErreur('⚠️ Pièce "' + code + '" n'a pas de localisation assignée. Entre la localisation manuellement dans le système.')
+        setErreur(`⚠️ Piece "${code}" sans localisation assignee. Entrer manuellement.`)
       }
       sonErreur()
       setPieceInput('')
