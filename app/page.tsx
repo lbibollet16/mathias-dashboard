@@ -8,8 +8,8 @@ const supabaseCli = createClient(
 )
 
 const ROLES_ONGLETS: Record<string, string[]> = {
-  admin:      ['calc','import','booking','retours','negatifs','commandes','fournitures','utilisateurs'],
-  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','fournitures'],
+  admin:      ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','utilisateurs'],
+  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire'],
   commis:     ['commandes','fournitures'],
   employe_piece: ['fournitures','negatifs'],
 }
@@ -312,7 +312,7 @@ export default function Dashboard() {
 
       {/* TABS */}
       <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,padding:'0 20px',display:'flex'}}>
-        {[{id:'calc',l:'Calculateur Achats'},{id:'import',l:'Importer Ventes'},{id:'retours',l:'Retours RMA'},{id:'booking',l:'Booking'},{id:'negatifs',l:'Pièces Négatives',d:true},{id:'commandes',l:'📋 Commandes du Jour'},{id:'fournitures',l:'💡 Suggestions'},{id:'utilisateurs',l:'👥 Utilisateurs'}].filter(t=>(ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis']).includes(t.id)).map(t=>(
+        {[{id:'calc',l:'Calculateur Achats'},{id:'import',l:'Importer Ventes'},{id:'retours',l:'Retours RMA'},{id:'booking',l:'Booking'},{id:'negatifs',l:'Pièces Négatives',d:true},{id:'commandes',l:'📋 Commandes du Jour'},{id:'fournitures',l:'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire Cyclique'},{id:'utilisateurs',l:'👥 Utilisateurs'}].filter(t=>(ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis']).includes(t.id)).map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:'12px 16px',border:'none',background:'transparent',cursor:'pointer',fontSize:13,fontWeight:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',transition:'all .15s'}}>
             {t.l}
           </button>
@@ -567,6 +567,7 @@ export default function Dashboard() {
         {/* ── NÉGATIFS ────────────────────────────────────────────── */}
         {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts} negsVerifies={negsVerifies} setNegsVerifies={setNegsVerifies} profil={profil} data={data}/>}
         {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts} fournituresData={fournituresData} setFournituresData={setFournituresData} profil={profil}/>}
+        {tab==='inventaire' && <InventaireTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
         {tab==='utilisateurs' && <UtilisateursTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
         {tab==='fournitures' && <FournituresTab fournituresData={fournituresData} setFournituresData={setFournituresData} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} data={data} profil={profil}/>}
       </div>
@@ -1161,6 +1162,340 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
         }
       </div>
     </div>
+  </>
+}
+
+// ── Inventaire Cyclique Tab ───────────────────────────────────────────────────
+function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
+  const employe = profil?.nom || profil?.email || 'Inconnu'
+  const [sousOnglet, setSousOnglet] = useState<'compter'|'rapport'>('compter')
+
+  // Import
+  const [importFile, setImportFile] = useState<File|null>(null)
+  const [importStatus, setImportStatus] = useState('')
+  const [importLoading, setImportLoading] = useState(false)
+
+  // Scan / recherche
+  const [locInput, setLocInput] = useState('')
+  const [locRecherchee, setLocRecherchee] = useState('')
+  const [pieces, setPieces] = useState<any[]>([])
+  const [stockTraction, setStockTraction] = useState<Map<string,{stock:number,reserve:number}>>(new Map())
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [qtesComptees, setQtesComptees] = useState<Record<string,string>>({})
+  const [notes, setNotes] = useState<Record<string,string>>({})
+  const [saving, setSaving] = useState<string|null>(null)
+  const [savedPieces, setSavedPieces] = useState<Set<string>>(new Set())
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // Rapport
+  const [comptages, setComptages] = useState<any[]>([])
+  const [filtDate, setFiltDate] = useState('')
+  const [filtEmploye, setFiltEmploye] = useState('ALL')
+  const [filtEcart, setFiltEcart] = useState('ALL')
+
+  useEffect(() => {
+    if (sousOnglet === 'rapport') chargerComptages()
+  }, [sousOnglet])
+
+  async function importerLocalisations(e: any) {
+    e.preventDefault()
+    if (!importFile) return
+    setImportLoading(true); setImportStatus('')
+    const fd = new FormData()
+    fd.append('file', importFile)
+    const r = await fetch('/api/inventaire/import', { method: 'POST', body: fd })
+    const j = await r.json()
+    if (j.success) setImportStatus(`✅ ${j.total} pièces importées`)
+    else setImportStatus(`❌ ${j.erreur}`)
+    setImportLoading(false)
+    setImportFile(null)
+  }
+
+  async function rechercherLocalisation(e?: any) {
+    if (e) e.preventDefault()
+    if (!locInput.trim()) return
+    setSearchLoading(true)
+    const loc = locInput.trim()
+    setLocRecherchee(loc)
+    setPieces([])
+    setQtesComptees({})
+    setNotes({})
+    setSavedPieces(new Set())
+
+    // Charger pièces depuis Supabase
+    const r = await fetch(`/api/inventaire/localisations?loc=${encodeURIComponent(loc)}`)
+    const data = await r.json()
+    setPieces(Array.isArray(data) ? data : [])
+
+    // Charger stock depuis Traction
+    if (Array.isArray(data) && data.length > 0) {
+      const r2 = await fetch(`/api/inventaire/stock?codes=${data.map((p:any)=>p.code_piece).join(',')}`)
+      if (r2.ok) {
+        const stocks = await r2.json()
+        const map = new Map<string,{stock:number,reserve:number}>()
+        for (const s of stocks) map.set(s.code_piece, { stock: s.stock, reserve: s.reserve })
+        setStockTraction(map)
+      }
+    }
+    setSearchLoading(false)
+    setTimeout(() => inputRef.current?.focus(), 100)
+  }
+
+  async function sauvegarderComptage(piece: any) {
+    const qte = qtesComptees[piece.code_piece]
+    if (qte === undefined || qte === '') return
+    setSaving(piece.code_piece)
+    const stockInfo = stockTraction.get(piece.code_piece)
+    const qteSysteme = (stockInfo?.stock || 0) + (stockInfo?.reserve || 0)
+    await fetch('/api/inventaire/comptages', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        code_piece: piece.code_piece,
+        localisation: locRecherchee,
+        qte_comptee: parseFloat(qte),
+        qte_systeme: qteSysteme,
+        qte_reservee: stockInfo?.reserve || 0,
+        employe,
+        note: notes[piece.code_piece] || null
+      })
+    })
+    setSavedPieces(prev => new Set([...prev, piece.code_piece]))
+    setSaving(null)
+  }
+
+  async function sauvegarderTous() {
+    for (const piece of pieces) {
+      if (qtesComptees[piece.code_piece] !== undefined && qtesComptees[piece.code_piece] !== '') {
+        await sauvegarderComptage(piece)
+      }
+    }
+  }
+
+  async function chargerComptages() {
+    const r = await fetch('/api/inventaire/comptages')
+    if (r.ok) setComptages(await r.json())
+  }
+
+  const employes = Array.from(new Set(comptages.map((c:any) => c.employe))).sort() as string[]
+  const comptagesFiltres = comptages.filter((c:any) => {
+    if (filtDate && !c.date_comptage.startsWith(filtDate)) return false
+    if (filtEmploye !== 'ALL' && c.employe !== filtEmploye) return false
+    if (filtEcart === 'ecart' && c.ecart === 0) return false
+    if (filtEcart === 'ok' && c.ecart !== 0) return false
+    return true
+  })
+  const nbEcarts = comptagesFiltres.filter((c:any) => c.ecart !== 0).length
+
+  return <>
+    {/* Sous-onglets */}
+    <div style={{display:'flex',gap:8,marginBottom:16}}>
+      <button onClick={()=>setSousOnglet('compter')} style={{padding:'8px 18px',borderRadius:20,border:`2px solid ${sousOnglet==='compter'?C.blue:bdr}`,background:sousOnglet==='compter'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='compter'?C.blue:sub,fontSize:13,fontWeight:700,cursor:'pointer'}}>
+        📦 Compter
+      </button>
+      <button onClick={()=>setSousOnglet('rapport')} style={{padding:'8px 18px',borderRadius:20,border:`2px solid ${sousOnglet==='rapport'?C.blue:bdr}`,background:sousOnglet==='rapport'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='rapport'?C.blue:sub,fontSize:13,fontWeight:700,cursor:'pointer'}}>
+        📊 Rapport
+      </button>
+    </div>
+
+    {sousOnglet === 'compter' ? <>
+      {/* Import fichier localisations */}
+      <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'16px 20px',marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>📥 Importer fichier localisations</div>
+        <form onSubmit={importerLocalisations} style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
+          <input type="file" accept=".xlsx,.xls" onChange={e=>setImportFile(e.target.files?.[0]||null)}
+            style={{...S,flex:2,minWidth:200}}/>
+          <button type="submit" disabled={!importFile||importLoading}
+            style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 18px',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+            {importLoading?'Import...':'📥 Importer'}
+          </button>
+          {importStatus && <span style={{fontSize:13,color:importStatus.startsWith('✅')?C.green:C.red,fontWeight:600}}>{importStatus}</span>}
+        </form>
+        <div style={{fontSize:11,color:sub,marginTop:6}}>⚠️ L'import va remplacer toutes les localisations existantes</div>
+      </div>
+
+      {/* Scan localisation */}
+      <div style={{background:card,borderRadius:12,border:`2px solid ${C.blue}`,padding:'16px 20px',marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:700,color:C.blue,marginBottom:10}}>🔍 Scanner / Entrer une localisation</div>
+        <form onSubmit={rechercherLocalisation} style={{display:'flex',gap:10}}>
+          <input ref={inputRef} value={locInput} onChange={e=>setLocInput(e.target.value)}
+            placeholder="Ex: A-12-3, scan code-barres..."
+            style={{...S,flex:1,fontSize:15,fontWeight:700,border:`2px solid ${C.blue}`}} autoFocus/>
+          <button type="submit" disabled={searchLoading}
+            style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 20px',fontWeight:700,cursor:'pointer',fontSize:14}}>
+            {searchLoading?'...':'Chercher'}
+          </button>
+        </form>
+      </div>
+
+      {/* Résultats */}
+      {locRecherchee && (
+        <div>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:10}}>
+            <div>
+              <strong style={{fontSize:16}}>📍 {locRecherchee}</strong>
+              <span style={{marginLeft:10,fontSize:13,color:sub}}>{pieces.length} pièce{pieces.length>1?'s':''}</span>
+              <span style={{marginLeft:10,fontSize:13,color:sub}}>👤 {employe}</span>
+            </div>
+            {pieces.length > 0 && (
+              <button onClick={sauvegarderTous} style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 18px',fontWeight:700,cursor:'pointer',fontSize:13}}>
+                ✅ Sauvegarder tout
+              </button>
+            )}
+          </div>
+
+          {pieces.length === 0
+            ? <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,textAlign:'center',padding:60,color:sub}}>
+                <div style={{fontSize:32,marginBottom:10}}>🔍</div>
+                <p>Aucune pièce trouvée pour <strong>{locRecherchee}</strong></p>
+              </div>
+            : <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                  <thead><tr style={{background:thBg}}>
+                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Code Pièce</th>
+                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Description</th>
+                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Localisations</th>
+                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Stock système</th>
+                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.yellow,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Réservé</th>
+                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`2px solid ${bdr}`,textAlign:'center',background:dark?'#0d2a18':'#e6f4ea'}}>Qté comptée</th>
+                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Écart</th>
+                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Note</th>
+                    <th style={{padding:'10px 12px',borderBottom:`2px solid ${bdr}`}}></th>
+                  </tr></thead>
+                  <tbody>
+                    {pieces.map((p:any) => {
+                      const stockInfo = stockTraction.get(p.code_piece)
+                      const stockSys = (stockInfo?.stock || 0) + (stockInfo?.reserve || 0)
+                      const reserve = stockInfo?.reserve || 0
+                      const qteC = qtesComptees[p.code_piece]
+                      const ecart = qteC !== undefined && qteC !== '' ? parseFloat(qteC) - stockSys : null
+                      const isSaved = savedPieces.has(p.code_piece)
+                      const locs = [p.localisation1,p.localisation2,p.localisation3,p.localisation4].filter(Boolean)
+                      return (
+                        <tr key={p.code_piece} style={{background:isSaved?(dark?'#0d2a18':'#f0fff4'):'transparent'}}
+                          onMouseEnter={e=>e.currentTarget.style.background=isSaved?(dark?'#0f3020':'#e6f4ea'):hvr}
+                          onMouseLeave={e=>e.currentTarget.style.background=isSaved?(dark?'#0d2a18':'#f0fff4'):'transparent'}>
+                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace',fontSize:12}}>{p.code_piece}</td>
+                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,color:sub,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={p.description}>{p.description}</td>
+                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                            <div style={{display:'flex',gap:4,flexWrap:'wrap',justifyContent:'center'}}>
+                              {locs.map((l:string,i:number)=>(
+                                <span key={i} style={{background:l===locRecherchee?(dark?'#1a233a':'#e8f0fe'):dark?'#333':'#e2e8f0',color:l===locRecherchee?C.blue:sub,padding:'2px 6px',borderRadius:4,fontSize:11,fontWeight:600}}>{l}</span>
+                              ))}
+                            </div>
+                          </td>
+                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700,color:stockSys<0?C.red:'inherit'}}>{stockSys}</td>
+                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.yellow,fontWeight:600}}>{reserve>0?`+${reserve}`:reserve}</td>
+                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',background:dark?'#0d2a18':'#e6f4ea'}}>
+                            <input type="number" step="any" value={qteC||''}
+                              onChange={e=>setQtesComptees(prev=>({...prev,[p.code_piece]:e.target.value}))}
+                              placeholder="0"
+                              style={{width:70,padding:'5px 8px',borderRadius:6,border:`1px solid ${bdr}`,background:dark?'#1a1a1a':'#fff',color:'inherit',textAlign:'center',fontWeight:700,fontSize:14}}
+                              onKeyDown={e=>{if(e.key==='Enter'){sauvegarderComptage(p)}}}/>
+                          </td>
+                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700,color:ecart===null?sub:ecart===0?C.green:C.red}}>
+                            {ecart===null?'—':ecart>0?`+${ecart}`:ecart}
+                          </td>
+                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`}}>
+                            <input value={notes[p.code_piece]||''} onChange={e=>setNotes(prev=>({...prev,[p.code_piece]:e.target.value}))}
+                              placeholder="Note..."
+                              style={{width:120,padding:'4px 8px',borderRadius:6,border:`1px solid ${bdr}`,background:dark?'#1a1a1a':'#fff',color:'inherit',fontSize:12}}/>
+                          </td>
+                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                            {isSaved
+                              ? <span style={{color:C.green,fontSize:12,fontWeight:700}}>✅</span>
+                              : <button onClick={()=>sauvegarderComptage(p)} disabled={saving===p.code_piece||qteC===undefined||qteC===''}
+                                  style={{background:qteC?C.blue:'#94a3b8',color:'#fff',border:'none',borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:700,cursor:qteC?'pointer':'not-allowed'}}>
+                                  {saving===p.code_piece?'...':'💾'}
+                                </button>
+                            }
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+          }
+        </div>
+      )}
+    </> : <>
+      {/* Rapport */}
+      <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'14px 18px',marginBottom:14,display:'flex',gap:12,flexWrap:'wrap',alignItems:'flex-end'}}>
+        <div style={{flex:1,minWidth:150}}>
+          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Date</div>
+          <input type="date" value={filtDate} onChange={e=>setFiltDate(e.target.value)} style={S}/>
+        </div>
+        <div style={{flex:1,minWidth:150}}>
+          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Employé</div>
+          <select value={filtEmploye} onChange={e=>setFiltEmploye(e.target.value)} style={S}>
+            <option value="ALL">Tous</option>
+            {employes.map((emp:string)=><option key={emp} value={emp}>{emp}</option>)}
+          </select>
+        </div>
+        <div style={{flex:1,minWidth:150}}>
+          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Écarts</div>
+          <select value={filtEcart} onChange={e=>setFiltEcart(e.target.value)} style={S}>
+            <option value="ALL">Tous</option>
+            <option value="ecart">Avec écart seulement</option>
+            <option value="ok">Sans écart seulement</option>
+          </select>
+        </div>
+        <button onClick={chargerComptages} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontWeight:700,cursor:'pointer'}}>🔄 Rafraîchir</button>
+        <div style={{background:dark?'#2b1113':'#fce8e6',border:`2px solid ${C.red}`,borderRadius:10,padding:'10px 16px',textAlign:'center',minWidth:150}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.red,textTransform:'uppercase'}}>Écarts</div>
+          <div style={{fontSize:22,fontWeight:900,color:C.red}}>{nbEcarts}</div>
+        </div>
+        <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`2px solid ${C.green}`,borderRadius:10,padding:'10px 16px',textAlign:'center',minWidth:150}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.green,textTransform:'uppercase'}}>Total compté</div>
+          <div style={{fontSize:22,fontWeight:900,color:C.green}}>{comptagesFiltres.length}</div>
+        </div>
+      </div>
+
+      <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+        <div style={{overflowX:'auto'}}>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+            <thead><tr style={{background:thBg}}>
+              <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Code Pièce</th>
+              <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Localisation</th>
+              <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Stock système</th>
+              <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.yellow,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Réservé</th>
+              <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Qté comptée</th>
+              <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Écart</th>
+              <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Note</th>
+              <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Employé</th>
+              <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Date & Heure</th>
+            </tr></thead>
+            <tbody>
+              {comptagesFiltres.length === 0
+                ? <tr><td colSpan={9} style={{textAlign:'center',padding:60,color:sub}}>Aucun comptage trouvé</td></tr>
+                : comptagesFiltres.map((c:any)=>(
+                    <tr key={c.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                      <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace',fontSize:12}}>{c.code_piece}</td>
+                      <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                        <span style={{background:dark?'#1a233a':'#e8f0fe',color:C.blue,padding:'2px 8px',borderRadius:4,fontSize:12,fontWeight:600}}>{c.localisation}</span>
+                      </td>
+                      <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{c.qte_systeme}</td>
+                      <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.yellow}}>{c.qte_reservee}</td>
+                      <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700,color:C.green}}>{c.qte_comptee}</td>
+                      <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:900,color:c.ecart===0?C.green:C.red}}>
+                        {c.ecart>0?`+${c.ecart}`:c.ecart}
+                      </td>
+                      <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{c.note||'—'}</td>
+                      <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`}}>
+                        <span style={{background:C.blue+'22',color:C.blue,padding:'2px 8px',borderRadius:10,fontSize:11}}>👤 {c.employe}</span>
+                      </td>
+                      <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:sub,fontSize:12,whiteSpace:'nowrap'}}>
+                        {new Date(c.date_comptage).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+                      </td>
+                    </tr>
+                  ))
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>}
   </>
 }
 
