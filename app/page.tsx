@@ -2376,6 +2376,7 @@ function BookingTab({data,dark,card,bdr,sub,thBg,S,alts}: any) {
 
 function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVerifies, setNegsVerifies, profil, data}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+  const employe = profil?.nom || profil?.email || 'Inconnu'
   const [filtFourn, setFiltFourn] = useState('ALL')
   const [filtLignes, setFiltLignes] = useState<string[]>([])
   const [ddLigneOpen, setDdLigneOpen] = useState(false)
@@ -2383,318 +2384,452 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
   const [sousOnglet, setSousOnglet] = useState<'actif'|'verifie'>('actif')
   const [noteModal, setNoteModal] = useState<any>(null)
   const [loading, setLoading] = useState(false)
-  const [form, setForm] = useState({
-    serv_detail: '', serv_interne: '', serv_gar: '', pce_detail: '',
-    recept_comm: '', dec_physique: '', autre: '', qte_reelle: '', commentaire: ''
-  })
+  const [photoFiles, setPhotoFiles] = useState<File[]>([])
+  const [photoPreviews, setPhotoPreviews] = useState<string[]>([])
+  const photoRef = useRef<HTMLInputElement>(null)
 
-  const employe = profil?.nom || profil?.email || 'Inconnu'
-
-  // Codes déjà vérifiés
-  const codesVerifies = new Set(negsVerifies.map((v:any) => v.code_piece))
-
-  // Dédupliquer par code_piece
-  const dedup = new Map<string, any>()
-  for (const n of negs) {
-    if (!dedup.has(n.code_piece) || new Date(n.date_apparition) > new Date(dedup.get(n.code_piece).date_apparition)) {
-      dedup.set(n.code_piece, n)
-    }
-  }
-  const negsUniques = Array.from(dedup.values())
-
-  const fournisseurs = Array.from(new Set(negsUniques.map((n: any) => n.fournisseur))).sort() as string[]
-  const lignes = Array.from(new Set(negsUniques.map((n: any) => n.ligne))).sort() as string[]
-
-  // Filtrer selon sous-onglet
-  const negsActifs = negsUniques.filter((n:any) => !codesVerifies.has(n.code_piece))
-  const filtered = negsActifs.filter((n: any) => {
-    if (filtFourn !== 'ALL' && n.fournisseur !== filtFourn) return false
-    if (filtLignes.length > 0 && !filtLignes.includes(n.ligne)) return false
-    return true
-  }).sort((a: any, b: any) => Math.abs(b.stock_negatif * b.cout_unitaire) - Math.abs(a.stock_negatif * a.cout_unitaire))
-
-  const totalErreur = filtered.reduce((s: number, n: any) => s + Math.abs(n.stock_negatif * n.cout_unitaire), 0)
-
-  const champs = [
-    {key:'serv_detail', label:'Serv. détail'},
-    {key:'serv_interne', label:'Serv. interne'},
-    {key:'serv_gar', label:'Serv. gar.'},
-    {key:'pce_detail', label:'Pce détail'},
-    {key:'recept_comm', label:'Récept. comm.'},
-    {key:'dec_physique', label:'Déc. physique'},
-    {key:'autre', label:'Autre'},
+  // Formulaire principal
+  const champsDef = [
+    {key:'serv_detail',   label:'Serv. détail',    desc:'Ventes service détail (sortie)',    sign:'-'},
+    {key:'serv_interne',  label:'Serv. interne',   desc:'Ventes service interne (sortie)',   sign:'-'},
+    {key:'serv_gar',      label:'Serv. gar.',       desc:'Ventes service garantie (sortie)',  sign:'-'},
+    {key:'pce_detail',    label:'Pce détail',       desc:'Ventes pièces détail (sortie)',     sign:'-'},
+    {key:'recept_comm',   label:'Récept. comm.',    desc:'Réceptions de commandes (entrée)',  sign:'+'},
+    {key:'dec_physique',  label:'Déc. physique',    desc:'Ajustement inventaire annuel (±)',  sign:'±'},
+    {key:'autre',         label:'Autre',            desc:'Autre ajustement (±)',              sign:'±'},
   ]
 
-  function getAjustement() {
-    const somme = champs.reduce((s, c) => s + (parseFloat((form as any)[c.key]) || 0), 0)
-    const reelle = parseFloat(form.qte_reelle) || 0
-    const stockNeg = noteModal ? Number(noteModal.stock_negatif) : 0
-    // Ajustement = qté réelle tablette - (stock système + transactions)
-    return reelle - (stockNeg + somme)
+  const CAUSES = [
+    'Stock vendu non reçu en inventaire',
+    'Erreur de comptage lors d'un inventaire antérieur',
+    'Ajustement incorrect (Déc. physique ou Autre)',
+    'Pièce alternative utilisée sous ce SKU',
+    'Retour fournisseur non traité',
+    'Double facturation',
+    'Autre raison',
+  ]
+
+  const emptyForm = () => ({
+    serv_detail:'', serv_interne:'', serv_gar:'', pce_detail:'',
+    recept_comm:'', dec_physique:'', autre:'', qte_reelle:'',
+    cause:'', commentaire_compta:''
+  })
+
+  const [form, setForm] = useState<any>(emptyForm())
+  const [altForm, setAltForm] = useState<any>(emptyForm())
+
+  function getAjust(stockSys: number, f: any) {
+    // Qté tablette = somme des transactions
+    // Stock sys = QTYMINUSRESERVED + QteReserveEnStock
+    // Ajustement = Qté tablette - Stock sys
+    const qteTab = parseFloat(f.qte_reelle) || 0
+    return qteTab - stockSys
   }
 
-  function formComplet() {
-    return champs.every(c => (form as any)[c.key] !== '') && form.qte_reelle !== ''
+  function qteTablette(f: any) {
+    return (parseFloat(f.serv_detail)||0) + (parseFloat(f.serv_interne)||0) +
+           (parseFloat(f.serv_gar)||0) + (parseFloat(f.pce_detail)||0) +
+           (parseFloat(f.recept_comm)||0) + (parseFloat(f.dec_physique)||0) +
+           (parseFloat(f.autre)||0)
   }
 
-  async function marquerVerifie(e: any) {
+  function formComplet(f: any) {
+    return champsDef.every(c => f[c.key] !== '') && f.qte_reelle !== '' && f.cause !== '' && f.commentaire_compta !== ''
+  }
+
+  function photoObligatoire(ajust: number) {
+    return Math.abs(ajust) > 1
+  }
+
+  function onPhoto(e: any) {
+    const files = Array.from(e.target.files || []) as File[]
+    if (files.length === 0) return
+    setPhotoFiles(prev => [...prev, ...files])
+    files.forEach(f => {
+      const reader = new FileReader()
+      reader.onload = ev => setPhotoPreviews(prev => [...prev, ev.target?.result as string])
+      reader.readAsDataURL(f)
+    })
+    e.target.value = ''
+  }
+
+  async function uploadPhotos(code_piece: string, loc: string): Promise<string[]> {
+    const urls: string[] = []
+    for (const file of photoFiles) {
+      try {
+        const fd = new FormData()
+        fd.append('file', file)
+        fd.append('code_piece', code_piece)
+        fd.append('localisation', `NEG_${code_piece}`)
+        const r = await fetch('/api/inventaire/photo', { method: 'POST', body: fd })
+        const j = await r.json()
+        if (j.url) urls.push(j.url)
+      } catch {}
+    }
+    return urls
+  }
+
+  async function soumettre(e: any) {
     e.preventDefault()
-    if (!formComplet()) return
+    if (!noteModal) return
     const n = noteModal
-    const val = Math.abs(n.stock_negatif * n.cout_unitaire)
-    const ajustement = getAjustement()
+    const stockSys = Number(n.stock_negatif)
+    const altCodes: string[] = (alts && alts.get && alts.get(n.code_piece)) || []
+    const hasAlt = altCodes.length > 0
+
+    const ajust = getAjust(stockSys, form)
+    const photoObl = photoObligatoire(ajust)
+
+    if (photoObl && photoFiles.length === 0) {
+      alert('📸 Photo obligatoire car écart > 1 unité !')
+      photoRef.current?.click()
+      return
+    }
+
     setLoading(true)
 
-    // Sauvegarder la pièce principale
+    // Upload photos
+    const photoUrls = await uploadPhotos(n.code_piece, 'NEG')
+
+    // Calculer ajustement alternatif
+    let altAjust = null
+    if (hasAlt) {
+      const altItem = (data?.liste_complete||[]).find((x:any) => x.pk === altCodes[0])
+      const altStockSys = altItem ? altItem.stock : 0
+      altAjust = getAjust(altStockSys, altForm)
+    }
+
     await fetch('/api/negatifs-verifies', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
-        code_piece: n.code_piece, employe,
+        code_piece: n.code_piece,
+        employe,
         stock_au_moment: n.stock_negatif,
-        valeur_au_moment: val,
-        serv_detail: parseFloat(form.serv_detail) || 0,
-        serv_interne: parseFloat(form.serv_interne) || 0,
-        serv_gar: parseFloat(form.serv_gar) || 0,
-        pce_detail: parseFloat(form.pce_detail) || 0,
-        recept_comm: parseFloat(form.recept_comm) || 0,
-        dec_physique: parseFloat(form.dec_physique) || 0,
-        autre: parseFloat(form.autre) || 0,
-        qte_reelle: parseFloat(form.qte_reelle) || 0,
-        ajustement,
-        commentaire: form.commentaire || null,
-        note: null
+        valeur_au_moment: Math.abs(n.stock_negatif * n.cout_unitaire),
+        serv_detail:   parseFloat(form.serv_detail)||0,
+        serv_interne:  parseFloat(form.serv_interne)||0,
+        serv_gar:      parseFloat(form.serv_gar)||0,
+        pce_detail:    parseFloat(form.pce_detail)||0,
+        recept_comm:   parseFloat(form.recept_comm)||0,
+        dec_physique:  parseFloat(form.dec_physique)||0,
+        autre:         parseFloat(form.autre)||0,
+        qte_reelle:    parseFloat(form.qte_reelle)||0,
+        ajustement:    ajust,
+        cause:         form.cause,
+        commentaire:   form.commentaire_compta,
+        photo_url:     photoUrls[0] || null,
+        photo_url2:    photoUrls[1] || null,
+        alt_code_piece: hasAlt ? altCodes[0] : null,
+        alt_ajustement: altAjust,
+        alt_serv_detail:  parseFloat(altForm.serv_detail)||0,
+        alt_serv_interne: parseFloat(altForm.serv_interne)||0,
+        alt_serv_gar:     parseFloat(altForm.serv_gar)||0,
+        alt_pce_detail:   parseFloat(altForm.pce_detail)||0,
+        alt_recept_comm:  parseFloat(altForm.recept_comm)||0,
+        alt_dec_physique: parseFloat(altForm.dec_physique)||0,
+        alt_autre:        parseFloat(altForm.autre)||0,
+        alt_qte_reelle:   parseFloat(altForm.qte_reelle)||0,
       })
     })
-
-    // Sauvegarder les pièces alternatives si remplies
-    const altCodes: string[] = (alts && alts.get && alts.get(n.code_piece)) || []
-    for (const ac of altCodes) {
-      const fKey = `alt_${ac}`
-      const altForm = (form as any)[fKey]
-      if (!altForm || altForm.qte_reelle === '') continue
-      const norm = (s:string) => s.trim().toLowerCase().replace(/\s+/g,'')
-      const altItem = (negs||[]).find((ni:any) => norm(ni.code_piece) === norm(ac))
-      const stockAlt = altItem ? Number(altItem.stock_negatif) : 0
-      const sommeAlt = ['serv_detail','serv_interne','serv_gar','pce_detail','recept_comm','dec_physique','autre']
-        .reduce((s,k) => s + (parseFloat(altForm[k])||0), 0)
-      const ajustAlt = (parseFloat(altForm.qte_reelle)||0) - (stockAlt + sommeAlt)
-      await fetch('/api/negatifs-verifies', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({
-          code_piece: ac, employe,
-          stock_au_moment: stockAlt,
-          valeur_au_moment: 0,
-          serv_detail: parseFloat(altForm.serv_detail)||0,
-          serv_interne: parseFloat(altForm.serv_interne)||0,
-          serv_gar: parseFloat(altForm.serv_gar)||0,
-          pce_detail: parseFloat(altForm.pce_detail)||0,
-          recept_comm: parseFloat(altForm.recept_comm)||0,
-          dec_physique: parseFloat(altForm.dec_physique)||0,
-          autre: parseFloat(altForm.autre)||0,
-          qte_reelle: parseFloat(altForm.qte_reelle)||0,
-          ajustement: ajustAlt,
-          commentaire: `Alt. de ${n.code_piece}${form.commentaire ? ' — ' + form.commentaire : ''}`,
-          note: null
-        })
-      })
-    }
 
     const r = await fetch('/api/negatifs-verifies')
     if (r.ok) setNegsVerifies(await r.json())
     setNoteModal(null)
-    setForm({serv_detail:'',serv_interne:'',serv_gar:'',pce_detail:'',recept_comm:'',dec_physique:'',autre:'',qte_reelle:'',commentaire:''})
+    setForm(emptyForm()); setAltForm(emptyForm())
+    setPhotoFiles([]); setPhotoPreviews([])
     setLoading(false)
   }
 
-  async function retablir(code_piece: string) {
-    await fetch('/api/negatifs-verifies', {
-      method: 'DELETE',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ code_piece })
-    })
+  async function retablir(id: number) {
+    await fetch('/api/negatifs-verifies', { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id }) })
     const r = await fetch('/api/negatifs-verifies')
     if (r.ok) setNegsVerifies(await r.json())
   }
 
+  // Dédupliquer
+  const dedup = new Map<string,any>()
+  for (const n of negs) {
+    if (!dedup.has(n.code_piece) || new Date(n.date_apparition) > new Date(dedup.get(n.code_piece).date_apparition))
+      dedup.set(n.code_piece, n)
+  }
+  const negsUniques = Array.from(dedup.values())
+  const codesVerifies = new Set(negsVerifies.map((v:any) => v.code_piece))
+  const fournisseurs = Array.from(new Set(negsUniques.map((n:any) => n.fournisseur))).sort() as string[]
+  const lignes = Array.from(new Set(negsUniques.map((n:any) => n.ligne))).sort() as string[]
+  const negsActifs = negsUniques.filter((n:any) => !codesVerifies.has(n.code_piece))
+
+  const filtered = negsActifs.filter((n:any) => {
+    if (filtFourn !== 'ALL' && n.fournisseur !== filtFourn) return false
+    if (filtLignes.length > 0 && !filtLignes.includes(n.ligne)) return false
+    return true
+  }).sort((a:any, b:any) => Math.abs(b.stock_negatif * b.cout_unitaire) - Math.abs(a.stock_negatif * a.cout_unitaire))
+
+  const totalErreur = filtered.reduce((s:number, n:any) => s + Math.abs(n.stock_negatif * n.cout_unitaire), 0)
+
+  const btnStyle: any = {border:'none',borderRadius:12,fontWeight:800,cursor:'pointer',color:'#fff',width:'100%',padding:'14px 0',fontSize:16}
+
+  // Composant formulaire champs transactions
+  function ChampTransaction({f, setF, prefix=''}: any) {
+    return (
+      <div style={{display:'flex',flexDirection:'column',gap:10}}>
+        {champsDef.map(c => (
+          <div key={c.key} style={{background:dark?'#111':'#f8f9fa',borderRadius:10,padding:'12px 14px',border:`1px solid ${bdr}`}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+              <div>
+                <div style={{fontWeight:700,fontSize:14}}>{c.label}
+                  <span style={{marginLeft:8,fontSize:12,fontWeight:400,color:c.sign==='-'?C.red:c.sign==='+'?C.green:sub}}>
+                    ({c.sign === '-' ? 'sortie' : c.sign === '+' ? 'entrée' : '±'})
+                  </span>
+                </div>
+                <div style={{fontSize:11,color:sub,marginTop:2}}>{c.desc}</div>
+              </div>
+            </div>
+            <input type="number" step="any" required
+              value={f[c.key]}
+              onChange={e => setF((prev:any) => ({...prev, [c.key]: e.target.value}))}
+              placeholder={c.sign === '+' ? 'Ex: 5' : c.sign === '-' ? 'Ex: -3' : 'Ex: ±2'}
+              inputMode="numeric"
+              style={{...S, fontSize:18, fontWeight:700, textAlign:'center', padding:'12px', borderRadius:10,
+                borderColor: f[c.key] !== '' ? (parseFloat(f[c.key]) < 0 && c.sign === '+' ? C.red : parseFloat(f[c.key]) > 0 && c.sign === '-' ? C.red : C.green) : bdr}}/>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   return <>
-    {/* Modal formulaire ajustement */}
+    {/* Input photo caché */}
+    <input ref={photoRef} type="file" accept="image/*" capture="environment" multiple onChange={onPhoto} style={{display:'none'}}/>
+
+    {/* Modal vérification — plein écran mobile */}
     {noteModal && (() => {
-      // Chercher les alternatives de la pièce
-      const altCodes: string[] = (alts && alts.get && alts.get(noteModal.code_piece)) || []
-      const allItems: any[] = data?.liste_complete || []
-      const altItems = altCodes.map((ac:string) => {
-        const norm = (s:string) => s.trim().toLowerCase().replace(/\s+/g,'')
-        // Chercher d'abord dans les négatifs, sinon dans liste_complete
-        const inNegs = (negs||[]).find((n:any) => norm(n.code_piece) === norm(ac))
-        if (inNegs) return inNegs
-        const inAll = allItems.find((n:any) => norm(n.pk) === norm(ac))
-        if (inAll) return { code_piece: inAll.pk, description: inAll.desc, stock_negatif: inAll.stock, fournisseur: inAll.fournisseur }
-        return { code_piece: ac, description: ac, stock_negatif: 0, fournisseur: '' }
-      })
-
-      const champs = [
-        {key:'serv_detail', label:'Serv. détail', desc:'Ventes débitées service détail'},
-        {key:'serv_interne', label:'Serv. interne', desc:'Ventes débitées service interne'},
-        {key:'serv_gar', label:'Serv. gar.', desc:'Ventes débitées service garantie'},
-        {key:'pce_detail', label:'Pce détail', desc:'Ventes pièces au détail'},
-        {key:'recept_comm', label:'Récept. comm.', desc:'Réceptions de commandes'},
-        {key:'dec_physique', label:'Déc. physique', desc:'Ajustement prise inventaire annuelle'},
-        {key:'autre', label:'Autre', desc:'Autres ajustements/erreurs inventaire'},
-      ]
-
-      function calcAjust(stockSys: number, f: any) {
-        const somme = champs.reduce((s,c) => s + (parseFloat(f[c.key])||0), 0)
-        const reelle = parseFloat(f.qte_reelle) || 0
-        return reelle - (stockSys + somme)
-      }
-
-      const ajustPrincipal = calcAjust(Number(noteModal.stock_negatif), form)
+      const n = noteModal
+      const stockSys = Number(n.stock_negatif)
+      const altCodes: string[] = (alts && alts.get && alts.get(n.code_piece)) || []
       const hasAlt = altCodes.length > 0
+      const altItem = hasAlt ? (data?.liste_complete||[]).find((x:any) => x.pk === altCodes[0]) : null
+      const altStockSys = altItem ? altItem.stock : 0
+
+      const qteTab = qteTablette(form)
+      const ajust = getAjust(stockSys, form)
+      const altQteTab = qteTablette(altForm)
+      const altAjust = hasAlt ? getAjust(altStockSys, altForm) : null
+      const photoObl = photoObligatoire(ajust)
+      const allFormsComplet = formComplet(form) && (!hasAlt || formComplet(altForm))
 
       return (
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.75)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
-          <div style={{background:card,borderRadius:16,width:'100%',maxWidth:hasAlt?920:560,border:`1px solid ${bdr}`,boxShadow:'0 20px 60px rgba(0,0,0,.5)',maxHeight:'92vh',overflowY:'auto'}}>
-            
-            {/* Header */}
-            <div style={{padding:'20px 24px',borderBottom:`1px solid ${bdr}`,position:'sticky',top:0,background:card,zIndex:10}}>
-              <h3 style={{margin:'0 0 4px',fontSize:17}}>✅ Vérification inventaire</h3>
-              <div style={{display:'flex',gap:16,flexWrap:'wrap'}}>
-                <span style={{color:sub,fontSize:13}}><strong style={{color:dark?'#e8e8e8':'#1a1a1a'}}>{noteModal.code_piece}</strong> — {noteModal.description}</span>
-                <span style={{color:C.red,fontSize:13,fontWeight:700}}>Stock système: {noteModal.stock_negatif}</span>
+        <div style={{position:'fixed',inset:0,background:dark?'#0d0d0d':'#f0f2f5',zIndex:9999,overflowY:'auto',fontFamily:"'DM Sans',sans-serif"}}>
+          {/* Header fixe */}
+          <div style={{position:'sticky',top:0,background:dark?'#111':C.red,color:'#fff',padding:'14px 16px',zIndex:10,display:'flex',justifyContent:'space-between',alignItems:'center',boxShadow:'0 2px 8px rgba(0,0,0,.2)'}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',opacity:.8}}>Vérification inventaire</div>
+              <div style={{fontSize:18,fontWeight:900,letterSpacing:1}}>{n.code_piece}</div>
+            </div>
+            <button onClick={()=>{setNoteModal(null);setForm(emptyForm());setAltForm(emptyForm());setPhotoFiles([]);setPhotoPreviews([])}}
+              style={{background:'rgba(255,255,255,.2)',border:'none',borderRadius:10,padding:'8px 14px',color:'#fff',cursor:'pointer',fontSize:14,fontWeight:700}}>
+              ✕ Fermer
+            </button>
+          </div>
+
+          <div style={{padding:'16px',maxWidth:700,margin:'0 auto'}}>
+            {/* Info pièce */}
+            <div style={{background:card,borderRadius:14,padding:'16px',marginBottom:16,border:`2px solid ${C.red}`}}>
+              <div style={{fontSize:13,fontWeight:700,color:C.red,marginBottom:8}}>📦 Pièce en négatif</div>
+              <div style={{fontWeight:800,fontSize:18}}>{n.code_piece}</div>
+              <div style={{color:sub,fontSize:13,marginTop:2}}>{n.description}</div>
+              <div style={{marginTop:10,display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}}>
+                <div style={{background:dark?'#1a1a1a':'#fff8f8',borderRadius:10,padding:'10px',textAlign:'center',border:`1px solid ${C.red}33`}}>
+                  <div style={{fontSize:11,color:sub,fontWeight:700,textTransform:'uppercase'}}>Stock total</div>
+                  <div style={{fontSize:22,fontWeight:900,color:C.red}}>{n.stock_negatif}</div>
+                </div>
+                <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:10,padding:'10px',textAlign:'center',border:`1px solid ${C.blue}33`}}>
+                  <div style={{fontSize:11,color:sub,fontWeight:700,textTransform:'uppercase'}}>Disponible</div>
+                  <div style={{fontSize:22,fontWeight:900,color:C.blue}}>{n.stock_negatif}</div>
+                </div>
+                <div style={{background:dark?'#2b2411':'#fef7e0',borderRadius:10,padding:'10px',textAlign:'center',border:`1px solid ${C.yellow}33`}}>
+                  <div style={{fontSize:11,color:sub,fontWeight:700,textTransform:'uppercase'}}>Réservé</div>
+                  <div style={{fontSize:22,fontWeight:900,color:C.yellow}}>0</div>
+                </div>
               </div>
-              {hasAlt && <div style={{marginTop:6,fontSize:12,color:C.blue}}>🔄 Pièce alternative détectée — remplis les 2 sections</div>}
+              <div style={{marginTop:8,fontSize:12,color:sub}}>🏢 {n.fournisseur} • Ligne {n.ligne}</div>
             </div>
 
-            <form onSubmit={marquerVerifie}>
-              <div style={{padding:'20px 24px',display:'grid',gridTemplateColumns:hasAlt?'1fr 1fr':'1fr',gap:20}}>
-                
-                {/* Section pièce principale */}
-                <div>
-                  <div style={{background:dark?'#1a1a2e':'#f0f4ff',borderRadius:10,padding:'10px 14px',marginBottom:14,border:`1px solid ${C.blue}33`}}>
-                    <div style={{fontSize:12,fontWeight:700,color:C.blue}}>📦 Pièce principale</div>
-                    <div style={{fontSize:13,fontWeight:700,marginTop:2}}>{noteModal.code_piece}</div>
-                    <div style={{fontSize:11,color:sub}}>{noteModal.description}</div>
-                  </div>
+            {/* Alternative détectée */}
+            {hasAlt && (
+              <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:14,padding:'14px 16px',marginBottom:16,border:`2px solid ${C.green}`}}>
+                <div style={{fontSize:13,fontWeight:700,color:C.green,marginBottom:6}}>🔄 Pièce alternative détectée</div>
+                <div style={{fontWeight:700,fontSize:16}}>{altCodes[0]}</div>
+                {altItem && <div style={{color:sub,fontSize:12,marginTop:2}}>{altItem.desc}</div>}
+                <div style={{fontSize:12,color:C.blue,marginTop:4}}>Stock actuel: <strong>{altStockSys}</strong></div>
+                <div style={{fontSize:12,color:sub,marginTop:4}}>⚠️ Si tu as utilisé cette alternative pour servir le client, remplis aussi sa section ci-dessous</div>
+              </div>
+            )}
 
-                  {/* Champs transactions */}
-                  <div style={{marginBottom:14}}>
-                    <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Transactions</div>
-                    <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                      {champs.map(c => (
-                        <div key={c.key} style={{display:'flex',alignItems:'center',gap:8}}>
-                          <div style={{flex:1}}>
-                            <div style={{fontSize:12,fontWeight:600}}>{c.label}</div>
-                            <div style={{fontSize:10,color:sub}}>{c.desc}</div>
-                          </div>
-                          <input type="number" step="any" required
-                            value={(form as any)[c.key]}
-                            onChange={e=>setForm(prev=>({...prev,[c.key]:e.target.value}))}
-                            placeholder="0"
-                            style={{...S,width:80,textAlign:'center',padding:'6px 8px'}}/>
-                        </div>
-                      ))}
+            {/* Formulaire pièce principale */}
+            <div style={{background:card,borderRadius:14,padding:'16px',marginBottom:16,border:`1px solid ${bdr}`}}>
+              <div style={{fontSize:15,fontWeight:800,color:C.red,marginBottom:14}}>
+                📋 Transactions — {n.code_piece}
+              </div>
+              <ChampTransaction f={form} setF={setForm}/>
+
+              {/* Qté tablette calculée automatiquement */}
+              <div style={{marginTop:14,background:dark?'#1a233a':'#e8f0fe',borderRadius:12,padding:'14px',border:`1px solid ${C.blue}33`}}>
+                <div style={{fontSize:12,fontWeight:700,color:C.blue,textTransform:'uppercase',marginBottom:6}}>
+                  📦 Qté tablette (calculée automatiquement)
+                </div>
+                <div style={{fontSize:28,fontWeight:900,color:C.blue,textAlign:'center'}}>{qteTab.toFixed(0)}</div>
+                <div style={{fontSize:11,color:sub,textAlign:'center',marginTop:2}}>= somme de toutes les transactions</div>
+              </div>
+
+              {/* Champ qte_reelle pour vérification */}
+              <div style={{marginTop:12,background:dark?'#0d2a18':'#e6f4ea',borderRadius:12,padding:'14px',border:`1px solid ${C.green}33`}}>
+                <div style={{fontSize:12,fontWeight:700,color:C.green,textTransform:'uppercase',marginBottom:6}}>
+                  ✅ Stock réel sur tablette (vérification)
+                </div>
+                <input type="number" step="any" inputMode="numeric" required min="0"
+                  value={form.qte_reelle}
+                  onChange={e=>setForm((prev:any)=>({...prev,qte_reelle:e.target.value}))}
+                  placeholder="Compter physiquement..."
+                  style={{...S,fontSize:24,fontWeight:900,textAlign:'center',padding:'14px',borderRadius:10}}/>
+                <div style={{fontSize:11,color:sub,marginTop:6,textAlign:'center'}}>Doit être ≥ 0</div>
+              </div>
+
+              {/* Ajustement calculé */}
+              {form.qte_reelle !== '' && (
+                <div style={{marginTop:12,background:ajust===0?(dark?'#0d2a18':'#e6f4ea'):(dark?'#2b1113':'#fce8e6'),borderRadius:12,padding:'14px',border:`2px solid ${ajust===0?C.green:C.red}`}}>
+                  <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',color:ajust===0?C.green:C.red,marginBottom:4}}>
+                    Ajustement à faire dans Traction
+                  </div>
+                  <div style={{fontSize:32,fontWeight:900,color:ajust===0?C.green:C.red,textAlign:'center'}}>
+                    {ajust===0?'✅ Aucun':ajust>0?`+${ajust.toFixed(0)}`:`${ajust.toFixed(0)}`}
+                  </div>
+                  {ajust !== 0 && (
+                    <div style={{fontSize:12,color:sub,textAlign:'center',marginTop:4}}>
+                      {form.qte_reelle} tablette − {stockSys} système = {ajust > 0 ? '+' : ''}{ajust.toFixed(0)}
+                    </div>
+                  )}
+                  {photoObl && photoFiles.length === 0 && (
+                    <div style={{marginTop:8,background:C.red+'22',borderRadius:8,padding:'8px 12px',color:C.red,fontSize:13,fontWeight:700,textAlign:'center'}}>
+                      📸 Photo obligatoire car écart &gt; 1 unité
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Formulaire alternatif */}
+            {hasAlt && (
+              <div style={{background:card,borderRadius:14,padding:'16px',marginBottom:16,border:`2px solid ${C.green}`}}>
+                <div style={{fontSize:15,fontWeight:800,color:C.green,marginBottom:14}}>
+                  🔄 Transactions — {altCodes[0]} (alternative)
+                </div>
+                <ChampTransaction f={altForm} setF={setAltForm}/>
+                <div style={{marginTop:14,background:dark?'#1a233a':'#e8f0fe',borderRadius:12,padding:'14px',border:`1px solid ${C.blue}33`}}>
+                  <div style={{fontSize:12,fontWeight:700,color:C.blue,textTransform:'uppercase',marginBottom:6}}>Qté tablette alternative</div>
+                  <div style={{fontSize:28,fontWeight:900,color:C.blue,textAlign:'center'}}>{altQteTab.toFixed(0)}</div>
+                </div>
+                <div style={{marginTop:12,background:dark?'#0d2a18':'#e6f4ea',borderRadius:12,padding:'14px',border:`1px solid ${C.green}33`}}>
+                  <div style={{fontSize:12,fontWeight:700,color:C.green,textTransform:'uppercase',marginBottom:6}}>Stock réel alternative</div>
+                  <input type="number" step="any" inputMode="numeric" required min="0"
+                    value={altForm.qte_reelle}
+                    onChange={e=>setAltForm((prev:any)=>({...prev,qte_reelle:e.target.value}))}
+                    placeholder="Compter physiquement..."
+                    style={{...S,fontSize:24,fontWeight:900,textAlign:'center',padding:'14px',borderRadius:10}}/>
+                </div>
+                {altForm.qte_reelle !== '' && altAjust !== null && (
+                  <div style={{marginTop:12,background:altAjust===0?(dark?'#0d2a18':'#e6f4ea'):(dark?'#2b1113':'#fce8e6'),borderRadius:12,padding:'14px',border:`2px solid ${altAjust===0?C.green:C.red}`}}>
+                    <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',color:altAjust===0?C.green:C.red,marginBottom:4}}>
+                      Ajustement alternatif dans Traction
+                    </div>
+                    <div style={{fontSize:32,fontWeight:900,color:altAjust===0?C.green:C.red,textAlign:'center'}}>
+                      {altAjust===0?'✅ Aucun':altAjust>0?`+${altAjust.toFixed(0)}`:`${altAjust.toFixed(0)}`}
                     </div>
                   </div>
+                )}
+              </div>
+            )}
 
-                  {/* Qté réelle */}
-                  <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:10,padding:'12px 14px',marginBottom:12,border:`1px solid ${C.green}33`}}>
-                    <label style={{fontSize:12,fontWeight:700,color:C.green,display:'block',marginBottom:6}}>📦 Qté réelle sur tablette *</label>
-                    <input type="number" step="any" required value={form.qte_reelle}
-                      onChange={e=>setForm(prev=>({...prev,qte_reelle:e.target.value}))}
-                      placeholder="Compter les unités..."
-                      style={{...S,fontWeight:700,fontSize:15,textAlign:'center'}}/>
+            {/* Cause + commentaire comptabilité */}
+            <div style={{background:card,borderRadius:14,padding:'16px',marginBottom:16,border:`1px solid ${bdr}`}}>
+              <div style={{fontSize:15,fontWeight:800,marginBottom:14}}>📝 Justification comptabilité</div>
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Cause principale *</div>
+                <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                  {CAUSES.map(cause => (
+                    <label key={cause} style={{display:'flex',alignItems:'center',gap:10,background:form.cause===cause?(dark?'#1a233a':'#e8f0fe'):dark?'#1a1a1a':'#f8f9fa',borderRadius:10,padding:'12px 14px',border:`2px solid ${form.cause===cause?C.blue:bdr}`,cursor:'pointer'}}>
+                      <input type="radio" name="cause" value={cause} checked={form.cause===cause} onChange={()=>setForm((p:any)=>({...p,cause}))} style={{accentColor:C.blue,width:18,height:18}}/>
+                      <span style={{fontSize:13,fontWeight:form.cause===cause?700:400,color:form.cause===cause?C.blue:'inherit'}}>{cause}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6}}>Explication pour la comptabilité *</div>
+                <textarea value={form.commentaire_compta} onChange={e=>setForm((p:any)=>({...p,commentaire_compta:e.target.value}))}
+                  placeholder="Explique en détail ce qui s'est passé pour permettre l'ajustement en comptabilité..."
+                  required rows={4}
+                  style={{...S,resize:'vertical',fontSize:14,padding:'12px',borderRadius:10,fontFamily:'inherit'}}/>
+              </div>
+            </div>
+
+            {/* Photos */}
+            <div style={{background:card,borderRadius:14,padding:'16px',marginBottom:16,border:`2px solid ${photoObl&&photoFiles.length===0?C.red:photoFiles.length>0?C.green:bdr}`}}>
+              <div style={{fontSize:15,fontWeight:800,marginBottom:10}}>
+                📸 Photos {photoObl?'(obligatoire — écart > 1)':'(optionnel)'}
+              </div>
+              {photoPreviews.length > 0 && (
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
+                  {photoPreviews.map((p,i) => (
+                    <div key={i} style={{position:'relative'}}>
+                      <img src={p} style={{width:'100%',borderRadius:10,height:120,objectFit:'cover'}} alt={`Photo ${i+1}`}/>
+                      <button onClick={()=>{setPhotoFiles(prev=>prev.filter((_,j)=>j!==i));setPhotoPreviews(prev=>prev.filter((_,j)=>j!==i))}}
+                        style={{position:'absolute',top:4,right:4,background:C.red,border:'none',borderRadius:'50%',width:24,height:24,color:'#fff',cursor:'pointer',fontSize:12,fontWeight:700}}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button type="button" onClick={()=>photoRef.current?.click()}
+                style={{...btnStyle,background:C.blue,fontSize:15,padding:'14px 0'}}>
+                📷 {photoPreviews.length > 0 ? 'Ajouter une autre photo' : 'Prendre une photo'}
+              </button>
+            </div>
+
+            {/* Résumé ajustements */}
+            {(form.qte_reelle !== '' || (hasAlt && altForm.qte_reelle !== '')) && (
+              <div style={{background:dark?'#111':'#f8f9fa',borderRadius:14,padding:'16px',marginBottom:16,border:`1px solid ${bdr}`}}>
+                <div style={{fontSize:15,fontWeight:800,marginBottom:12}}>📊 Résumé des ajustements à faire</div>
+                <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                  <div style={{background:card,borderRadius:10,padding:'12px 14px',border:`2px solid ${ajust===0?C.green:C.red}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                    <div>
+                      <div style={{fontWeight:700,fontFamily:'monospace'}}>{n.code_piece}</div>
+                      <div style={{fontSize:12,color:sub}}>Pièce principale</div>
+                    </div>
+                    <div style={{fontSize:24,fontWeight:900,color:ajust===0?C.green:C.red}}>
+                      {ajust===0?'✅':ajust>0?`+${ajust.toFixed(0)}`:`${ajust.toFixed(0)}`}
+                    </div>
                   </div>
-
-                  {/* Ajustement principal */}
-                  {form.qte_reelle !== '' && (
-                    <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:10,padding:'10px 14px',border:`1px solid ${C.blue}33`}}>
-                      <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,marginBottom:2}}>Ajustement à faire</div>
-                      <div style={{fontSize:24,fontWeight:900,color:ajustPrincipal>=0?C.green:C.red}}>
-                        {ajustPrincipal>=0?'+':''}{ajustPrincipal.toFixed(0)} unités
+                  {hasAlt && altForm.qte_reelle !== '' && altAjust !== null && (
+                    <div style={{background:card,borderRadius:10,padding:'12px 14px',border:`2px solid ${altAjust===0?C.green:C.red}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                      <div>
+                        <div style={{fontWeight:700,fontFamily:'monospace'}}>{altCodes[0]}</div>
+                        <div style={{fontSize:12,color:sub}}>Pièce alternative</div>
                       </div>
-                      <div style={{fontSize:10,color:sub,marginTop:2}}>
-                        {form.qte_reelle} tablette − ({noteModal.stock_negatif} système + {champs.reduce((s,c)=>s+(parseFloat((form as any)[c.key])||0),0).toFixed(0)} transactions)
+                      <div style={{fontSize:24,fontWeight:900,color:altAjust===0?C.green:C.red}}>
+                        {altAjust===0?'✅':altAjust>0?`+${altAjust.toFixed(0)}`:`${altAjust.toFixed(0)}`}
                       </div>
                     </div>
                   )}
                 </div>
-
-                {/* Section pièce alternative */}
-                {hasAlt && altItems.map((altItem: any) => {
-                  const fKey = `alt_${altItem.code_piece}`
-                  const altForm = (form as any)[fKey] || {serv_detail:'',serv_interne:'',serv_gar:'',pce_detail:'',recept_comm:'',dec_physique:'',autre:'',qte_reelle:''}
-                  const ajustAlt = altForm.qte_reelle !== '' ? calcAjust(Number(altItem.stock_negatif||0), altForm) : null
-
-                  return (
-                    <div key={altItem.code_piece}>
-                      <div style={{background:dark?'#1a2a1a':'#f0fff4',borderRadius:10,padding:'10px 14px',marginBottom:14,border:`1px solid ${C.green}33`}}>
-                        <div style={{fontSize:12,fontWeight:700,color:C.green}}>🔄 Pièce alternative</div>
-                        <div style={{fontSize:13,fontWeight:700,marginTop:2}}>{altItem.code_piece}</div>
-                        <div style={{fontSize:11,color:sub}}>{altItem.description}</div>
-                        <div style={{fontSize:11,color:C.red,fontWeight:700,marginTop:2}}>Stock système: {altItem.stock_negatif||0}</div>
-                      </div>
-
-                      <div style={{marginBottom:14}}>
-                        <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Transactions</div>
-                        <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                          {champs.map(c => (
-                            <div key={c.key} style={{display:'flex',alignItems:'center',gap:8}}>
-                              <div style={{flex:1}}>
-                                <div style={{fontSize:12,fontWeight:600}}>{c.label}</div>
-                                <div style={{fontSize:10,color:sub}}>{c.desc}</div>
-                              </div>
-                              <input type="number" step="any" required
-                                value={altForm[c.key]}
-                                onChange={e=>setForm(prev=>({...prev,[fKey]:{...altForm,[c.key]:e.target.value}}))}
-                                placeholder="0"
-                                style={{...S,width:80,textAlign:'center',padding:'6px 8px'}}/>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:10,padding:'12px 14px',marginBottom:12,border:`1px solid ${C.green}33`}}>
-                        <label style={{fontSize:12,fontWeight:700,color:C.green,display:'block',marginBottom:6}}>📦 Qté réelle sur tablette *</label>
-                        <input type="number" step="any" required value={altForm.qte_reelle}
-                          onChange={e=>setForm(prev=>({...prev,[fKey]:{...altForm,qte_reelle:e.target.value}}))}
-                          placeholder="Compter les unités..."
-                          style={{...S,fontWeight:700,fontSize:15,textAlign:'center'}}/>
-                      </div>
-
-                      {altForm.qte_reelle !== '' && ajustAlt !== null && (
-                        <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:10,padding:'10px 14px',border:`1px solid ${C.blue}33`}}>
-                          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,marginBottom:2}}>Ajustement à faire</div>
-                          <div style={{fontSize:24,fontWeight:900,color:ajustAlt>=0?C.green:C.red}}>
-                            {ajustAlt>=0?'+':''}{ajustAlt.toFixed(0)} unités
-                          </div>
-                          <div style={{fontSize:10,color:sub,marginTop:2}}>
-                            {altForm.qte_reelle} tablette − ({altItem.stock_negatif||0} système + {champs.reduce((s,c)=>s+(parseFloat(altForm[c.key])||0),0).toFixed(0)} transactions)
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
               </div>
+            )}
 
-              {/* Commentaire + boutons */}
-              <div style={{padding:'0 24px 20px 24px'}}>
-                <div style={{marginBottom:16}}>
-                  <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Commentaire (optionnel)</label>
-                  <input value={form.commentaire} onChange={e=>setForm(prev=>({...prev,commentaire:e.target.value}))}
-                    placeholder="Ex: Trouvé en arrière-boutique, donné la pièce alternative au client..." style={S}/>
-                </div>
-                <div style={{display:'flex',gap:10}}>
-                  <button type="button" onClick={()=>{setNoteModal(null);setForm({serv_detail:'',serv_interne:'',serv_gar:'',pce_detail:'',recept_comm:'',dec_physique:'',autre:'',qte_reelle:'',commentaire:''})}}
-                    style={{flex:1,background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'11px 0',cursor:'pointer',color:sub,fontWeight:600}}>Annuler</button>
-                  <button type="submit" disabled={loading||!formComplet()}
-                    style={{flex:2,background:formComplet()?C.green:'#94a3b8',color:'#fff',border:'none',borderRadius:8,padding:'11px 0',fontWeight:700,cursor:formComplet()?'pointer':'not-allowed',fontSize:14}}>
-                    {loading?'Enregistrement...':'✅ Confirmer la vérification'}
-                  </button>
-                </div>
-              </div>
+            {/* Bouton soumettre */}
+            <form onSubmit={soumettre}>
+              <button type="submit" disabled={loading||!allFormsComplet||(photoObl&&photoFiles.length===0)}
+                style={{...btnStyle,background:allFormsComplet&&(!photoObl||photoFiles.length>0)?C.green:'#94a3b8',marginBottom:32,fontSize:18,padding:'18px 0'}}>
+                {loading?'Enregistrement...':`✅ Confirmer la vérification`}
+              </button>
             </form>
           </div>
         </div>
@@ -2703,17 +2838,17 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
 
     {/* Sous-onglets */}
     <div style={{display:'flex',gap:8,marginBottom:14}}>
-      <button onClick={()=>setSousOnglet('actif')} style={{padding:'7px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='actif'?C.red:bdr}`,background:sousOnglet==='actif'?C.red+'22':'transparent',color:sousOnglet==='actif'?C.red:sub,fontSize:12,fontWeight:700,cursor:'pointer'}}>
+      <button onClick={()=>setSousOnglet('actif')} style={{padding:isMobile?'10px 16px':'7px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='actif'?C.red:bdr}`,background:sousOnglet==='actif'?C.red+'22':'transparent',color:sousOnglet==='actif'?C.red:sub,fontSize:isMobile?14:12,fontWeight:700,cursor:'pointer'}}>
         🔴 À vérifier ({negsActifs.length})
       </button>
-      <button onClick={()=>setSousOnglet('verifie')} style={{padding:'7px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='verifie'?C.green:bdr}`,background:sousOnglet==='verifie'?C.green+'22':'transparent',color:sousOnglet==='verifie'?C.green:sub,fontSize:12,fontWeight:700,cursor:'pointer'}}>
+      <button onClick={()=>setSousOnglet('verifie')} style={{padding:isMobile?'10px 16px':'7px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='verifie'?C.green:bdr}`,background:sousOnglet==='verifie'?C.green+'22':'transparent',color:sousOnglet==='verifie'?C.green:sub,fontSize:isMobile?14:12,fontWeight:700,cursor:'pointer'}}>
         ✅ Vérifié ({negsVerifies.length})
       </button>
     </div>
 
     {sousOnglet === 'actif' ? <>
-      {/* Filtres + Total */}
-      <div style={{background:card,borderRadius:12,padding:isMobile?'10px 12px':'14px 18px',marginBottom:14,display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end',border:`1px solid ${bdr}`}}>
+      {/* Filtres */}
+      <div style={{background:card,borderRadius:12,padding:'12px',marginBottom:14,display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end',border:`1px solid ${bdr}`}}>
         <div style={{flex:1,minWidth:isMobile?'100%':180}}>
           <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Fournisseur</div>
           <select value={filtFourn} onChange={e=>setFiltFourn(e.target.value)} style={S}>
@@ -2721,26 +2856,24 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
             {fournisseurs.map((f:string)=><option key={f} value={f}>{f} ({negsActifs.filter((n:any)=>n.fournisseur===f).length})</option>)}
           </select>
         </div>
-        <div style={{flex:1.2,minWidth:isMobile?'100%':160}} ref={ddLigneRef}>
+        <div style={{flex:1,minWidth:isMobile?'100%':160}} ref={ddLigneRef}>
           <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>
             Lignes {filtLignes.length>0&&<span style={{color:C.blue}}>({filtLignes.length})</span>}
           </div>
           <div style={{position:'relative'}}>
-            <button onClick={()=>setDdLigneOpen(!ddLigneOpen)} style={{...S,display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer',textAlign:'left'}}>
-              <span style={{fontSize:13}}>{filtLignes.length===0?'Toutes':filtLignes.length===1?filtLignes[0]:`${filtLignes.length} sélectionnées`}</span>
+            <button onClick={()=>setDdLigneOpen(!ddLigneOpen)} style={{...S,display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer'}}>
+              <span>{filtLignes.length===0?'Toutes':filtLignes.length===1?filtLignes[0]:`${filtLignes.length} sélectionnées`}</span>
               <span style={{fontSize:10}}>{ddLigneOpen?'▲':'▼'}</span>
             </button>
             {ddLigneOpen && (
               <div style={{position:'absolute',top:'105%',left:0,right:0,background:card,border:`1px solid ${bdr}`,borderRadius:8,zIndex:500,boxShadow:'0 4px 16px rgba(0,0,0,.15)',maxHeight:220,overflowY:'auto'}}>
-                <div style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <div style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,display:'flex',justifyContent:'space-between'}}>
                   <span style={{fontSize:11,color:sub}}>Sélectionner lignes</span>
-                  {filtLignes.length>0&&<button onClick={()=>setFiltLignes([])} style={{fontSize:11,color:C.red,background:'none',border:'none',cursor:'pointer',padding:0}}>Tout décocher</button>}
+                  {filtLignes.length>0&&<button onClick={()=>setFiltLignes([])} style={{fontSize:11,color:C.red,background:'none',border:'none',cursor:'pointer'}}>Tout décocher</button>}
                 </div>
                 {lignes.map((l:string)=>(
-                  <label key={l} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 12px',cursor:'pointer',fontSize:13,borderBottom:`1px solid ${dark?'#222':'#f5f5f5'}`}}
-                    onMouseEnter={e=>(e.currentTarget.style.background=hvr)}
-                    onMouseLeave={e=>(e.currentTarget.style.background='transparent')}>
-                    <input type="checkbox" checked={filtLignes.includes(l)} onChange={()=>setFiltLignes(prev=>prev.includes(l)?prev.filter(x=>x!==l):[...prev,l])} style={{accentColor:C.blue}}/>
+                  <label key={l} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',cursor:'pointer',fontSize:13,borderBottom:`1px solid ${dark?'#222':'#f5f5f5'}`}}>
+                    <input type="checkbox" checked={filtLignes.includes(l)} onChange={()=>setFiltLignes(prev=>prev.includes(l)?prev.filter(x=>x!==l):[...prev,l])} style={{accentColor:C.blue,width:16,height:16}}/>
                     {l}
                   </label>
                 ))}
@@ -2748,40 +2881,37 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
             )}
           </div>
         </div>
-        <div style={{flex:1,minWidth:140,display:'flex',alignItems:'center',gap:10}}>
-          {(filtFourn!=='ALL'||filtLignes.length>0) && (
-            <button onClick={()=>{setFiltFourn('ALL');setFiltLignes([]);setDdLigneOpen(false)}} style={{background:'none',border:`1px solid ${bdr}`,borderRadius:6,padding:'6px 12px',fontSize:12,color:sub,cursor:'pointer'}}>Réinitialiser</button>
-          )}
-        </div>
-        <div style={{background:dark?'#2b1113':'#fce8e6',border:`2px solid ${C.red}`,borderRadius:10,padding:'10px 18px',textAlign:'right',minWidth:200}}>
-          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red,marginBottom:3}}>Erreur inventaire ({filtered.length} pièces)</div>
-          <div style={{fontSize:24,fontWeight:900,color:C.red}}>− {totalErreur.toLocaleString('fr-CA',{minimumFractionDigits:2})} $</div>
+        <div style={{background:dark?'#2b1113':'#fce8e6',border:`2px solid ${C.red}`,borderRadius:10,padding:'10px 14px',textAlign:'right',minWidth:isMobile?'100%':180,flex:isMobile?1:0}}>
+          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red}}>Erreur inventaire ({filtered.length})</div>
+          <div style={{fontSize:isMobile?22:20,fontWeight:900,color:C.red}}>− {totalErreur.toLocaleString('fr-CA',{minimumFractionDigits:2})} $</div>
         </div>
       </div>
 
-      {/* Tableau actif */}
+      {/* Liste pièces négatives */}
       {isMobile
         ? <div style={{display:'flex',flexDirection:'column',gap:10}}>
             {filtered.length===0
-              ? <div style={{textAlign:'center',padding:40,color:sub}}>✅ Aucune pièce négative</div>
+              ? <div style={{textAlign:'center',padding:50,color:sub,fontSize:14}}>✅ Aucune pièce négative</div>
               : filtered.map((n:any)=>{
                   const val=Math.abs(n.stock_negatif*n.cout_unitaire)
+                  const altCodes: string[] = (alts&&alts.get&&alts.get(n.code_piece))||[]
                   return (
-                    <div key={n.code_piece} style={{background:card,borderRadius:12,border:`2px solid ${val>500?C.red:val>100?C.yellow:bdr}`,padding:'14px 16px'}}>
-                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
-                        <div>
-                          <div style={{fontWeight:800,fontSize:15,color:C.red}}>{n.code_piece}</div>
+                    <div key={n.code_piece} style={{background:card,borderRadius:14,border:`2px solid ${val>500?C.red:val>100?C.yellow:bdr}`,padding:'16px'}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:10}}>
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:800,fontSize:16,color:C.red}}>{n.code_piece}</div>
+                          <div style={{fontSize:12,color:sub,marginTop:2}}>{n.description}</div>
                           <div style={{fontSize:12,color:sub,marginTop:2}}>{n.fournisseur} • Ligne {n.ligne}</div>
-                          <div style={{fontSize:12,color:sub,marginTop:1}}>{n.description}</div>
+                          {altCodes.length>0&&<div style={{fontSize:11,color:C.green,marginTop:4}}>🔄 Alt: {altCodes.join(', ')}</div>}
                         </div>
-                        <div style={{textAlign:'right'}}>
-                          <div style={{fontSize:20,fontWeight:900,color:C.red}}>{n.stock_negatif}</div>
+                        <div style={{textAlign:'right',marginLeft:12}}>
+                          <div style={{fontSize:26,fontWeight:900,color:C.red}}>{n.stock_negatif}</div>
                           <div style={{fontSize:13,fontWeight:700,color:C.red}}>− {val.toFixed(2)} $</div>
                         </div>
                       </div>
-                      <button onClick={()=>setNoteModal(n)}
-                        style={{width:'100%',background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'11px 0',fontSize:14,fontWeight:700,cursor:'pointer'}}>
-                        ✓ Marquer vérifié
+                      <button onClick={()=>{setNoteModal(n);setForm(emptyForm());setAltForm(emptyForm());setPhotoFiles([]);setPhotoPreviews([])}}
+                        style={{...btnStyle,background:C.green,fontSize:16,padding:'14px 0'}}>
+                        ✓ Vérifier cette pièce
                       </button>
                     </div>
                   )
@@ -2789,110 +2919,150 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
             }
           </div>
         : <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
-        <div style={{overflowX:'auto'}}>
-          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-            <thead><tr style={{background:thBg}}>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Fournisseur</th>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Ligne</th>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code Pièce</th>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Description</th>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Stock</th>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'right'}}>Coût Un.</th>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`2px solid ${bdr}`,textAlign:'right'}}>Valeur</th>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Détecté le</th>
-              <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Action</th>
-            </tr></thead>
-            <tbody>
-              {filtered.length===0
-                ? <tr><td colSpan={9} style={{textAlign:'center',padding:60,color:sub}}>✅ Aucune pièce négative</td></tr>
-                : filtered.map((n:any)=>{
-                    const val=Math.abs(n.stock_negatif*n.cout_unitaire)
-                    const bgR=val>500?(dark?'#2b1113':'#fff8f8'):val>100?(dark?'#2b2411':'#fffcf5'):'transparent'
-                    const dateStr=n.date_apparition?new Date(n.date_apparition).toLocaleDateString('fr-CA',{month:'short',day:'numeric'}):'—'
-                    return (
-                      <tr key={n.code_piece} style={{background:bgR,borderLeft:val>500?`4px solid ${C.red}`:val>100?`4px solid ${C.yellow}`:'none'}}
-                        onMouseEnter={e=>e.currentTarget.style.background=hvr}
-                        onMouseLeave={e=>e.currentTarget.style.background=bgR}>
-                        <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:600}}>{n.fournisseur}</td>
-                        <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                          <span style={{background:dark?'#333':'#e2e8f0',color:dark?'#ccc':'#475569',padding:'2px 8px',borderRadius:4,fontSize:12,fontWeight:600}}>{n.ligne}</span>
-                        </td>
-                        <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>
-                          {n.code_piece}
-                          {alts&&alts.get&&alts.get(n.code_piece)&&(alts.get(n.code_piece)||[]).length>0&&
-                            <div style={{fontSize:10,color:C.green,marginTop:2}}>✅ Alt: {(alts.get(n.code_piece)||[]).join(', ')}</div>}
-                        </td>
-                        <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:sub}} title={n.description}>{n.description}</td>
-                        <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.red,fontWeight:900,fontSize:17}}>{n.stock_negatif}</td>
-                        <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{n.cout_unitaire.toFixed(2)} $</td>
-                        <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:C.red,fontWeight:700}}>− {val.toFixed(2)} $</td>
-                        <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:sub,fontSize:12}}>{dateStr}</td>
-                        <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                          <button onClick={()=>setNoteModal(n)}
-                            style={{background:C.green+'22',color:C.green,border:`1px solid ${C.green}`,borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
-                            ✓ Vérifié
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })
-              }
-            </tbody>
-          </table>
-        </div>
-      </div>}
+            <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                <thead><tr style={{background:thBg}}>
+                  <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Fournisseur</th>
+                  <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Ligne</th>
+                  <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code Pièce</th>
+                  <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Description</th>
+                  <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Stock</th>
+                  <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'right'}}>Coût Un.</th>
+                  <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`2px solid ${bdr}`,textAlign:'right'}}>Valeur</th>
+                  <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Détecté le</th>
+                  <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Action</th>
+                </tr></thead>
+                <tbody>
+                  {filtered.length===0
+                    ? <tr><td colSpan={9} style={{textAlign:'center',padding:60,color:sub}}>✅ Aucune pièce négative</td></tr>
+                    : filtered.map((n:any)=>{
+                        const val=Math.abs(n.stock_negatif*n.cout_unitaire)
+                        const bgR=val>500?(dark?'#2b1113':'#fff8f8'):val>100?(dark?'#2b2411':'#fffcf5'):'transparent'
+                        const dateStr=n.date_apparition?new Date(n.date_apparition).toLocaleDateString('fr-CA',{month:'short',day:'numeric'}):'—'
+                        return (
+                          <tr key={n.code_piece} style={{background:bgR,borderLeft:val>500?`4px solid ${C.red}`:val>100?`4px solid ${C.yellow}`:'none'}}
+                            onMouseEnter={e=>e.currentTarget.style.background=hvr}
+                            onMouseLeave={e=>e.currentTarget.style.background=bgR}>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:600}}>{n.fournisseur}</td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                              <span style={{background:dark?'#333':'#e2e8f0',color:dark?'#ccc':'#475569',padding:'2px 8px',borderRadius:4,fontSize:12,fontWeight:600}}>{n.ligne}</span>
+                            </td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>
+                              {n.code_piece}
+                              {alts&&alts.get&&alts.get(n.code_piece)&&(alts.get(n.code_piece)||[]).length>0&&
+                                <div style={{fontSize:10,color:C.green,marginTop:2}}>✅ Alt: {(alts.get(n.code_piece)||[]).join(', ')}</div>}
+                            </td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:sub}} title={n.description}>{n.description}</td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.red,fontWeight:900,fontSize:17}}>{n.stock_negatif}</td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{n.cout_unitaire.toFixed(2)} $</td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:C.red,fontWeight:700}}>− {val.toFixed(2)} $</td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:sub,fontSize:12}}>{dateStr}</td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                              <button onClick={()=>{setNoteModal(n);setForm(emptyForm());setAltForm(emptyForm());setPhotoFiles([]);setPhotoPreviews([])}}
+                                style={{background:C.green+'22',color:C.green,border:`1px solid ${C.green}`,borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                                ✓ Vérifié
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+      }
     </> : <>
       {/* Tableau vérifié */}
       <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
-        <div style={{overflowX:'auto'}}>
-          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-            <thead><tr style={{background:thBg}}>
-              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code Pièce</th>
-              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Stock syst.</th>
-              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Serv. détail</th>
-              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Serv. interne</th>
-              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Serv. gar.</th>
-              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Pce détail</th>
-              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Récept. comm.</th>
-              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Déc. physique</th>
-              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Autre</th>
-              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Qté tablette</th>
-              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Ajustement</th>
-              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Commentaire</th>
-              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Vérifié par</th>
-              <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Date</th>
-            </tr></thead>
-            <tbody>
+        {isMobile
+          ? <div style={{display:'flex',flexDirection:'column',gap:10,padding:'10px'}}>
               {negsVerifies.length===0
-                ? <tr><td colSpan={14} style={{textAlign:'center',padding:60,color:sub}}>Aucune pièce vérifiée</td></tr>
+                ? <div style={{textAlign:'center',padding:40,color:sub}}>Aucune pièce vérifiée</div>
                 : negsVerifies.map((v:any)=>(
-                    <tr key={v.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{v.code_piece}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.red,fontWeight:700}}>{v.stock_au_moment}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{v.serv_detail ?? '—'}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{v.serv_interne ?? '—'}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{v.serv_gar ?? '—'}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{v.pce_detail ?? '—'}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{v.recept_comm ?? '—'}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{v.dec_physique ?? '—'}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{v.autre ?? '—'}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.green,fontWeight:700}}>{v.qte_reelle ?? '—'}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:900,color:Number(v.ajustement)>=0?C.green:C.red}}>
-                        {Number(v.ajustement)>=0?'+':''}{Number(v.ajustement).toFixed(0)}
-                      </td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11,maxWidth:150,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={v.commentaire||''}>{v.commentaire||'—'}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:600}}>
-                        <span style={{background:C.blue+'22',color:C.blue,padding:'2px 6px',borderRadius:10,fontSize:10}}>👤 {v.employe}</span>
-                      </td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:sub,fontSize:11,whiteSpace:'nowrap'}}>
-                        {new Date(v.date_verification).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
-                      </td>
-                    </tr>
+                    <div key={v.id} style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'14px'}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+                        <div>
+                          <div style={{fontWeight:800,fontSize:15,fontFamily:'monospace'}}>{v.code_piece}</div>
+                          <div style={{fontSize:12,color:sub}}>👤 {v.employe}</div>
+                          <div style={{fontSize:11,color:sub}}>{new Date(v.date_verification).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
+                        </div>
+                        <div style={{textAlign:'right'}}>
+                          <div style={{fontSize:22,fontWeight:900,color:Number(v.ajustement)>=0?C.green:C.red}}>
+                            {Number(v.ajustement)>=0?'+':''}{Number(v.ajustement).toFixed(0)}
+                          </div>
+                          <div style={{display:'flex',gap:4,justifyContent:'flex-end',marginTop:4}}>
+                            {v.photo_url&&<a href={v.photo_url} target="_blank" rel="noreferrer" style={{fontSize:20}}>📸</a>}
+                            {v.photo_url2&&<a href={v.photo_url2} target="_blank" rel="noreferrer" style={{fontSize:20}}>📸</a>}
+                          </div>
+                        </div>
+                      </div>
+                      {v.cause&&<div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:8,padding:'8px 10px',fontSize:12,color:C.blue,marginBottom:6}}>📋 {v.cause}</div>}
+                      {v.commentaire&&<div style={{fontSize:12,color:sub,marginBottom:6}}>💬 {v.commentaire}</div>}
+                      {v.alt_code_piece&&(
+                        <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:8,padding:'8px 10px',fontSize:12,color:C.green}}>
+                          🔄 Alt {v.alt_code_piece}: {Number(v.alt_ajustement)>=0?'+':''}{Number(v.alt_ajustement).toFixed(0)}
+                        </div>
+                      )}
+                      <button onClick={()=>retablir(v.id)} style={{marginTop:10,background:C.yellow+'22',color:C.yellow,border:'none',borderRadius:8,padding:'8px 0',fontSize:13,fontWeight:700,cursor:'pointer',width:'100%'}}>
+                        ↩ Rétablir
+                      </button>
+                    </div>
                   ))
               }
-            </tbody>
-          </table>
-        </div>
+            </div>
+          : <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                <thead><tr style={{background:thBg}}>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Stock</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Ajust.</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Cause</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Commentaire</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`2px solid ${bdr}`}}>Alt.</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Photos</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Vérifié par</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Date</th>
+                  <th style={{padding:'9px 8px',borderBottom:`2px solid ${bdr}`}}></th>
+                </tr></thead>
+                <tbody>
+                  {negsVerifies.length===0
+                    ? <tr><td colSpan={10} style={{textAlign:'center',padding:60,color:sub}}>Aucune pièce vérifiée</td></tr>
+                    : negsVerifies.map((v:any)=>(
+                        <tr key={v.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace',fontSize:11}}>{v.code_piece}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.red,fontWeight:700}}>{v.stock_au_moment}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:900,color:Number(v.ajustement)>=0?C.green:C.red}}>
+                            {Number(v.ajustement)>=0?'+':''}{Number(v.ajustement).toFixed(0)}
+                          </td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:C.blue,maxWidth:150,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v.cause||'—'}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:150,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v.commentaire||'—'}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>
+                            {v.alt_code_piece&&<div style={{color:C.green,fontWeight:700}}>{v.alt_code_piece}<br/><span style={{color:Number(v.alt_ajustement)>=0?C.green:C.red}}>{Number(v.alt_ajustement)>=0?'+':''}{Number(v.alt_ajustement)?.toFixed(0)}</span></div>}
+                          </td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                            <div style={{display:'flex',gap:4,justifyContent:'center'}}>
+                              {v.photo_url&&<a href={v.photo_url} target="_blank" rel="noreferrer" style={{fontSize:16}}>📸</a>}
+                              {v.photo_url2&&<a href={v.photo_url2} target="_blank" rel="noreferrer" style={{fontSize:16}}>📸</a>}
+                              {!v.photo_url&&<span style={{color:sub,fontSize:11}}>—</span>}
+                            </div>
+                          </td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`}}>
+                            <span style={{background:C.blue+'22',color:C.blue,padding:'2px 6px',borderRadius:10,fontSize:10}}>👤 {v.employe}</span>
+                          </td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:sub,fontSize:11,whiteSpace:'nowrap'}}>
+                            {new Date(v.date_verification).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+                          </td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`}}>
+                            <button onClick={()=>retablir(v.id)} style={{background:C.yellow+'22',color:C.yellow,border:'none',borderRadius:6,padding:'4px 8px',fontSize:11,cursor:'pointer',fontWeight:700}}>↩</button>
+                          </td>
+                        </tr>
+                      ))
+                  }
+                </tbody>
+              </table>
+            </div>
+        }
       </div>
     </>}
   </>
