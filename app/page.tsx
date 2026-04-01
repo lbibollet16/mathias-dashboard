@@ -1175,17 +1175,19 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [importStatus, setImportStatus] = useState('')
   const [importLoading, setImportLoading] = useState(false)
 
-  // Scan / recherche
+  // État de la session de comptage
+  const [etape, setEtape] = useState<'localisation'|'piece'|'quantite'>('localisation')
   const [locInput, setLocInput] = useState('')
-  const [locRecherchee, setLocRecherchee] = useState('')
-  const [pieces, setPieces] = useState<any[]>([])
-  const [stockTraction, setStockTraction] = useState<Map<string,{stock:number,reserve:number}>>(new Map())
-  const [searchLoading, setSearchLoading] = useState(false)
-  const [qtesComptees, setQtesComptees] = useState<Record<string,string>>({})
-  const [notes, setNotes] = useState<Record<string,string>>({})
-  const [saving, setSaving] = useState<string|null>(null)
-  const [savedPieces, setSavedPieces] = useState<Set<string>>(new Set())
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [pieceInput, setPieceInput] = useState('')
+  const [qteInput, setQteInput] = useState('')
+  const [locActive, setLocActive] = useState<any>(null) // {loc, pieces}
+  const [pieceActive, setPieceActive] = useState<any>(null) // info pièce
+  const [modeRapide, setModeRapide] = useState(false) // qte=1 auto
+  const [erreur, setErreur] = useState('')
+  const [avertissement, setAvertissement] = useState('')
+  const [comptesDuJour, setComptesDuJour] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const [dernierSauvegarde, setDernierSauvegarde] = useState<any>(null)
 
   // Rapport
   const [comptages, setComptages] = useState<any[]>([])
@@ -1193,9 +1195,166 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [filtEmploye, setFiltEmploye] = useState('ALL')
   const [filtEcart, setFiltEcart] = useState('ALL')
 
+  const locRef = useRef<HTMLInputElement>(null)
+  const pieceRef = useRef<HTMLInputElement>(null)
+  const qteRef = useRef<HTMLInputElement>(null)
+
   useEffect(() => {
     if (sousOnglet === 'rapport') chargerComptages()
   }, [sousOnglet])
+
+  // Sons de feedback
+  function sonOk() { try { const ctx = new AudioContext(); const o = ctx.createOscillator(); const g = ctx.createGain(); o.connect(g); g.connect(ctx.destination); o.frequency.value = 880; g.gain.setValueAtTime(0.3, ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2); o.start(); o.stop(ctx.currentTime + 0.2); } catch {} }
+  function sonErreur() { try { const ctx = new AudioContext(); const o = ctx.createOscillator(); const g = ctx.createGain(); o.connect(g); g.connect(ctx.destination); o.frequency.value = 220; g.gain.setValueAtTime(0.3, ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4); o.start(); o.stop(ctx.currentTime + 0.4); } catch {} }
+
+  // ÉTAPE 1 — Scanner localisation
+  async function scanLocalisation(e?: any) {
+    if (e) e.preventDefault()
+    const loc = locInput.trim().toUpperCase()
+    if (!loc) return
+    setLoading(true); setErreur(''); setAvertissement('')
+
+    const r = await fetch('/api/inventaire/localisations?loc=' + encodeURIComponent(loc))
+    const data = await r.json()
+
+    if (!Array.isArray(data) || data.length === 0) {
+      setErreur('❌ Localisation "' + loc + '" inconnue — vérifie le code')
+      sonErreur()
+      setLocInput('')
+      setLoading(false)
+      setTimeout(() => locRef.current?.focus(), 100)
+      return
+    }
+
+    setLocActive({ loc, pieces: data })
+    setLocInput('')
+    setEtape('piece')
+    sonOk()
+    setLoading(false)
+    setTimeout(() => pieceRef.current?.focus(), 100)
+  }
+
+  // ÉTAPE 2 — Scanner pièce
+  async function scanPiece(e?: any) {
+    if (e) e.preventDefault()
+    const code = pieceInput.trim().toUpperCase()
+    if (!code) return
+    setLoading(true); setErreur(''); setAvertissement('')
+
+    // Chercher la pièce dans la localisation active
+    const pieceDansLoc = locActive?.pieces?.find((p:any) =>
+      p.code_piece.trim().toUpperCase() === code
+    )
+
+    if (!pieceDansLoc) {
+      // La pièce n'est pas dans cette localisation — chercher si elle existe ailleurs
+      const r = await fetch('/api/sku-lookup?sku=' + encodeURIComponent(code))
+      const j = await r.json()
+
+      if (!j.found) {
+        setErreur('❌ Pièce "' + code + '" inconnue dans le système')
+        sonErreur()
+        setPieceInput('')
+        setLoading(false)
+        setTimeout(() => pieceRef.current?.focus(), 100)
+        return
+      }
+
+      // Pièce existe mais pas dans cette localisation
+      const rLoc = await fetch('/api/inventaire/localisations?code=' + encodeURIComponent(code))
+      const locData = await rLoc.json()
+      const autresLocs = Array.isArray(locData) && locData.length > 0
+        ? locData.flatMap((p:any) => [p.localisation1,p.localisation2,p.localisation3,p.localisation4].filter(Boolean))
+        : []
+
+      if (autresLocs.length > 0) {
+        setErreur('🚫 Pièce "' + code + '" n'est pas dans la localisation ' + locActive.loc + '. Mettre à la bonne place : ' + autresLocs.join(', '))
+      } else {
+        setErreur('⚠️ Pièce "' + code + '" n'a pas de localisation assignée. Entre la localisation manuellement dans le système.')
+      }
+      sonErreur()
+      setPieceInput('')
+      setLoading(false)
+      setTimeout(() => pieceRef.current?.focus(), 100)
+      return
+    }
+
+    // Pièce valide dans la localisation
+    const rStock = await fetch('/api/inventaire/stock?codes=' + encodeURIComponent(code))
+    let stockInfo = { stock: 0, reserve: 0 }
+    if (rStock.ok) {
+      const stocks = await rStock.json()
+      if (stocks.length > 0) stockInfo = { stock: stocks[0].stock, reserve: stocks[0].reserve }
+    }
+
+    setPieceActive({ ...pieceDansLoc, stockSys: (stockInfo.stock + stockInfo.reserve), reserve: stockInfo.reserve, stock: stockInfo.stock })
+    setPieceInput('')
+
+    if (modeRapide) {
+      // Mode rapide — sauvegarder directement avec qte=1
+      await sauvegarderComptage(pieceDansLoc, stockInfo, 1)
+    } else {
+      setEtape('quantite')
+      setLoading(false)
+      setTimeout(() => qteRef.current?.focus(), 100)
+    }
+  }
+
+  // ÉTAPE 3 — Sauvegarder comptage
+  async function sauvegarderComptage(piece: any, stockInfo: any, qte?: number) {
+    const qteFinal = qte !== undefined ? qte : parseFloat(qteInput)
+    if (isNaN(qteFinal)) { setErreur('Quantité invalide'); return }
+    setLoading(true)
+
+    const qteSysteme = (stockInfo?.stock || 0) + (stockInfo?.reserve || 0)
+    await fetch('/api/inventaire/comptages', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        code_piece: piece.code_piece,
+        localisation: locActive.loc,
+        qte_comptee: qteFinal,
+        qte_systeme: qteSysteme,
+        qte_reservee: stockInfo?.reserve || 0,
+        employe,
+        note: null
+      })
+    })
+
+    const nouveau = { code_piece: piece.code_piece, description: piece.description, qte_comptee: qteFinal, qte_systeme: qteSysteme, ecart: qteFinal - qteSysteme, heure: new Date().toLocaleTimeString('fr-CA') }
+    setComptesDuJour(prev => [nouveau, ...prev.filter((c:any) => c.code_piece !== piece.code_piece)])
+    setDernierSauvegarde(nouveau)
+    setQteInput('')
+    setPieceActive(null)
+    setEtape('piece')
+    sonOk()
+    setLoading(false)
+    setTimeout(() => pieceRef.current?.focus(), 100)
+  }
+
+  async function soumettreQuantite(e?: any) {
+    if (e) e.preventDefault()
+    if (!pieceActive) return
+    await sauvegarderComptage(pieceActive, { stock: pieceActive.stock, reserve: pieceActive.reserve }, undefined)
+  }
+
+  function annulerDernier() {
+    if (!dernierSauvegarde) return
+    setComptesDuJour(prev => prev.filter((c:any) => c.code_piece !== dernierSauvegarde.code_piece))
+    setDernierSauvegarde(null)
+    // Note: on ne supprime pas de Supabase car c'est une action rapide
+  }
+
+  function changerLocalisation() {
+    setEtape('localisation')
+    setLocActive(null)
+    setPieceActive(null)
+    setLocInput('')
+    setPieceInput('')
+    setQteInput('')
+    setErreur('')
+    setTimeout(() => locRef.current?.focus(), 100)
+  }
 
   async function importerLocalisations(e: any) {
     e.preventDefault()
@@ -1205,71 +1364,10 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     fd.append('file', importFile)
     const r = await fetch('/api/inventaire/import', { method: 'POST', body: fd })
     const j = await r.json()
-    if (j.success) setImportStatus(`✅ ${j.total} pièces importées`)
-    else setImportStatus(`❌ ${j.erreur}`)
+    if (j.success) setImportStatus('✅ ' + j.total + ' pièces importées')
+    else setImportStatus('❌ ' + j.erreur)
     setImportLoading(false)
     setImportFile(null)
-  }
-
-  async function rechercherLocalisation(e?: any) {
-    if (e) e.preventDefault()
-    if (!locInput.trim()) return
-    setSearchLoading(true)
-    const loc = locInput.trim()
-    setLocRecherchee(loc)
-    setPieces([])
-    setQtesComptees({})
-    setNotes({})
-    setSavedPieces(new Set())
-
-    // Charger pièces depuis Supabase
-    const r = await fetch(`/api/inventaire/localisations?loc=${encodeURIComponent(loc)}`)
-    const data = await r.json()
-    setPieces(Array.isArray(data) ? data : [])
-
-    // Charger stock depuis Traction
-    if (Array.isArray(data) && data.length > 0) {
-      const r2 = await fetch(`/api/inventaire/stock?codes=${data.map((p:any)=>p.code_piece).join(',')}`)
-      if (r2.ok) {
-        const stocks = await r2.json()
-        const map = new Map<string,{stock:number,reserve:number}>()
-        for (const s of stocks) map.set(s.code_piece, { stock: s.stock, reserve: s.reserve })
-        setStockTraction(map)
-      }
-    }
-    setSearchLoading(false)
-    setTimeout(() => inputRef.current?.focus(), 100)
-  }
-
-  async function sauvegarderComptage(piece: any) {
-    const qte = qtesComptees[piece.code_piece]
-    if (qte === undefined || qte === '') return
-    setSaving(piece.code_piece)
-    const stockInfo = stockTraction.get(piece.code_piece)
-    const qteSysteme = (stockInfo?.stock || 0) + (stockInfo?.reserve || 0)
-    await fetch('/api/inventaire/comptages', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        code_piece: piece.code_piece,
-        localisation: locRecherchee,
-        qte_comptee: parseFloat(qte),
-        qte_systeme: qteSysteme,
-        qte_reservee: stockInfo?.reserve || 0,
-        employe,
-        note: notes[piece.code_piece] || null
-      })
-    })
-    setSavedPieces(prev => new Set([...prev, piece.code_piece]))
-    setSaving(null)
-  }
-
-  async function sauvegarderTous() {
-    for (const piece of pieces) {
-      if (qtesComptees[piece.code_piece] !== undefined && qtesComptees[piece.code_piece] !== '') {
-        await sauvegarderComptage(piece)
-      }
-    }
   }
 
   async function chargerComptages() {
@@ -1285,140 +1383,178 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     if (filtEcart === 'ok' && c.ecart !== 0) return false
     return true
   })
-  const nbEcarts = comptagesFiltres.filter((c:any) => c.ecart !== 0).length
 
   return <>
     {/* Sous-onglets */}
-    <div style={{display:'flex',gap:8,marginBottom:16}}>
-      <button onClick={()=>setSousOnglet('compter')} style={{padding:'8px 18px',borderRadius:20,border:`2px solid ${sousOnglet==='compter'?C.blue:bdr}`,background:sousOnglet==='compter'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='compter'?C.blue:sub,fontSize:13,fontWeight:700,cursor:'pointer'}}>
-        📦 Compter
-      </button>
-      <button onClick={()=>setSousOnglet('rapport')} style={{padding:'8px 18px',borderRadius:20,border:`2px solid ${sousOnglet==='rapport'?C.blue:bdr}`,background:sousOnglet==='rapport'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='rapport'?C.blue:sub,fontSize:13,fontWeight:700,cursor:'pointer'}}>
-        📊 Rapport
-      </button>
+    <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center',justifyContent:'space-between'}}>
+      <div style={{display:'flex',gap:8}}>
+        <button onClick={()=>setSousOnglet('compter')} style={{padding:'8px 18px',borderRadius:20,border:`2px solid ${sousOnglet==='compter'?C.blue:bdr}`,background:sousOnglet==='compter'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='compter'?C.blue:sub,fontSize:13,fontWeight:700,cursor:'pointer'}}>
+          📦 Compter
+        </button>
+        <button onClick={()=>setSousOnglet('rapport')} style={{padding:'8px 18px',borderRadius:20,border:`2px solid ${sousOnglet==='rapport'?C.blue:bdr}`,background:sousOnglet==='rapport'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='rapport'?C.blue:sub,fontSize:13,fontWeight:700,cursor:'pointer'}}>
+          📊 Rapport
+        </button>
+      </div>
+      {sousOnglet==='compter' && (
+        <div style={{display:'flex',gap:10,alignItems:'center'}}>
+          {/* Mode rapide toggle */}
+          <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13}}>
+            <div onClick={()=>setModeRapide(!modeRapide)} style={{width:40,height:22,borderRadius:11,background:modeRapide?C.green:'#94a3b8',position:'relative',cursor:'pointer',transition:'all .2s'}}>
+              <div style={{position:'absolute',top:3,left:modeRapide?21:3,width:16,height:16,borderRadius:'50%',background:'#fff',transition:'all .2s'}}/>
+            </div>
+            <span style={{color:modeRapide?C.green:sub,fontWeight:600}}>⚡ Mode rapide (qté=1)</span>
+          </label>
+        </div>
+      )}
     </div>
 
     {sousOnglet === 'compter' ? <>
-      {/* Import fichier localisations */}
-      <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'16px 20px',marginBottom:16}}>
-        <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>📥 Importer fichier localisations</div>
+
+      {/* Import fichier */}
+      <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'12px 18px',marginBottom:16}}>
         <form onSubmit={importerLocalisations} style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
-          <input type="file" accept=".xlsx,.xls" onChange={e=>setImportFile(e.target.files?.[0]||null)}
-            style={{...S,flex:2,minWidth:200}}/>
-          <button type="submit" disabled={!importFile||importLoading}
-            style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 18px',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+          <span style={{fontSize:13,fontWeight:600,color:sub}}>📥 Mettre à jour les localisations :</span>
+          <input type="file" accept=".xlsx,.xls" onChange={e=>setImportFile(e.target.files?.[0]||null)} style={{...S,flex:1,minWidth:180,fontSize:12}}/>
+          <button type="submit" disabled={!importFile||importLoading} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'7px 14px',fontWeight:700,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
             {importLoading?'Import...':'📥 Importer'}
           </button>
-          {importStatus && <span style={{fontSize:13,color:importStatus.startsWith('✅')?C.green:C.red,fontWeight:600}}>{importStatus}</span>}
-        </form>
-        <div style={{fontSize:11,color:sub,marginTop:6}}>⚠️ L'import va remplacer toutes les localisations existantes</div>
-      </div>
-
-      {/* Scan localisation */}
-      <div style={{background:card,borderRadius:12,border:`2px solid ${C.blue}`,padding:'16px 20px',marginBottom:16}}>
-        <div style={{fontSize:13,fontWeight:700,color:C.blue,marginBottom:10}}>🔍 Scanner / Entrer une localisation</div>
-        <form onSubmit={rechercherLocalisation} style={{display:'flex',gap:10}}>
-          <input ref={inputRef} value={locInput} onChange={e=>setLocInput(e.target.value)}
-            placeholder="Ex: A-12-3, scan code-barres..."
-            style={{...S,flex:1,fontSize:15,fontWeight:700,border:`2px solid ${C.blue}`}} autoFocus/>
-          <button type="submit" disabled={searchLoading}
-            style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 20px',fontWeight:700,cursor:'pointer',fontSize:14}}>
-            {searchLoading?'...':'Chercher'}
-          </button>
+          {importStatus && <span style={{fontSize:12,color:importStatus.startsWith('✅')?C.green:C.red,fontWeight:600}}>{importStatus}</span>}
         </form>
       </div>
 
-      {/* Résultats */}
-      {locRecherchee && (
+      {/* Zone principale de scan */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 320px',gap:16,alignItems:'start'}}>
+
+        {/* Panneau de scan */}
         <div>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:10}}>
-            <div>
-              <strong style={{fontSize:16}}>📍 {locRecherchee}</strong>
-              <span style={{marginLeft:10,fontSize:13,color:sub}}>{pieces.length} pièce{pieces.length>1?'s':''}</span>
-              <span style={{marginLeft:10,fontSize:13,color:sub}}>👤 {employe}</span>
-            </div>
-            {pieces.length > 0 && (
-              <button onClick={sauvegarderTous} style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 18px',fontWeight:700,cursor:'pointer',fontSize:13}}>
-                ✅ Sauvegarder tout
+          {/* Localisation active */}
+          {locActive ? (
+            <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`2px solid ${C.green}`,borderRadius:14,padding:'16px 20px',marginBottom:16,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <div>
+                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.green,marginBottom:4}}>📍 Localisation active</div>
+                <div style={{fontSize:32,fontWeight:900,color:C.green,letterSpacing:2}}>{locActive.loc}</div>
+                <div style={{fontSize:12,color:sub,marginTop:2}}>{locActive.pieces.length} pièces dans cette localisation</div>
+              </div>
+              <button onClick={changerLocalisation} style={{background:'none',border:`1px solid ${C.green}`,borderRadius:8,padding:'8px 14px',color:C.green,cursor:'pointer',fontWeight:700,fontSize:12}}>
+                🔄 Changer
               </button>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div style={{background:dark?'#1a1a2e':'#f0f4ff',border:`2px dashed ${C.blue}`,borderRadius:14,padding:'20px',marginBottom:16,textAlign:'center'}}>
+              <div style={{fontSize:32,marginBottom:8}}>📍</div>
+              <div style={{fontSize:15,fontWeight:700,color:C.blue}}>Scanner une localisation pour commencer</div>
+            </div>
+          )}
 
-          {pieces.length === 0
-            ? <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,textAlign:'center',padding:60,color:sub}}>
-                <div style={{fontSize:32,marginBottom:10}}>🔍</div>
-                <p>Aucune pièce trouvée pour <strong>{locRecherchee}</strong></p>
+          {/* Champ scan localisation */}
+          {etape === 'localisation' && (
+            <div style={{background:card,borderRadius:14,border:`2px solid ${C.blue}`,padding:'20px',marginBottom:16}}>
+              <div style={{fontSize:13,fontWeight:700,color:C.blue,marginBottom:10}}>📍 Scanner / Entrer une localisation</div>
+              <form onSubmit={scanLocalisation} style={{display:'flex',gap:10}}>
+                <input ref={locRef} value={locInput} onChange={e=>{setLocInput(e.target.value);setErreur('')}}
+                  placeholder="Ex: PSC4-36, BA21..."
+                  style={{...S,flex:1,fontSize:18,fontWeight:700,letterSpacing:1}} autoFocus/>
+                <button type="submit" disabled={loading} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'0 20px',fontWeight:700,cursor:'pointer',fontSize:14}}>
+                  {loading?'...':'OK'}
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* Champ scan pièce */}
+          {etape === 'piece' && locActive && (
+            <div style={{background:card,borderRadius:14,border:`2px solid ${C.yellow}`,padding:'20px',marginBottom:16}}>
+              <div style={{fontSize:13,fontWeight:700,color:C.yellow,marginBottom:10}}>
+                🔍 Scanner une pièce {modeRapide && <span style={{background:C.green,color:'#fff',padding:'2px 8px',borderRadius:10,fontSize:11,marginLeft:6}}>⚡ Mode rapide — qté=1</span>}
               </div>
-            : <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
-                <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-                  <thead><tr style={{background:thBg}}>
-                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Code Pièce</th>
-                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Description</th>
-                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Localisations</th>
-                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Stock système</th>
-                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.yellow,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Réservé</th>
-                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`2px solid ${bdr}`,textAlign:'center',background:dark?'#0d2a18':'#e6f4ea'}}>Qté comptée</th>
-                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Écart</th>
-                    <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Note</th>
-                    <th style={{padding:'10px 12px',borderBottom:`2px solid ${bdr}`}}></th>
-                  </tr></thead>
-                  <tbody>
-                    {pieces.map((p:any) => {
-                      const stockInfo = stockTraction.get(p.code_piece)
-                      const stockSys = (stockInfo?.stock || 0) + (stockInfo?.reserve || 0)
-                      const reserve = stockInfo?.reserve || 0
-                      const qteC = qtesComptees[p.code_piece]
-                      const ecart = qteC !== undefined && qteC !== '' ? parseFloat(qteC) - stockSys : null
-                      const isSaved = savedPieces.has(p.code_piece)
-                      const locs = [p.localisation1,p.localisation2,p.localisation3,p.localisation4].filter(Boolean)
-                      return (
-                        <tr key={p.code_piece} style={{background:isSaved?(dark?'#0d2a18':'#f0fff4'):'transparent'}}
-                          onMouseEnter={e=>e.currentTarget.style.background=isSaved?(dark?'#0f3020':'#e6f4ea'):hvr}
-                          onMouseLeave={e=>e.currentTarget.style.background=isSaved?(dark?'#0d2a18':'#f0fff4'):'transparent'}>
-                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace',fontSize:12}}>{p.code_piece}</td>
-                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,color:sub,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={p.description}>{p.description}</td>
-                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                            <div style={{display:'flex',gap:4,flexWrap:'wrap',justifyContent:'center'}}>
-                              {locs.map((l:string,i:number)=>(
-                                <span key={i} style={{background:l===locRecherchee?(dark?'#1a233a':'#e8f0fe'):dark?'#333':'#e2e8f0',color:l===locRecherchee?C.blue:sub,padding:'2px 6px',borderRadius:4,fontSize:11,fontWeight:600}}>{l}</span>
-                              ))}
-                            </div>
-                          </td>
-                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700,color:stockSys<0?C.red:'inherit'}}>{stockSys}</td>
-                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.yellow,fontWeight:600}}>{reserve>0?`+${reserve}`:reserve}</td>
-                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',background:dark?'#0d2a18':'#e6f4ea'}}>
-                            <input type="number" step="any" value={qteC||''}
-                              onChange={e=>setQtesComptees(prev=>({...prev,[p.code_piece]:e.target.value}))}
-                              placeholder="0"
-                              style={{width:70,padding:'5px 8px',borderRadius:6,border:`1px solid ${bdr}`,background:dark?'#1a1a1a':'#fff',color:'inherit',textAlign:'center',fontWeight:700,fontSize:14}}
-                              onKeyDown={e=>{if(e.key==='Enter'){sauvegarderComptage(p)}}}/>
-                          </td>
-                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700,color:ecart===null?sub:ecart===0?C.green:C.red}}>
-                            {ecart===null?'—':ecart>0?`+${ecart}`:ecart}
-                          </td>
-                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`}}>
-                            <input value={notes[p.code_piece]||''} onChange={e=>setNotes(prev=>({...prev,[p.code_piece]:e.target.value}))}
-                              placeholder="Note..."
-                              style={{width:120,padding:'4px 8px',borderRadius:6,border:`1px solid ${bdr}`,background:dark?'#1a1a1a':'#fff',color:'inherit',fontSize:12}}/>
-                          </td>
-                          <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                            {isSaved
-                              ? <span style={{color:C.green,fontSize:12,fontWeight:700}}>✅</span>
-                              : <button onClick={()=>sauvegarderComptage(p)} disabled={saving===p.code_piece||qteC===undefined||qteC===''}
-                                  style={{background:qteC?C.blue:'#94a3b8',color:'#fff',border:'none',borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:700,cursor:qteC?'pointer':'not-allowed'}}>
-                                  {saving===p.code_piece?'...':'💾'}
-                                </button>
-                            }
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
+              <form onSubmit={scanPiece} style={{display:'flex',gap:10}}>
+                <input ref={pieceRef} value={pieceInput} onChange={e=>{setPieceInput(e.target.value);setErreur('')}}
+                  placeholder="Scanner code-barres ou taper le SKU..."
+                  style={{...S,flex:1,fontSize:18,fontWeight:700}} autoFocus/>
+                <button type="submit" disabled={loading} style={{background:C.yellow,color:'#fff',border:'none',borderRadius:8,padding:'0 20px',fontWeight:700,cursor:'pointer',fontSize:14}}>
+                  {loading?'...':'OK'}
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* Champ quantité */}
+          {etape === 'quantite' && pieceActive && (
+            <div style={{background:card,borderRadius:14,border:`2px solid ${C.green}`,padding:'20px',marginBottom:16}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14}}>
+                <div>
+                  <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.green,marginBottom:4}}>✅ Pièce trouvée</div>
+                  <div style={{fontSize:18,fontWeight:900}}>{pieceActive.code_piece}</div>
+                  <div style={{fontSize:13,color:sub,marginTop:2}}>{pieceActive.description}</div>
+                  <div style={{fontSize:12,marginTop:6,display:'flex',gap:16}}>
+                    <span style={{color:C.blue}}>Stock système: <strong>{pieceActive.stockSys}</strong></span>
+                    {pieceActive.reserve > 0 && <span style={{color:C.yellow}}>Réservé: <strong>{pieceActive.reserve}</strong></span>}
+                  </div>
+                </div>
+                <button onClick={()=>{setEtape('piece');setPieceActive(null);setQteInput('');setTimeout(()=>pieceRef.current?.focus(),100)}}
+                  style={{background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'6px 12px',color:sub,cursor:'pointer',fontSize:12}}>
+                  ← Annuler
+                </button>
               </div>
-          }
+              <form onSubmit={soumettreQuantite} style={{display:'flex',gap:10}}>
+                <input ref={qteRef} type="number" step="any" value={qteInput}
+                  onChange={e=>{setQteInput(e.target.value);setErreur('')}}
+                  placeholder="Quantité comptée..."
+                  style={{...S,flex:1,fontSize:24,fontWeight:900,textAlign:'center'}} autoFocus/>
+                <button type="submit" disabled={loading||!qteInput} style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'0 24px',fontWeight:700,cursor:qteInput?'pointer':'not-allowed',fontSize:16}}>
+                  {loading?'...':'✅ OK'}
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* Message erreur */}
+          {erreur && (
+            <div style={{background:C.red+'22',border:`2px solid ${C.red}`,borderRadius:10,padding:'12px 16px',marginBottom:12,color:C.red,fontWeight:700,fontSize:14}}>
+              {erreur}
+            </div>
+          )}
+
+          {/* Dernier sauvegardé */}
+          {dernierSauvegarde && etape === 'piece' && (
+            <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}33`,borderRadius:10,padding:'10px 14px',marginBottom:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <span style={{fontSize:13,color:C.green,fontWeight:600}}>
+                ✅ {dernierSauvegarde.code_piece} — {dernierSauvegarde.qte_comptee} unités
+                {dernierSauvegarde.ecart !== 0 && <span style={{color:C.red,marginLeft:8}}>Écart: {dernierSauvegarde.ecart>0?'+':''}{dernierSauvegarde.ecart}</span>}
+              </span>
+              <button onClick={annulerDernier} style={{background:'none',border:`1px solid ${bdr}`,borderRadius:6,padding:'4px 10px',fontSize:11,color:sub,cursor:'pointer'}}>↩ Annuler</button>
+            </div>
+          )}
         </div>
-      )}
+
+        {/* Panneau comptages de la session */}
+        <div style={{background:card,borderRadius:14,border:`1px solid ${bdr}`,overflow:'hidden',position:'sticky',top:80}}>
+          <div style={{padding:'12px 16px',borderBottom:`1px solid ${bdr}`,background:thBg,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span style={{fontSize:13,fontWeight:700}}>📋 Session ({comptesDuJour.length})</span>
+            {comptesDuJour.length > 0 && <span style={{fontSize:11,color:sub}}>👤 {employe}</span>}
+          </div>
+          <div style={{maxHeight:500,overflowY:'auto'}}>
+            {comptesDuJour.length === 0
+              ? <div style={{textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucun comptage encore</div>
+              : comptesDuJour.map((c:any, i:number) => (
+                  <div key={i} style={{padding:'10px 14px',borderBottom:`1px solid ${bdr}`,background:i===0?(dark?'#0d2a18':'#f0fff4'):'transparent'}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+                      <div>
+                        <div style={{fontSize:12,fontWeight:700}}>{c.code_piece}</div>
+                        <div style={{fontSize:10,color:sub,marginTop:1}}>{c.heure}</div>
+                      </div>
+                      <div style={{textAlign:'right'}}>
+                        <div style={{fontSize:14,fontWeight:900,color:C.green}}>{c.qte_comptee}</div>
+                        {c.ecart !== 0 && <div style={{fontSize:10,fontWeight:700,color:C.red}}>{c.ecart>0?'+':''}{c.ecart}</div>}
+                      </div>
+                    </div>
+                  </div>
+                ))
+            }
+          </div>
+        </div>
+      </div>
+
     </> : <>
       {/* Rapport */}
       <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'14px 18px',marginBottom:14,display:'flex',gap:12,flexWrap:'wrap',alignItems:'flex-end'}}>
@@ -1442,12 +1578,12 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           </select>
         </div>
         <button onClick={chargerComptages} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontWeight:700,cursor:'pointer'}}>🔄 Rafraîchir</button>
-        <div style={{background:dark?'#2b1113':'#fce8e6',border:`2px solid ${C.red}`,borderRadius:10,padding:'10px 16px',textAlign:'center',minWidth:150}}>
+        <div style={{background:dark?'#2b1113':'#fce8e6',border:`2px solid ${C.red}`,borderRadius:10,padding:'10px 16px',textAlign:'center',minWidth:130}}>
           <div style={{fontSize:11,fontWeight:700,color:C.red,textTransform:'uppercase'}}>Écarts</div>
-          <div style={{fontSize:22,fontWeight:900,color:C.red}}>{nbEcarts}</div>
+          <div style={{fontSize:22,fontWeight:900,color:C.red}}>{comptagesFiltres.filter((c:any)=>c.ecart!==0).length}</div>
         </div>
-        <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`2px solid ${C.green}`,borderRadius:10,padding:'10px 16px',textAlign:'center',minWidth:150}}>
-          <div style={{fontSize:11,fontWeight:700,color:C.green,textTransform:'uppercase'}}>Total compté</div>
+        <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`2px solid ${C.green}`,borderRadius:10,padding:'10px 16px',textAlign:'center',minWidth:130}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.green,textTransform:'uppercase'}}>Total</div>
           <div style={{fontSize:22,fontWeight:900,color:C.green}}>{comptagesFiltres.length}</div>
         </div>
       </div>
@@ -1462,15 +1598,15 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.yellow,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Réservé</th>
               <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Qté comptée</th>
               <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Écart</th>
-              <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Note</th>
               <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Employé</th>
               <th style={{padding:'10px 12px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Date & Heure</th>
             </tr></thead>
             <tbody>
               {comptagesFiltres.length === 0
-                ? <tr><td colSpan={9} style={{textAlign:'center',padding:60,color:sub}}>Aucun comptage trouvé</td></tr>
+                ? <tr><td colSpan={8} style={{textAlign:'center',padding:60,color:sub}}>Aucun comptage trouvé</td></tr>
                 : comptagesFiltres.map((c:any)=>(
-                    <tr key={c.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                    <tr key={c.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}
+                      style={{background:c.ecart!==0?(dark?'#2b1113':'#fff8f8'):'transparent'}}>
                       <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace',fontSize:12}}>{c.code_piece}</td>
                       <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                         <span style={{background:dark?'#1a233a':'#e8f0fe',color:C.blue,padding:'2px 8px',borderRadius:4,fontSize:12,fontWeight:600}}>{c.localisation}</span>
@@ -1479,9 +1615,8 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                       <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.yellow}}>{c.qte_reservee}</td>
                       <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700,color:C.green}}>{c.qte_comptee}</td>
                       <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:900,color:c.ecart===0?C.green:C.red}}>
-                        {c.ecart>0?`+${c.ecart}`:c.ecart}
+                        {c.ecart>0?'+':''}{c.ecart}
                       </td>
-                      <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{c.note||'—'}</td>
                       <td style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`}}>
                         <span style={{background:C.blue+'22',color:C.blue,padding:'2px 8px',borderRadius:10,fontSize:11}}>👤 {c.employe}</span>
                       </td>
@@ -1498,6 +1633,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     </>}
   </>
 }
+
 
 // ── Utilisateurs Tab ─────────────────────────────────────────────────────────
 function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
