@@ -2469,8 +2469,8 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     return urls
   }
 
-  async function soumettre(e: any) {
-    e.preventDefault()
+  async function soumettre(e?: any) {
+    if (e) e.preventDefault()
     if (!noteModal) return
     const n = noteModal
     const stockSys = Number(n.stock_negatif)
@@ -2585,13 +2585,18 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                 <div style={{fontSize:11,color:sub,marginTop:2}}>{c.desc}</div>
               </div>
             </div>
-            <input type="number" step="any" required
+            <input type="text" inputMode="decimal" required
               value={f[c.key]}
-              onChange={e => setF((prev:any) => ({...prev, [c.key]: e.target.value}))}
-              placeholder={c.sign === '+' ? 'Ex: 5' : c.sign === '-' ? 'Ex: -3' : 'Ex: ±2'}
-              inputMode="numeric"
-              style={{...S, fontSize:18, fontWeight:700, textAlign:'center', padding:'12px', borderRadius:10,
-                borderColor: f[c.key] !== '' ? (parseFloat(f[c.key]) < 0 && c.sign === '+' ? C.red : parseFloat(f[c.key]) > 0 && c.sign === '-' ? C.red : C.green) : bdr}}/>
+              onChange={e => {
+                const val = e.target.value
+                // Permettre: vide, -, chiffres, point/virgule
+                if (val === '' || val === '-' || /^-?\d*[.,]?\d*$/.test(val)) {
+                  setF((prev:any) => ({...prev, [c.key]: val.replace(',','.')}))
+                }
+              }}
+              placeholder={c.sign === '+' ? '0' : c.sign === '-' ? '-3' : '±0'}
+              style={{...S, fontSize:20, fontWeight:700, textAlign:'center', padding:'12px', borderRadius:10,
+                borderColor: f[c.key] !== '' && f[c.key] !== '-' ? (parseFloat(f[c.key]) < 0 && c.sign === '+' ? C.red : parseFloat(f[c.key]) > 0 && c.sign === '-' ? C.red : C.green) : bdr}}/>
           </div>
         ))}
       </div>
@@ -2825,12 +2830,10 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
             )}
 
             {/* Bouton soumettre */}
-            <form onSubmit={soumettre}>
-              <button type="submit" disabled={loading||!allFormsComplet||(photoObl&&photoFiles.length===0)}
-                style={{...btnStyle,background:allFormsComplet&&(!photoObl||photoFiles.length>0)?C.green:'#94a3b8',marginBottom:32,fontSize:18,padding:'18px 0'}}>
-                {loading?'Enregistrement...':`✅ Confirmer la vérification`}
-              </button>
-            </form>
+            <button onClick={soumettre} disabled={loading||!allFormsComplet||(photoObl&&photoFiles.length===0)}
+              style={{...btnStyle,background:allFormsComplet&&(!photoObl||photoFiles.length>0)?C.green:'#94a3b8',marginBottom:32,fontSize:18,padding:'18px 0'}}>
+              {loading?'Enregistrement...':'✅ Confirmer la vérification'}
+            </button>
           </div>
         </div>
       )
