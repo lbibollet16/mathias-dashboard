@@ -6,18 +6,28 @@ export async function GET(req: NextRequest) {
     const loc = req.nextUrl.searchParams.get('loc')?.trim()
     if (!loc) return NextResponse.json([])
 
-    // Utiliser eq avec or pour correspondance exacte insensible à la casse
-    const locUpper = loc.toUpperCase()
+    // Faire 4 requêtes séparées et combiner les résultats
+    const [r1, r2, r3, r4] = await Promise.all([
+      supabaseAdmin.from('inventaire_localisations').select('*').ilike('localisation1', loc).limit(500),
+      supabaseAdmin.from('inventaire_localisations').select('*').ilike('localisation2', loc).limit(500),
+      supabaseAdmin.from('inventaire_localisations').select('*').ilike('localisation3', loc).limit(500),
+      supabaseAdmin.from('inventaire_localisations').select('*').ilike('localisation4', loc).limit(500),
+    ])
 
-    const { data, error } = await supabaseAdmin
-      .from('inventaire_localisations')
-      .select('*')
-      .or(`localisation1.eq.${loc},localisation2.eq.${loc},localisation3.eq.${loc},localisation4.eq.${loc},localisation1.eq.${locUpper},localisation2.eq.${locUpper},localisation3.eq.${locUpper},localisation4.eq.${locUpper}`)
-      .order('code_piece')
-      .limit(1000)
+    // Combiner et dédupliquer par id
+    const seen = new Set<number>()
+    const results: any[] = []
+    for (const r of [r1, r2, r3, r4]) {
+      for (const row of r.data || []) {
+        if (!seen.has(row.id)) {
+          seen.add(row.id)
+          results.push(row)
+        }
+      }
+    }
 
-    if (error) throw error
-    return NextResponse.json(data || [])
+    results.sort((a, b) => a.code_piece.localeCompare(b.code_piece))
+    return NextResponse.json(results)
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message }, { status: 500 })
   }
