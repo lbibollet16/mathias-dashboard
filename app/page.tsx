@@ -2606,6 +2606,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                 placeholder="0"
                 style={{...S, flex:1, fontSize:22, fontWeight:700, textAlign:'center', padding:'12px', borderRadius:10, boxSizing:'border-box',
                   borderColor: f[c.key] !== '' && f[c.key] !== '-' ? (parseFloat(f[c.key]) < 0 && c.sign === '+' ? C.red : parseFloat(f[c.key]) > 0 && c.sign === '-' ? C.red : C.green) : bdr}}/>
+            </div>
           </div>
         ))}
       </div>
