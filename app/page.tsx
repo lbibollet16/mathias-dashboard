@@ -1234,7 +1234,13 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
 function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const employe = profil?.nom || profil?.email || 'Inconnu'
   const [sousOnglet, setSousOnglet] = useState<'compter'|'rapport'>('compter')
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
 
   // Import
   const [importFile, setImportFile] = useState<File|null>(null)
@@ -1246,7 +1252,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [locInput, setLocInput] = useState('')
   const [pieceInput, setPieceInput] = useState('')
   const [qteInput, setQteInput] = useState('')
-  const [locActive, setLocActive] = useState<any>(null)
+  const [locActive, setLocActive] = useState<string|null>(null)
   const [piecesLoc, setPiecesLoc] = useState<any[]>([])
   const [stockMap, setStockMap] = useState<Map<string,{stock:number,reserve:number}>>(new Map())
   const [pieceActive, setPieceActive] = useState<any>(null)
@@ -1272,6 +1278,8 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const pieceRef = useRef<HTMLInputElement>(null)
   const qteRef = useRef<HTMLInputElement>(null)
   const photoRef = useRef<HTMLInputElement>(null)
+  const locScanRef = useRef<HTMLInputElement>(null)
+  const pieceScanRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (sousOnglet === 'rapport') chargerComptages()
@@ -1280,22 +1288,73 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   function sonOk() { try { const a = new AudioContext(), o = a.createOscillator(), g = a.createGain(); o.connect(g); g.connect(a.destination); o.frequency.value=880; g.gain.setValueAtTime(0.3,a.currentTime); g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+0.15); o.start(); o.stop(a.currentTime+0.15); } catch {} }
   function sonErr() { try { const a = new AudioContext(), o = a.createOscillator(), g = a.createGain(); o.connect(g); g.connect(a.destination); o.frequency.value=200; g.gain.setValueAtTime(0.3,a.currentTime); g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+0.4); o.start(); o.stop(a.currentTime+0.4); } catch {} }
 
-  async function scanLocalisation(e?: any) {
-    if (e) e.preventDefault()
-    const loc = locInput.trim().toUpperCase()
+  // Traiter image scannée — extraire texte du code-barres via input file
+  function onLocScan(e: any) {
+    const f = e.target.files?.[0]
+    if (!f) return
+    // Sur mobile, le scan renvoie l'image — on utilise BarcodeDetector si disponible
+    const reader = new FileReader()
+    reader.onload = async () => {
+      if ('BarcodeDetector' in window) {
+        try {
+          const img = new Image()
+          img.src = reader.result as string
+          await new Promise(r => img.onload = r)
+          const detector = new (window as any).BarcodeDetector()
+          const barcodes = await detector.detect(img)
+          if (barcodes.length > 0) {
+            const val = barcodes[0].rawValue.trim().toUpperCase()
+            setLocInput(val)
+            // Auto-submit
+            setTimeout(() => scanLocalisationVal(val), 100)
+            return
+          }
+        } catch {}
+      }
+      // Fallback — ouvrir input texte avec valeur vide si pas de détection
+      locRef.current?.focus()
+    }
+    reader.readAsDataURL(f)
+    e.target.value = ''
+  }
+
+  function onPieceScan(e: any) {
+    const f = e.target.files?.[0]
+    if (!f) return
+    const reader = new FileReader()
+    reader.onload = async () => {
+      if ('BarcodeDetector' in window) {
+        try {
+          const img = new Image()
+          img.src = reader.result as string
+          await new Promise(r => img.onload = r)
+          const detector = new (window as any).BarcodeDetector()
+          const barcodes = await detector.detect(img)
+          if (barcodes.length > 0) {
+            const val = barcodes[0].rawValue.trim().toUpperCase()
+            setPieceInput(val)
+            setTimeout(() => scanPieceVal(val), 100)
+            return
+          }
+        } catch {}
+      }
+      pieceRef.current?.focus()
+    }
+    reader.readAsDataURL(f)
+    e.target.value = ''
+  }
+
+  async function scanLocalisationVal(loc: string) {
     if (!loc) return
     setLoading(true); setErreur(''); setShowCreerLoc(false)
-
     const r = await fetch('/api/inventaire/localisations?loc=' + encodeURIComponent(loc))
     const data = await r.json()
-
     if (!Array.isArray(data) || data.length === 0) {
       setErreur('❌ Localisation "' + loc + '" inconnue')
       setLocInconnue(loc); setShowCreerLoc(true); sonErr()
       setLocInput(''); setLoading(false)
       setTimeout(() => locRef.current?.focus(), 100); return
     }
-
     const codes = data.map((p:any) => p.code_piece).join(',')
     const rStock = await fetch('/api/inventaire/stock?codes=' + encodeURIComponent(codes))
     const map = new Map<string,{stock:number,reserve:number}>()
@@ -1306,6 +1365,11 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     setStockMap(map); setPiecesLoc(data); setLocActive(loc)
     setLocInput(''); setEtape('piece'); setComptesDuJour([]); sonOk(); setLoading(false)
     setTimeout(() => pieceRef.current?.focus(), 100)
+  }
+
+  async function scanLocalisation(e?: any) {
+    if (e) e.preventDefault()
+    await scanLocalisationVal(locInput.trim().toUpperCase())
   }
 
   async function creerLocalisation() {
@@ -1322,14 +1386,10 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     setTimeout(() => pieceRef.current?.focus(), 100)
   }
 
-  async function scanPiece(e?: any) {
-    if (e) e.preventDefault()
-    const code = pieceInput.trim().toUpperCase()
+  async function scanPieceVal(code: string) {
     if (!code) return
     setLoading(true); setErreur('')
-
     const pieceDansLoc = piecesLoc.find((p:any) => p.code_piece.trim().toUpperCase() === code)
-
     if (!pieceDansLoc) {
       const r = await fetch('/api/sku-lookup?sku=' + encodeURIComponent(code))
       const j = await r.json()
@@ -1347,11 +1407,9 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       sonErr(); setPieceInput(''); setLoading(false)
       setTimeout(() => pieceRef.current?.focus(), 100); return
     }
-
     const stockInfo = stockMap.get(code) || { stock: 0, reserve: 0 }
     setPieceActive({ ...pieceDansLoc, stockSys: stockInfo.stock + stockInfo.reserve, stock: stockInfo.stock, reserve: stockInfo.reserve })
     setPieceInput('')
-
     if (modeRapide) {
       await _sauvegarder(pieceDansLoc, stockInfo, 1)
     } else {
@@ -1360,22 +1418,23 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     }
   }
 
+  async function scanPiece(e?: any) {
+    if (e) e.preventDefault()
+    await scanPieceVal(pieceInput.trim().toUpperCase())
+  }
+
   async function soumettreQte(e?: any) {
     if (e) e.preventDefault()
     if (!pieceActive || !qteInput) return
     const qte = parseFloat(qteInput)
-    const stockInfo = { stock: pieceActive.stock, reserve: pieceActive.reserve }
     const ecart = qte - pieceActive.stockSys
-
-    // Si écart → demander photo
     if (ecart !== 0) {
-      setPendingComptage({ piece: pieceActive, stockInfo, qte, ecart })
-      setEtape('photo')
-      setLoading(false)
+      setPendingComptage({ piece: pieceActive, stockInfo: { stock: pieceActive.stock, reserve: pieceActive.reserve }, qte, ecart })
+      setEtape('photo'); setLoading(false)
       setTimeout(() => photoRef.current?.click(), 300)
     } else {
       setLoading(true)
-      await _sauvegarder(pieceActive, stockInfo, qte, null)
+      await _sauvegarder(pieceActive, { stock: pieceActive.stock, reserve: pieceActive.reserve }, qte, null)
     }
   }
 
@@ -1383,19 +1442,16 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     if (e) e.preventDefault()
     if (!pendingComptage || !photoFile) return
     setUploadingPhoto(true)
-
-    // Upload photo vers Supabase Storage
     let photoUrl = null
     try {
       const fd = new FormData()
       fd.append('file', photoFile)
       fd.append('code_piece', pendingComptage.piece.code_piece)
-      fd.append('localisation', locActive)
+      fd.append('localisation', locActive||'')
       const r = await fetch('/api/inventaire/photo', { method: 'POST', body: fd })
       const j = await r.json()
       if (j.url) photoUrl = j.url
     } catch {}
-
     await _sauvegarder(pendingComptage.piece, pendingComptage.stockInfo, pendingComptage.qte, photoUrl)
     setPhotoFile(null); setPhotoPreview(null); setPendingComptage(null); setUploadingPhoto(false)
   }
@@ -1465,31 +1521,29 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     return true
   })
 
-  // Styles mobile-first
-  const mobile = typeof window !== 'undefined' && window.innerWidth < 640
-  const btnPrimary = {border:'none',borderRadius:12,fontWeight:800,cursor:'pointer',fontSize:mobile?18:14,padding:mobile?'16px 0':'10px 0',width:'100%',color:'#fff'}
-  const inputBig = {...S, fontSize:mobile?22:16, fontWeight:700, padding:mobile?'16px 14px':'10px 14px', borderRadius:12}
+  const btnPrimary: any = {border:'none',borderRadius:12,fontWeight:800,cursor:'pointer',color:'#fff',width:'100%',padding:isMobile?'16px 0':'10px 0',fontSize:isMobile?17:14}
 
   return <>
     {/* Sous-onglets */}
     <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center',justifyContent:'space-between'}}>
       <div style={{display:'flex',gap:8}}>
-        <button onClick={()=>setSousOnglet('compter')} style={{padding:mobile?'10px 20px':'8px 18px',borderRadius:20,border:`2px solid ${sousOnglet==='compter'?C.blue:bdr}`,background:sousOnglet==='compter'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='compter'?C.blue:sub,fontSize:mobile?15:13,fontWeight:700,cursor:'pointer'}}>📦 Compter</button>
-        <button onClick={()=>setSousOnglet('rapport')} style={{padding:mobile?'10px 20px':'8px 18px',borderRadius:20,border:`2px solid ${sousOnglet==='rapport'?C.blue:bdr}`,background:sousOnglet==='rapport'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='rapport'?C.blue:sub,fontSize:mobile?15:13,fontWeight:700,cursor:'pointer'}}>📊 Rapport</button>
+        <button onClick={()=>setSousOnglet('compter')} style={{padding:isMobile?'10px 18px':'8px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='compter'?C.blue:bdr}`,background:sousOnglet==='compter'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='compter'?C.blue:sub,fontSize:isMobile?14:13,fontWeight:700,cursor:'pointer'}}>📦 Compter</button>
+        <button onClick={()=>setSousOnglet('rapport')} style={{padding:isMobile?'10px 18px':'8px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='rapport'?C.blue:bdr}`,background:sousOnglet==='rapport'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='rapport'?C.blue:sub,fontSize:isMobile?14:13,fontWeight:700,cursor:'pointer'}}>📊 Rapport</button>
       </div>
       {sousOnglet==='compter' && (
         <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer'}}>
           <div onClick={()=>setModeRapide(!modeRapide)} style={{width:44,height:24,borderRadius:12,background:modeRapide?C.green:'#94a3b8',position:'relative',cursor:'pointer',transition:'all .2s'}}>
             <div style={{position:'absolute',top:4,left:modeRapide?23:4,width:16,height:16,borderRadius:'50%',background:'#fff',transition:'all .2s'}}/>
           </div>
-          <span style={{color:modeRapide?C.green:sub,fontWeight:600,fontSize:mobile?14:13}}>⚡ Mode rapide</span>
+          <span style={{color:modeRapide?C.green:sub,fontWeight:600,fontSize:isMobile?14:13}}>⚡ Mode rapide</span>
         </label>
       )}
     </div>
 
     {sousOnglet==='compter' ? <>
-      {/* Import — seulement sur desktop */}
-      {!mobile && (
+
+      {/* Import — desktop seulement */}
+      {!isMobile && (
         <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'10px 16px',marginBottom:12}}>
           <form onSubmit={importerLocalisations} style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
             <span style={{fontSize:12,fontWeight:600,color:sub}}>📥 Mettre à jour localisations:</span>
@@ -1502,48 +1556,58 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         </div>
       )}
 
-      {/* Layout — grille sur desktop, colonne sur mobile */}
-      <div style={{display:'grid',gridTemplateColumns:mobile?'1fr':'1fr 300px',gap:16,alignItems:'start'}}>
+      {/* Inputs cachés pour scan caméra */}
+      <input ref={locScanRef} type="file" accept="image/*" capture="environment" onChange={onLocScan} style={{display:'none'}}/>
+      <input ref={pieceScanRef} type="file" accept="image/*" capture="environment" onChange={onPieceScan} style={{display:'none'}}/>
+      <input ref={photoRef} type="file" accept="image/*" capture="environment" onChange={onPhotoChange} style={{display:'none'}}/>
+
+      <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 300px',gap:16,alignItems:'start'}}>
         <div>
+
           {/* Localisation active */}
           {locActive && (
-            <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`2px solid ${C.green}`,borderRadius:14,padding:mobile?'14px 16px':'12px 16px',marginBottom:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`2px solid ${C.green}`,borderRadius:14,padding:isMobile?'14px 16px':'12px 16px',marginBottom:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
               <div>
-                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.green}}>📍 Localisation</div>
-                <div style={{fontSize:mobile?36:26,fontWeight:900,color:C.green,letterSpacing:2,marginTop:2}}>{locActive}</div>
+                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.green}}>📍 Localisation active</div>
+                <div style={{fontSize:isMobile?34:26,fontWeight:900,color:C.green,letterSpacing:2,marginTop:2}}>{locActive}</div>
                 <div style={{fontSize:12,color:sub}}>{piecesLoc.length} pièces • 👤 {employe}</div>
               </div>
               <div style={{display:'flex',flexDirection:'column',gap:6}}>
                 {dernierComptage && (
-                  <button onClick={annulerDernier} style={{background:C.yellow+'22',border:`1px solid ${C.yellow}`,borderRadius:8,padding:'6px 10px',color:C.yellow,cursor:'pointer',fontWeight:700,fontSize:12}}>
-                    ↩ Annuler
-                  </button>
+                  <button onClick={annulerDernier} style={{background:C.yellow+'22',border:`1px solid ${C.yellow}`,borderRadius:8,padding:'7px 12px',color:C.yellow,cursor:'pointer',fontWeight:700,fontSize:13}}>↩ Annuler</button>
                 )}
-                <button onClick={changerLocalisation} style={{background:'none',border:`1px solid ${C.green}`,borderRadius:8,padding:'6px 10px',color:C.green,cursor:'pointer',fontWeight:700,fontSize:12}}>
-                  🔄 Changer
-                </button>
+                <button onClick={changerLocalisation} style={{background:'none',border:`1px solid ${C.green}`,borderRadius:8,padding:'7px 12px',color:C.green,cursor:'pointer',fontWeight:700,fontSize:13}}>🔄 Changer</button>
               </div>
             </div>
           )}
 
           {/* ÉTAPE LOCALISATION */}
           {etape==='localisation' && (
-            <div style={{background:card,borderRadius:14,border:`2px solid ${C.blue}`,padding:mobile?'20px':'16px',marginBottom:12}}>
-              <div style={{fontSize:mobile?16:13,fontWeight:700,color:C.blue,marginBottom:12}}>📍 Scanner / Entrer localisation</div>
-              <form onSubmit={scanLocalisation}>
-                <input ref={locRef} value={locInput} onChange={e=>{setLocInput(e.target.value);setErreur('');setShowCreerLoc(false)}}
+            <div style={{background:card,borderRadius:14,border:`2px solid ${C.blue}`,padding:isMobile?'20px':'16px',marginBottom:12}}>
+              <div style={{fontSize:isMobile?16:13,fontWeight:700,color:C.blue,marginBottom:14}}>📍 Localisation</div>
+              <form onSubmit={scanLocalisation} style={{display:'flex',flexDirection:'column',gap:10}}>
+                <input ref={locRef} value={locInput} onChange={e=>{setLocInput(e.target.value.toUpperCase());setErreur('');setShowCreerLoc(false)}}
                   placeholder="Ex: PSC4-36"
-                  style={{...inputBig,marginBottom:10}} autoFocus autoCapitalize="characters"/>
-                <button type="submit" disabled={loading} style={{...btnPrimary,background:C.blue}}>
-                  {loading?'...':'🔍 Chercher'}
-                </button>
+                  style={{...S,fontSize:isMobile?20:16,fontWeight:700,padding:isMobile?'16px 14px':'10px 14px',borderRadius:12,textAlign:'center',letterSpacing:2}} autoCapitalize="characters"/>
+                <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'1fr auto',gap:10}}>
+                  {isMobile && (
+                    <button type="button" onClick={()=>locScanRef.current?.click()}
+                      style={{...btnPrimary,background:dark?'#1a233a':'#e8f0fe',color:C.blue,border:`2px solid ${C.blue}`,fontSize:15}}>
+                      📷 Scanner
+                    </button>
+                  )}
+                  <button type="submit" disabled={loading} style={{...btnPrimary,background:C.blue}}>
+                    {loading?'...':isMobile?'🔍 Chercher':'OK'}
+                  </button>
+                </div>
               </form>
               {showCreerLoc && (
-                <div style={{marginTop:12,background:dark?'#1a1a2e':'#fff8e1',border:`1px solid ${C.yellow}`,borderRadius:10,padding:'12px 14px'}}>
-                  <p style={{color:C.yellow,fontWeight:700,fontSize:13,margin:'0 0 8px'}}>⚠️ "{locInconnue}" inconnue</p>
-                  <div style={{display:'flex',gap:8,flexDirection:mobile?'column':'row'}}>
-                    <button onClick={creerLocalisation} style={{...btnPrimary,background:C.green,padding:'10px 0'}}>✅ Créer cette localisation</button>
-                    <button onClick={()=>{setShowCreerLoc(false);setErreur('');setLocInconnue('')}} style={{...btnPrimary,background:'#94a3b8',padding:'10px 0'}}>Annuler</button>
+                <div style={{marginTop:14,background:dark?'#1a1a2e':'#fff8e1',border:`2px solid ${C.yellow}`,borderRadius:12,padding:'14px 16px'}}>
+                  <p style={{color:C.yellow,fontWeight:700,fontSize:14,margin:'0 0 6px'}}>⚠️ "{locInconnue}" inconnue</p>
+                  <p style={{color:sub,fontSize:12,margin:'0 0 12px'}}>Cette localisation n'existe pas. Veux-tu la créer ?</p>
+                  <div style={{display:'flex',gap:8,flexDirection:isMobile?'column':'row'}}>
+                    <button onClick={creerLocalisation} style={{...btnPrimary,background:C.green,padding:'12px 0'}}>✅ Créer "{locInconnue}"</button>
+                    <button onClick={()=>{setShowCreerLoc(false);setErreur('');setLocInconnue('')}} style={{...btnPrimary,background:'#94a3b8',padding:'12px 0'}}>Annuler</button>
                   </div>
                 </div>
               )}
@@ -1552,93 +1616,87 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 
           {/* ÉTAPE PIÈCE */}
           {etape==='piece' && locActive && (
-            <div style={{background:card,borderRadius:14,border:`2px solid ${C.yellow}`,padding:mobile?'20px':'16px',marginBottom:12}}>
-              <div style={{fontSize:mobile?16:13,fontWeight:700,color:C.yellow,marginBottom:12}}>
+            <div style={{background:card,borderRadius:14,border:`2px solid ${C.yellow}`,padding:isMobile?'20px':'16px',marginBottom:12}}>
+              <div style={{fontSize:isMobile?16:13,fontWeight:700,color:C.yellow,marginBottom:14}}>
                 🔍 Scanner une pièce
-                {modeRapide && <span style={{background:C.green,color:'#fff',padding:'2px 8px',borderRadius:10,fontSize:11,marginLeft:8}}>⚡ qté=1</span>}
+                {modeRapide && <span style={{background:C.green,color:'#fff',padding:'3px 10px',borderRadius:10,fontSize:12,marginLeft:8}}>⚡ qté=1</span>}
               </div>
-              <form onSubmit={scanPiece}>
-                <input ref={pieceRef} value={pieceInput} onChange={e=>{setPieceInput(e.target.value);setErreur('')}}
-                  placeholder="Scanner ou taper SKU..."
-                  style={{...inputBig,marginBottom:10}} autoFocus autoCapitalize="characters"/>
-                <button type="submit" disabled={loading} style={{...btnPrimary,background:C.yellow}}>
-                  {loading?'...':'✅ Confirmer'}
-                </button>
+              <form onSubmit={scanPiece} style={{display:'flex',flexDirection:'column',gap:10}}>
+                <input ref={pieceRef} value={pieceInput} onChange={e=>{setPieceInput(e.target.value.toUpperCase());setErreur('')}}
+                  placeholder="Scanner ou taper le SKU..."
+                  style={{...S,fontSize:isMobile?20:16,fontWeight:700,padding:isMobile?'16px 14px':'10px 14px',borderRadius:12,textAlign:'center'}} autoCapitalize="characters"/>
+                <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'1fr auto',gap:10}}>
+                  {isMobile && (
+                    <button type="button" onClick={()=>pieceScanRef.current?.click()}
+                      style={{...btnPrimary,background:dark?'#2b2411':'#fff8e1',color:C.yellow,border:`2px solid ${C.yellow}`,fontSize:15}}>
+                      📷 Scanner
+                    </button>
+                  )}
+                  <button type="submit" disabled={loading} style={{...btnPrimary,background:C.yellow}}>
+                    {loading?'...':isMobile?'✅ Confirmer':'OK'}
+                  </button>
+                </div>
               </form>
             </div>
           )}
 
           {/* ÉTAPE QUANTITÉ */}
           {etape==='quantite' && pieceActive && (
-            <div style={{background:card,borderRadius:14,border:`2px solid ${C.green}`,padding:mobile?'20px':'16px',marginBottom:12}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12}}>
-                <div>
-                  <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.green}}>✅ Pièce</div>
-                  <div style={{fontSize:mobile?22:18,fontWeight:900,marginTop:2}}>{pieceActive.code_piece}</div>
-                  <div style={{fontSize:12,color:sub,marginTop:2}}>{pieceActive.description}</div>
-                  <div style={{fontSize:mobile?14:12,marginTop:6,display:'flex',gap:12,flexWrap:'wrap'}}>
-                    <span style={{color:C.blue}}>Stock: <strong>{pieceActive.stockSys}</strong></span>
-                    {pieceActive.reserve>0 && <span style={{color:C.yellow}}>Réservé: <strong>{pieceActive.reserve}</strong></span>}
+            <div style={{background:card,borderRadius:14,border:`2px solid ${C.green}`,padding:isMobile?'20px':'16px',marginBottom:12}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14}}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.green}}>✅ Pièce confirmée</div>
+                  <div style={{fontSize:isMobile?22:18,fontWeight:900,marginTop:2}}>{pieceActive.code_piece}</div>
+                  <div style={{fontSize:13,color:sub,marginTop:2}}>{pieceActive.description}</div>
+                  <div style={{fontSize:isMobile?14:12,marginTop:6,display:'flex',gap:14,flexWrap:'wrap'}}>
+                    <span style={{color:C.blue,fontWeight:600}}>Stock: <strong>{pieceActive.stockSys}</strong></span>
+                    {pieceActive.reserve>0 && <span style={{color:C.yellow,fontWeight:600}}>Réservé: <strong>{pieceActive.reserve}</strong></span>}
                   </div>
                 </div>
                 <button onClick={()=>{setEtape('piece');setPieceActive(null);setQteInput('');setTimeout(()=>pieceRef.current?.focus(),100)}}
-                  style={{background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'6px 10px',color:sub,cursor:'pointer',fontSize:12}}>
+                  style={{background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'6px 12px',color:sub,cursor:'pointer',fontSize:12,marginLeft:10}}>
                   ↩ Mauvaise
                 </button>
               </div>
-              <form onSubmit={soumettreQte}>
+              <form onSubmit={soumettreQte} style={{display:'flex',flexDirection:'column',gap:10}}>
                 <input ref={qteRef} type="number" inputMode="numeric" step="any" value={qteInput}
                   onChange={e=>{setQteInput(e.target.value);setErreur('')}}
                   placeholder="Quantité sur tablette"
-                  style={{...inputBig,textAlign:'center',fontSize:mobile?32:22,marginBottom:10}} autoFocus/>
+                  style={{...S,fontSize:isMobile?36:22,fontWeight:900,textAlign:'center',padding:isMobile?'20px 14px':'12px 14px',borderRadius:12}} autoFocus/>
                 <button type="submit" disabled={loading||!qteInput} style={{...btnPrimary,background:qteInput?C.green:'#94a3b8'}}>
-                  {loading?'...':'✅ Confirmer quantité'}
+                  {loading?'Sauvegarde...':'✅ Confirmer'}
                 </button>
               </form>
             </div>
           )}
 
-          {/* ÉTAPE PHOTO — obligatoire si écart */}
+          {/* ÉTAPE PHOTO */}
           {etape==='photo' && pendingComptage && (
-            <div style={{background:card,borderRadius:14,border:`2px solid ${C.red}`,padding:mobile?'20px':'16px',marginBottom:12}}>
-              <div style={{fontSize:mobile?16:13,fontWeight:700,color:C.red,marginBottom:4}}>📸 Photo requise — Écart détecté</div>
-              <div style={{background:C.red+'22',borderRadius:8,padding:'10px 14px',marginBottom:14}}>
-                <div style={{fontSize:mobile?18:14,fontWeight:900,color:C.red}}>
-                  {pendingComptage.piece.code_piece} — Écart: {pendingComptage.ecart>0?'+':''}{pendingComptage.ecart}
+            <div style={{background:card,borderRadius:14,border:`2px solid ${C.red}`,padding:isMobile?'20px':'16px',marginBottom:12}}>
+              <div style={{fontSize:isMobile?16:13,fontWeight:700,color:C.red,marginBottom:10}}>📸 Photo obligatoire — Écart détecté</div>
+              <div style={{background:C.red+'22',borderRadius:10,padding:'12px 16px',marginBottom:14}}>
+                <div style={{fontSize:isMobile?20:15,fontWeight:900,color:C.red}}>
+                  Écart: {pendingComptage.ecart>0?'+':''}{pendingComptage.ecart} unités
                 </div>
-                <div style={{fontSize:12,color:sub,marginTop:2}}>
-                  Stock système: {pendingComptage.piece.stockSys} → Compté: {pendingComptage.qte}
+                <div style={{fontSize:13,color:sub,marginTop:3}}>
+                  {pendingComptage.piece.code_piece} — Système: {pendingComptage.piece.stockSys} → Compté: {pendingComptage.qte}
                 </div>
               </div>
-              <p style={{color:sub,fontSize:13,margin:'0 0 12px'}}>Prends une photo du stock sur la tablette pour justifier l'écart.</p>
-              
-              {/* Input photo caméra */}
-              <input ref={photoRef} type="file" accept="image/*" capture="environment"
-                onChange={onPhotoChange} style={{display:'none'}}/>
-              
-              {!photoPreview ? (
-                <button onClick={()=>photoRef.current?.click()}
-                  style={{...btnPrimary,background:C.blue,marginBottom:10}}>
-                  📷 Prendre une photo
-                </button>
-              ) : (
-                <div style={{marginBottom:12}}>
-                  <img src={photoPreview} style={{width:'100%',borderRadius:10,maxHeight:250,objectFit:'cover',border:`2px solid ${C.green}`}} alt="Photo"/>
-                  <button onClick={()=>photoRef.current?.click()}
-                    style={{...btnPrimary,background:'#94a3b8',marginTop:8,padding:'10px 0'}}>
-                    🔄 Reprendre
-                  </button>
-                </div>
-              )}
-
+              <p style={{color:sub,fontSize:13,margin:'0 0 14px'}}>Prends une photo du stock sur la tablette pour justifier l'écart.</p>
+              {!photoPreview
+                ? <button onClick={()=>photoRef.current?.click()} style={{...btnPrimary,background:C.blue,marginBottom:10}}>📷 Prendre une photo</button>
+                : <div style={{marginBottom:12}}>
+                    <img src={photoPreview} style={{width:'100%',borderRadius:12,maxHeight:260,objectFit:'cover',border:`2px solid ${C.green}`}} alt="Photo"/>
+                    <button onClick={()=>photoRef.current?.click()} style={{...btnPrimary,background:'#94a3b8',marginTop:8,padding:'10px 0',fontSize:14}}>🔄 Reprendre</button>
+                  </div>
+              }
               {photoPreview && (
-                <button onClick={soumettreAvecPhoto} disabled={uploadingPhoto}
-                  style={{...btnPrimary,background:C.green}}>
-                  {uploadingPhoto?'Envoi...':'✅ Confirmer avec photo'}
+                <button onClick={soumettreAvecPhoto} disabled={uploadingPhoto} style={{...btnPrimary,background:C.green}}>
+                  {uploadingPhoto?'Envoi en cours...':'✅ Confirmer avec photo'}
                 </button>
               )}
               <button onClick={()=>{setEtape('quantite');setPendingComptage(null);setPhotoFile(null);setPhotoPreview(null)}}
-                style={{...btnPrimary,background:'none',color:sub,border:`1px solid ${bdr}`,marginTop:8}}>
+                style={{...btnPrimary,background:'transparent',color:sub,border:`1px solid ${bdr}`,marginTop:10,fontSize:14}}>
                 ← Modifier la quantité
               </button>
             </div>
@@ -1646,52 +1704,83 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 
           {/* Erreur */}
           {erreur && (
-            <div style={{background:C.red+'22',border:`2px solid ${C.red}`,borderRadius:10,padding:'12px 16px',marginBottom:12,color:C.red,fontWeight:700,fontSize:mobile?15:13}}>
+            <div style={{background:C.red+'22',border:`2px solid ${C.red}`,borderRadius:12,padding:'14px 16px',marginBottom:12,color:C.red,fontWeight:700,fontSize:isMobile?15:13}}>
               {erreur}
             </div>
           )}
 
-          {/* Liste pièces localisation — masquée sur mobile si en train de scanner */}
-          {locActive && piecesLoc.length > 0 && (!mobile || etape==='piece') && (
+          {/* Tableau pièces de la localisation */}
+          {locActive && piecesLoc.length > 0 && etape !== 'photo' && (
             <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden',marginTop:8}}>
-              <div style={{padding:'10px 14px',borderBottom:`1px solid ${bdr}`,background:thBg,fontSize:12,fontWeight:700,color:sub}}>
-                📦 Pièces dans {locActive} ({piecesLoc.length}) — {comptesDuJour.length} comptées
+              <div style={{padding:'10px 14px',borderBottom:`1px solid ${bdr}`,background:thBg,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <span style={{fontSize:13,fontWeight:700}}>📦 {locActive} — {piecesLoc.length} pièces</span>
+                <span style={{fontSize:12,color:C.green,fontWeight:700}}>{comptesDuJour.length} comptées</span>
               </div>
-              <div style={{maxHeight:mobile?200:300,overflowY:'auto'}}>
-                <table style={{width:'100%',borderCollapse:'collapse',fontSize:mobile?13:12}}>
-                  <thead><tr style={{background:thBg}}>
-                    <th style={{padding:'7px 10px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`,textAlign:'left'}}>Code</th>
-                    {!mobile && <th style={{padding:'7px 10px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`,textAlign:'left'}}>Description</th>}
-                    <th style={{padding:'7px 10px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>Stock</th>
-                    <th style={{padding:'7px 10px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>Compté</th>
-                  </tr></thead>
-                  <tbody>
+              {isMobile
+                ? <div style={{maxHeight:300,overflowY:'auto'}}>
                     {piecesLoc.map((p:any) => {
                       const si = stockMap.get(p.code_piece)||{stock:0,reserve:0}
                       const c = comptesDuJour.find((x:any)=>x.code_piece===p.code_piece)
+                      const stockTotal = si.stock + si.reserve
                       return (
-                        <tr key={p.code_piece} style={{background:c?(dark?'#0d2a18':'#f0fff4'):'transparent'}}>
-                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace',fontSize:11}}>{p.code_piece}</td>
-                          {!mobile && <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,color:sub,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.description}</td>}
-                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700,color:(si.stock+si.reserve)<0?C.red:'inherit'}}>{si.stock+si.reserve}</td>
-                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                        <div key={p.code_piece} style={{padding:'12px 14px',borderBottom:`1px solid ${bdr}`,background:c?(dark?'#0d2a18':'#f0fff4'):'transparent',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontWeight:700,fontSize:14,fontFamily:'monospace'}}>{p.code_piece}</div>
+                            <div style={{fontSize:11,color:sub,marginTop:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.description}</div>
+                            <div style={{fontSize:12,marginTop:2,display:'flex',gap:10}}>
+                              <span style={{color:stockTotal<0?C.red:C.blue}}>Stock: <strong>{stockTotal}</strong></span>
+                              {si.reserve>0&&<span style={{color:C.yellow}}>Rés: <strong>{si.reserve}</strong></span>}
+                            </div>
+                          </div>
+                          <div style={{textAlign:'right',marginLeft:10}}>
                             {c
-                              ? <span style={{color:c.ecart===0?C.green:C.red,fontWeight:900}}>{c.qte_comptee}{c.ecart!==0&&` (${c.ecart>0?'+':''}${c.ecart})`}</span>
-                              : <span style={{color:sub}}>—</span>
+                              ? <div>
+                                  <div style={{fontSize:18,fontWeight:900,color:c.ecart===0?C.green:C.red}}>{c.qte_comptee}</div>
+                                  {c.ecart!==0&&<div style={{fontSize:11,color:C.red,fontWeight:700}}>{c.ecart>0?'+':''}{c.ecart}</div>}
+                                  {c.photo_url&&<div style={{fontSize:14}}>📸</div>}
+                                </div>
+                              : <div style={{width:36,height:36,borderRadius:'50%',border:`2px dashed ${bdr}`,display:'flex',alignItems:'center',justifyContent:'center',color:sub,fontSize:18}}>—</div>
                             }
-                          </td>
-                        </tr>
+                          </div>
+                        </div>
                       )
                     })}
-                  </tbody>
-                </table>
-              </div>
+                  </div>
+                : <div style={{maxHeight:280,overflowY:'auto'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                      <thead><tr style={{background:thBg}}>
+                        <th style={{padding:'7px 10px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`,textAlign:'left'}}>Code</th>
+                        <th style={{padding:'7px 10px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`,textAlign:'left'}}>Description</th>
+                        <th style={{padding:'7px 10px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>Stock sys.</th>
+                        <th style={{padding:'7px 10px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.yellow,borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>Réservé</th>
+                        <th style={{padding:'7px 10px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>Compté</th>
+                        <th style={{padding:'7px 10px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>Écart</th>
+                      </tr></thead>
+                      <tbody>
+                        {piecesLoc.map((p:any) => {
+                          const si = stockMap.get(p.code_piece)||{stock:0,reserve:0}
+                          const c = comptesDuJour.find((x:any)=>x.code_piece===p.code_piece)
+                          return (
+                            <tr key={p.code_piece} style={{background:c?(dark?'#0d2a18':'#f0fff4'):'transparent'}}>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace',fontSize:11}}>{p.code_piece}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,color:sub,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.description}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700,color:(si.stock+si.reserve)<0?C.red:'inherit'}}>{si.stock+si.reserve}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.yellow}}>{si.reserve||0}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700,color:c?C.green:sub}}>{c?c.qte_comptee:'—'}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700,color:c&&c.ecart!==0?C.red:C.green}}>{c?(c.ecart===0?'✅':(c.ecart>0?'+':'')+c.ecart):'—'}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+              }
             </div>
           )}
         </div>
 
-        {/* Session — masquée sur mobile */}
-        {!mobile && (
+        {/* Panneau session — desktop seulement */}
+        {!isMobile && (
           <div style={{background:card,borderRadius:14,border:`1px solid ${bdr}`,overflow:'hidden',position:'sticky',top:80}}>
             <div style={{padding:'10px 14px',borderBottom:`1px solid ${bdr}`,background:thBg,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
               <span style={{fontSize:13,fontWeight:700}}>📋 Session ({comptesDuJour.length})</span>
@@ -1712,7 +1801,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                             <div style={{fontSize:14,fontWeight:900,color:C.green}}>{c.qte_comptee}</div>
                             {c.ecart!==0&&<div style={{fontSize:10,fontWeight:700,color:C.red}}>{c.ecart>0?'+':''}{c.ecart}</div>}
                           </div>
-                          {c.photo_url && <span style={{fontSize:16}}>📸</span>}
+                          {c.photo_url&&<span style={{fontSize:16}}>📸</span>}
                         </div>
                       </div>
                     </div>
@@ -1721,37 +1810,23 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
             </div>
           </div>
         )}
-
-        {/* Résumé session sur mobile */}
-        {mobile && comptesDuJour.length > 0 && (
-          <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'10px 14px',marginTop:4}}>
-            <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>📋 Session — {comptesDuJour.length} pièces comptées</div>
-            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-              {comptesDuJour.map((c:any,i:number)=>(
-                <span key={i} style={{background:c.ecart===0?(dark?'#0d2a18':'#e6f4ea'):C.red+'22',color:c.ecart===0?C.green:C.red,padding:'4px 10px',borderRadius:20,fontSize:12,fontWeight:700}}>
-                  {c.code_piece}: {c.qte_comptee} {c.ecart!==0&&`(${c.ecart>0?'+':''}${c.ecart})`} {c.photo_url&&'📸'}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
     </> : <>
       {/* Rapport */}
       <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'12px 16px',marginBottom:12,display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
-        <div style={{flex:1,minWidth:130}}>
+        <div style={{flex:1,minWidth:isMobile?'100%':130}}>
           <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:4}}>Date</div>
           <input type="date" value={filtDate} onChange={e=>setFiltDate(e.target.value)} style={S}/>
         </div>
-        <div style={{flex:1,minWidth:130}}>
+        <div style={{flex:1,minWidth:isMobile?'45%':130}}>
           <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:4}}>Employé</div>
           <select value={filtEmploye} onChange={e=>setFiltEmploye(e.target.value)} style={S}>
             <option value="ALL">Tous</option>
             {employes.map((e:string)=><option key={e} value={e}>{e}</option>)}
           </select>
         </div>
-        <div style={{flex:1,minWidth:130}}>
+        <div style={{flex:1,minWidth:isMobile?'45%':130}}>
           <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:4}}>Écarts</div>
           <select value={filtEcart} onChange={e=>setFiltEcart(e.target.value)} style={S}>
             <option value="ALL">Tous</option>
@@ -1760,60 +1835,88 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           </select>
         </div>
         <button onClick={chargerComptages} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer'}}>🔄</button>
-        <div style={{background:dark?'#2b1113':'#fce8e6',border:`2px solid ${C.red}`,borderRadius:10,padding:'8px 14px',textAlign:'center',minWidth:100}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.red,textTransform:'uppercase'}}>Écarts</div>
-          <div style={{fontSize:20,fontWeight:900,color:C.red}}>{cFiltres.filter((c:any)=>c.ecart!==0).length}</div>
-        </div>
-        <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`2px solid ${C.green}`,borderRadius:10,padding:'8px 14px',textAlign:'center',minWidth:100}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.green,textTransform:'uppercase'}}>Total</div>
-          <div style={{fontSize:20,fontWeight:900,color:C.green}}>{cFiltres.length}</div>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+          <div style={{background:dark?'#2b1113':'#fce8e6',border:`2px solid ${C.red}`,borderRadius:10,padding:'8px 14px',textAlign:'center',minWidth:100}}>
+            <div style={{fontSize:10,fontWeight:700,color:C.red,textTransform:'uppercase'}}>Écarts</div>
+            <div style={{fontSize:20,fontWeight:900,color:C.red}}>{cFiltres.filter((c:any)=>c.ecart!==0).length}</div>
+          </div>
+          <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`2px solid ${C.green}`,borderRadius:10,padding:'8px 14px',textAlign:'center',minWidth:100}}>
+            <div style={{fontSize:10,fontWeight:700,color:C.green,textTransform:'uppercase'}}>Total</div>
+            <div style={{fontSize:20,fontWeight:900,color:C.green}}>{cFiltres.length}</div>
+          </div>
         </div>
       </div>
 
-      <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
-        <div style={{overflowX:'auto'}}>
-          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-            <thead><tr style={{background:thBg}}>
-              {['Code Pièce','Localisation','Stock sys.','Réservé','Compté','Écart','Photo','Employé','Date'].map((h,i)=>(
-                <th key={i} style={{padding:'9px 10px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:i>1?'center':'left'}}>{h}</th>
-              ))}
-            </tr></thead>
-            <tbody>
-              {cFiltres.length===0
-                ? <tr><td colSpan={9} style={{textAlign:'center',padding:50,color:sub}}>Aucun comptage</td></tr>
-                : cFiltres.map((c:any)=>(
-                    <tr key={c.id} style={{background:c.ecart!==0?(dark?'#2b1113':'#fff8f8'):'transparent'}}
-                      onMouseEnter={e=>e.currentTarget.style.background=c.ecart!==0?(dark?'#3a1a1a':'#ffe8e8'):hvr}
-                      onMouseLeave={e=>e.currentTarget.style.background=c.ecart!==0?(dark?'#2b1113':'#fff8f8'):'transparent'}>
-                      <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace',fontSize:11}}>{c.code_piece}</td>
-                      <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}>
-                        <span style={{background:dark?'#1a233a':'#e8f0fe',color:C.blue,padding:'2px 6px',borderRadius:4,fontSize:11,fontWeight:600}}>{c.localisation}</span>
-                        {c.note==='nouvelle_localisation'&&<span style={{background:C.yellow+'22',color:C.yellow,padding:'2px 5px',borderRadius:4,fontSize:9,marginLeft:4}}>Nouvelle</span>}
-                      </td>
-                      <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{c.qte_systeme}</td>
-                      <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.yellow}}>{c.qte_reservee}</td>
-                      <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700,color:C.green}}>{c.qte_comptee}</td>
-                      <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:900,color:c.ecart===0?C.green:C.red}}>
-                        {c.ecart>0?'+':''}{c.ecart}
-                      </td>
-                      <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                        {c.photo_url
-                          ? <a href={c.photo_url} target="_blank" rel="noreferrer" style={{color:C.blue,textDecoration:'none',fontSize:18}}>📸</a>
-                          : <span style={{color:sub,fontSize:11}}>—</span>}
-                      </td>
-                      <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}>
-                        <span style={{background:C.blue+'22',color:C.blue,padding:'2px 6px',borderRadius:10,fontSize:10}}>👤 {c.employe}</span>
-                      </td>
-                      <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:sub,fontSize:11,whiteSpace:'nowrap'}}>
-                        {new Date(c.date_comptage).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
-                      </td>
-                    </tr>
-                  ))
-              }
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {isMobile
+        ? <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {cFiltres.length===0
+              ? <div style={{textAlign:'center',padding:40,color:sub}}>Aucun comptage</div>
+              : cFiltres.map((c:any)=>(
+                  <div key={c.id} style={{background:card,borderRadius:12,border:`2px solid ${c.ecart!==0?C.red:C.green}`,padding:'14px 16px'}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+                      <div>
+                        <div style={{fontWeight:800,fontSize:15,fontFamily:'monospace'}}>{c.code_piece}</div>
+                        <div style={{fontSize:12,color:sub,marginTop:2}}>
+                          <span style={{background:dark?'#1a233a':'#e8f0fe',color:C.blue,padding:'2px 6px',borderRadius:4,fontWeight:600}}>{c.localisation}</span>
+                        </div>
+                      </div>
+                      <div style={{textAlign:'right'}}>
+                        <div style={{fontSize:22,fontWeight:900,color:c.ecart===0?C.green:C.red}}>{c.ecart>0?'+':''}{c.ecart}</div>
+                        {c.photo_url&&<a href={c.photo_url} target="_blank" rel="noreferrer" style={{fontSize:20}}>📸</a>}
+                      </div>
+                    </div>
+                    <div style={{display:'flex',gap:12,fontSize:12,color:sub}}>
+                      <span>Stock: <strong style={{color:C.blue}}>{c.qte_systeme}</strong></span>
+                      <span>Compté: <strong style={{color:C.green}}>{c.qte_comptee}</strong></span>
+                      <span>👤 {c.employe}</span>
+                    </div>
+                    <div style={{fontSize:11,color:sub,marginTop:4}}>
+                      {new Date(c.date_comptage).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+                    </div>
+                  </div>
+                ))
+            }
+          </div>
+        : <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+            <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                <thead><tr style={{background:thBg}}>
+                  {['Code Pièce','Localisation','Stock sys.','Réservé','Compté','Écart','Photo','Employé','Date'].map((h,i)=>(
+                    <th key={i} style={{padding:'9px 10px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:i>1?'center':'left'}}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {cFiltres.length===0
+                    ? <tr><td colSpan={9} style={{textAlign:'center',padding:50,color:sub}}>Aucun comptage</td></tr>
+                    : cFiltres.map((c:any)=>(
+                        <tr key={c.id} style={{background:c.ecart!==0?(dark?'#2b1113':'#fff8f8'):'transparent'}}
+                          onMouseEnter={e=>e.currentTarget.style.background=c.ecart!==0?(dark?'#3a1a1a':'#ffe8e8'):hvr}
+                          onMouseLeave={e=>e.currentTarget.style.background=c.ecart!==0?(dark?'#2b1113':'#fff8f8'):'transparent'}>
+                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace',fontSize:11}}>{c.code_piece}</td>
+                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}>
+                            <span style={{background:dark?'#1a233a':'#e8f0fe',color:C.blue,padding:'2px 6px',borderRadius:4,fontSize:11,fontWeight:600}}>{c.localisation}</span>
+                          </td>
+                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{c.qte_systeme}</td>
+                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.yellow}}>{c.qte_reservee}</td>
+                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700,color:C.green}}>{c.qte_comptee}</td>
+                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:900,color:c.ecart===0?C.green:C.red}}>{c.ecart>0?'+':''}{c.ecart}</td>
+                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                            {c.photo_url?<a href={c.photo_url} target="_blank" rel="noreferrer" style={{color:C.blue,textDecoration:'none',fontSize:18}}>📸</a>:<span style={{color:sub,fontSize:11}}>—</span>}
+                          </td>
+                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}>
+                            <span style={{background:C.blue+'22',color:C.blue,padding:'2px 6px',borderRadius:10,fontSize:10}}>👤 {c.employe}</span>
+                          </td>
+                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:sub,fontSize:11,whiteSpace:'nowrap'}}>
+                            {new Date(c.date_comptage).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+                          </td>
+                        </tr>
+                      ))
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+      }
     </>}
   </>
 }
