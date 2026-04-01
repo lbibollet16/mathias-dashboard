@@ -2453,6 +2453,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
   ]
 
   const CAUSES = [
+    'Pièce non réceptionnée mais facturée (logiciel/service)',
     'Stock vendu non reçu en inventaire',
     "Erreur de comptage lors d'un inventaire antérieur",
     'Ajustement incorrect (Déc. physique ou Autre)',
@@ -2461,6 +2462,8 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     'Double facturation',
     'Autre raison',
   ]
+
+  const CAUSES_SANS_PHOTO = ['Pièce non réceptionnée mais facturée (logiciel/service)']
 
   const emptyForm = () => ({
     serv_detail:'', serv_interne:'', serv_gar:'', pce_detail:'',
@@ -2490,7 +2493,8 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     return champsDef.every(c => f[c.key] !== '') && f.qte_reelle !== '' && f.cause !== '' && f.commentaire_compta !== ''
   }
 
-  function photoObligatoire(ajust: number) {
+  function photoObligatoire(ajust: number, cause?: string) {
+    if (cause && CAUSES_SANS_PHOTO.includes(cause)) return false
     return Math.abs(ajust) > 1
   }
 
@@ -2533,7 +2537,8 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     const ajust = getAjust(stockSys, form)
     const photoObl = photoObligatoire(ajust)
 
-    if (photoObl && photoFiles.length === 0) {
+    const photoObl2 = photoObligatoire(ajust, form.cause)
+    if (photoObl2 && photoFiles.length === 0) {
       alert('📸 Photo obligatoire car écart > 1 unité !')
       photoRef.current?.click()
       return
@@ -2707,7 +2712,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
       const ajust = getAjust(stockSys, form)
       const altQteTab = qteTablette(altForm)
       const altAjust = hasAlt ? getAjust(altStockSys, altForm) : null
-      const photoObl = photoObligatoire(ajust)
+      const photoObl = photoObligatoire(ajust, form.cause)
       const allFormsComplet = formComplet(form) && (!hasAlt || formComplet(altForm))
 
       return (
@@ -2807,7 +2812,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                       {form.qte_reelle} tablette − {stockSys} système = {ajust > 0 ? '+' : ''}{ajust.toFixed(0)}
                     </div>
                   )}
-                  {photoObl && photoFiles.length === 0 && (
+                  {photoObligatoire(ajust, form.cause) && photoFiles.length === 0 && (
                     <div style={{marginTop:8,background:C.red+'22',borderRadius:8,padding:'8px 12px',color:C.red,fontSize:13,fontWeight:700,textAlign:'center'}}>
                       📸 Photo obligatoire car écart &gt; 1 unité
                     </div>
@@ -2874,7 +2879,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
             {/* Photos */}
             <div style={{background:card,borderRadius:14,padding:'16px',marginBottom:16,border:`2px solid ${photoObl&&photoFiles.length===0?C.red:photoFiles.length>0?C.green:bdr}`}}>
               <div style={{fontSize:15,fontWeight:800,marginBottom:10}}>
-                📸 Photos {photoObl?'(obligatoire — écart > 1)':'(optionnel)'}
+                📸 Photos {photoObligatoire(ajust, form.cause)?'(obligatoire — écart > 1)':'(optionnel)'}
               </div>
               {photoPreviews.length > 0 && (
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
@@ -2923,7 +2928,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
             )}
 
             {/* Bouton soumettre */}
-            <button onClick={soumettre} disabled={loading||!allFormsComplet||(photoObl&&photoFiles.length===0)}
+            <button onClick={soumettre} disabled={loading||!allFormsComplet||(photoObligatoire(getAjust(Number(noteModal?.stock_negatif),form),form.cause)&&photoFiles.length===0)}
               style={{...btnStyle,background:allFormsComplet&&(!photoObl||photoFiles.length>0)?C.green:'#94a3b8',marginBottom:32,fontSize:18,padding:'18px 0'}}>
               {loading?'Enregistrement...':'✅ Confirmer la vérification'}
             </button>
@@ -3145,17 +3150,25 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                   <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code</th>
                   <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Stock</th>
                   <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Ajust.</th>
-                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Cause</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`2px solid ${bdr}`}}>Cause</th>
                   <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Commentaire</th>
                   <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`2px solid ${bdr}`}}>Alt.</th>
-                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Photos</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Photos</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Serv.D</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Serv.I</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Serv.G</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Pce.D</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Récept.</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Déc.P</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Autre</th>
+                  <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Tablette</th>
                   <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Vérifié par</th>
                   <th style={{padding:'9px 8px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Date</th>
                   <th style={{padding:'9px 8px',borderBottom:`2px solid ${bdr}`}}></th>
                 </tr></thead>
                 <tbody>
                   {negsVerifies.length===0
-                    ? <tr><td colSpan={10} style={{textAlign:'center',padding:60,color:sub}}>Aucune pièce vérifiée</td></tr>
+                    ? <tr><td colSpan={19} style={{textAlign:'center',padding:60,color:sub}}>Aucune pièce vérifiée</td></tr>
                     : negsVerifies.map((v:any)=>(
                         <tr key={v.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                           <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace',fontSize:11}}>{v.code_piece}</td>
@@ -3163,8 +3176,8 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                           <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:900,color:Number(v.ajustement)>=0?C.green:C.red}}>
                             {Number(v.ajustement)>=0?'+':''}{Number(v.ajustement).toFixed(0)}
                           </td>
-                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:C.blue,maxWidth:150,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v.cause||'—'}</td>
-                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:150,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v.commentaire||'—'}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:C.blue,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={v.cause}>{v.cause||'—'}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={v.commentaire}>{v.commentaire||'—'}</td>
                           <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>
                             {v.alt_code_piece&&<div style={{color:C.green,fontWeight:700}}>{v.alt_code_piece}<br/><span style={{color:Number(v.alt_ajustement)>=0?C.green:C.red}}>{Number(v.alt_ajustement)>=0?'+':''}{Number(v.alt_ajustement)?.toFixed(0)}</span></div>}
                           </td>
@@ -3175,6 +3188,12 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                               {!v.photo_url&&<span style={{color:sub,fontSize:11}}>—</span>}
                             </div>
                           </td>
+                          {[v.serv_detail,v.serv_interne,v.serv_gar,v.pce_detail,v.recept_comm,v.dec_physique,v.autre].map((val,i)=>(
+                            <td key={i} style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontSize:11,fontWeight:600,color:Number(val)===0?sub:Number(val)<0?C.red:C.green}}>
+                              {Number(val??0)>0?'+':''}{Number(val??0).toFixed(0)}
+                            </td>
+                          ))}
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontSize:11,fontWeight:700,color:C.green}}>{Number(v.qte_reelle??0).toFixed(0)}</td>
                           <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`}}>
                             <span style={{background:C.blue+'22',color:C.blue,padding:'2px 6px',borderRadius:10,fontSize:10}}>👤 {v.employe}</span>
                           </td>
