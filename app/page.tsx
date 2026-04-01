@@ -1990,7 +1990,14 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                 <span style={{background:C.yellow+'22',color:C.yellow,padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:700}}>⏳ En attente</span>
                               </>
                           }
-                          {c.photo_url&&<div style={{marginTop:4}}><a href={c.photo_url} target="_blank" rel="noreferrer" style={{fontSize:20}}>📸</a></div>}
+                          {c.photo_url&&(
+                          <div style={{marginTop:8}}>
+                            <div style={{fontSize:10,color:sub,marginBottom:3,fontWeight:700,textTransform:'uppercase'}}>📸 Photo</div>
+                            <a href={c.photo_url} target="_blank" rel="noreferrer">
+                              <img src={c.photo_url} style={{width:'100%',maxWidth:120,height:80,objectFit:'cover',borderRadius:8,border:`2px solid ${C.green}`,display:'block'}} alt="Photo comptage"/>
+                            </a>
+                          </div>
+                        )}
                         </div>
                       </div>
                       <div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:8,padding:'8px 10px',marginBottom:6}}>
@@ -1999,6 +2006,14 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                           {estReconcilie&&<span style={{color:sub}}>Stock J+1: <strong style={{color:C.blue}}>{c.stock_apres_sync}</strong></span>}
                           <span style={{color:sub}}>Compté: <strong style={{color:C.green}}>{c.qte_comptee}</strong></span>
                         </div>
+                        {c.photo_url&&(
+                          <div style={{marginTop:8}}>
+                            <a href={c.photo_url} target="_blank" rel="noreferrer">
+                              <img src={c.photo_url} style={{width:'100%',maxWidth:140,height:90,objectFit:'cover',borderRadius:8,border:`2px solid ${C.green}`,display:'block'}} alt="Photo écart"/>
+                            </a>
+                            <div style={{fontSize:10,color:C.green,marginTop:2,fontWeight:700}}>📸 Photo de l'écart</div>
+                          </div>
+                        )}
                         {estReconcilie&&c.ecart!==c.ecart_reconcilie&&(
                           <div style={{fontSize:11,color:sub,marginTop:4}}>
                             Ventes entre-temps: <strong style={{color:C.blue}}>{c.qte_systeme - c.stock_apres_sync}</strong> unités vendues après le comptage
@@ -2497,6 +2512,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     if (causeIdx === 0 || (cause && CAUSES.indexOf(cause) === 0)) return false
     return Math.abs(ajust) > 1
   }
+  function onPhoto(e: any) {
     const files = Array.from(e.target.files || []) as File[]
     if (files.length === 0) return
     setPhotoFiles(prev => [...prev, ...files])
