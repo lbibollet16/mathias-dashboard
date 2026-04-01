@@ -32,9 +32,15 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const { code_piece } = await req.json()
-    const { error } = await supabaseAdmin.from('negatifs_verifies').delete().eq('code_piece', code_piece)
-    if (error) throw error
+    const body = await req.json()
+    // Supprimer par id (prioritaire) ou par code_piece
+    if (body.id) {
+      const { error } = await supabaseAdmin.from('negatifs_verifies').delete().eq('id', body.id)
+      if (error) throw error
+    } else if (body.code_piece) {
+      const { error } = await supabaseAdmin.from('negatifs_verifies').delete().eq('code_piece', body.code_piece)
+      if (error) throw error
+    }
     return NextResponse.json({ success: true })
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message }, { status: 500 })

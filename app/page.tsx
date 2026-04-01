@@ -2621,17 +2621,25 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
           const couleur = f[c.key] !== '' ? (parseFloat(f[c.key]) < 0 && c.sign==='+' ? C.red : parseFloat(f[c.key]) > 0 && c.sign==='-' ? C.red : C.green) : bdr
           return (
             <div key={c.key} style={{background:dark?'#111':'#f8f9fa',borderRadius:10,padding:'12px 14px',border:`1px solid ${couleur}`}}>
-              <div style={{marginBottom:10}}>
-                <div style={{fontWeight:700,fontSize:14,display:'flex',justifyContent:'space-between'}}>
-                  <span>{c.label}</span>
-                  <span style={{fontSize:12,fontWeight:400,color:c.sign==='-'?C.red:c.sign==='+'?C.green:sub}}>
-                    {c.sign === '-' ? '(sortie −)' : c.sign === '+' ? '(entrée +)' : '(±)'}
-                  </span>
+              <div style={{marginBottom:10,display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:700,fontSize:14,display:'flex',justifyContent:'space-between'}}>
+                    <span>{c.label}</span>
+                    <span style={{fontSize:12,fontWeight:400,color:c.sign==='-'?C.red:c.sign==='+'?C.green:sub}}>
+                      {c.sign === '-' ? '(sortie −)' : c.sign === '+' ? '(entrée +)' : '(±)'}
+                    </span>
+                  </div>
+                  <div style={{fontSize:11,color:sub,marginTop:2}}>{c.desc}</div>
                 </div>
-                <div style={{fontSize:11,color:sub,marginTop:2}}>{c.desc}</div>
+                {f[c.key] !== '' && (
+                  <button type="button" onClick={()=>setF((prev:any)=>({...prev,[c.key]:''}))}
+                    style={{marginLeft:8,background:C.red+'22',border:'none',borderRadius:8,padding:'4px 10px',color:C.red,cursor:'pointer',fontSize:12,fontWeight:700,flexShrink:0}}>
+                    ✕ Effacer
+                  </button>
+                )}
               </div>
-              {/* Valeur actuelle affichée en grand */}
-              <div style={{fontSize:28,fontWeight:900,textAlign:'center',color:isNeg?C.red:valNum>0?C.green:sub,marginBottom:10,minHeight:40}}>
+              {/* Valeur affichée en grand */}
+              <div style={{fontSize:28,fontWeight:900,textAlign:'center',color:isNeg?C.red:valNum>0?C.green:sub,marginBottom:10,minHeight:40,background:dark?'#1a1a1a':'#fff',borderRadius:8,padding:'8px',border:`1px solid ${bdr}`}}>
                 {f[c.key]===''?<span style={{color:sub,fontSize:18}}>0</span>:f[c.key]}
               </div>
               {/* Clavier numérique custom */}
@@ -2693,15 +2701,21 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
       return (
         <div style={{position:'fixed',inset:0,background:dark?'#0d0d0d':'#f0f2f5',zIndex:9999,overflowY:'auto',fontFamily:"'DM Sans',sans-serif"}}>
           {/* Header fixe */}
-          <div style={{position:'sticky',top:0,background:dark?'#111':C.red,color:'#fff',padding:'14px 16px',zIndex:10,display:'flex',justifyContent:'space-between',alignItems:'center',boxShadow:'0 2px 8px rgba(0,0,0,.2)'}}>
+          <div style={{position:'sticky',top:0,background:dark?'#111':C.red,color:'#fff',padding:'14px 16px',zIndex:10,display:'flex',justifyContent:'space-between',alignItems:'center',boxShadow:'0 2px 8px rgba(0,0,0,.2)',gap:8}}>
             <div>
               <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',opacity:.8}}>Vérification inventaire</div>
               <div style={{fontSize:18,fontWeight:900,letterSpacing:1}}>{n.code_piece}</div>
             </div>
-            <button onClick={()=>{setNoteModal(null);setForm(emptyForm());setAltForm(emptyForm());setPhotoFiles([]);setPhotoPreviews([])}}
-              style={{background:'rgba(255,255,255,.2)',border:'none',borderRadius:10,padding:'8px 14px',color:'#fff',cursor:'pointer',fontSize:14,fontWeight:700}}>
-              ✕ Fermer
-            </button>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={()=>{setForm(emptyForm());setAltForm(emptyForm());setPhotoFiles([]);setPhotoPreviews([])}}
+                style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.4)',borderRadius:10,padding:'8px 12px',color:'#fff',cursor:'pointer',fontSize:13,fontWeight:700}}>
+                🔄 Réinitialiser
+              </button>
+              <button onClick={()=>{setNoteModal(null);setForm(emptyForm());setAltForm(emptyForm());setPhotoFiles([]);setPhotoPreviews([])}}
+                style={{background:'rgba(255,255,255,.2)',border:'none',borderRadius:10,padding:'8px 14px',color:'#fff',cursor:'pointer',fontSize:14,fontWeight:700}}>
+                ✕ Fermer
+              </button>
+            </div>
           </div>
 
           <div style={{padding:'16px',maxWidth:700,margin:'0 auto'}}>
