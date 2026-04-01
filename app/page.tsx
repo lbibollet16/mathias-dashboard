@@ -1565,21 +1565,54 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         <div>
 
           {/* Localisation active */}
-          {locActive && (
-            <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`2px solid ${C.green}`,borderRadius:14,padding:isMobile?'14px 16px':'12px 16px',marginBottom:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-              <div>
-                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.green}}>📍 Localisation active</div>
-                <div style={{fontSize:isMobile?34:26,fontWeight:900,color:C.green,letterSpacing:2,marginTop:2}}>{locActive}</div>
-                <div style={{fontSize:12,color:sub}}>{piecesLoc.length} pièces • 👤 {employe}</div>
+          {locActive && (() => {
+            const nbComptes = comptesDuJour.length
+            const nbTotal = piecesLoc.filter((p:any) => {
+              const key = p.code_piece.toUpperCase()
+              return key.indexOf('LOC_') !== 0 // Exclure les placeholders
+            }).length
+            const pct = nbTotal > 0 ? Math.round((nbComptes / nbTotal) * 100) : 0
+            return (
+              <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`2px solid ${C.green}`,borderRadius:14,padding:isMobile?'14px 16px':'12px 16px',marginBottom:12}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.green}}>📍 Localisation active</div>
+                    <div style={{fontSize:isMobile?30:24,fontWeight:900,color:C.green,letterSpacing:2,marginTop:2}}>{locActive}</div>
+                    <div style={{fontSize:12,color:sub,marginTop:2}}>👤 {employe} • {nbTotal} pièces</div>
+                  </div>
+                  <div style={{display:'flex',flexDirection:'column',gap:6,alignItems:'flex-end'}}>
+                    {dernierComptage && (
+                      <button onClick={annulerDernier} style={{background:C.yellow+'22',border:`1px solid ${C.yellow}`,borderRadius:8,padding:'6px 10px',color:C.yellow,cursor:'pointer',fontWeight:700,fontSize:12}}>↩ Annuler</button>
+                    )}
+                    <button onClick={changerLocalisation} style={{background:'none',border:`1px solid ${C.green}`,borderRadius:8,padding:'6px 10px',color:C.green,cursor:'pointer',fontWeight:700,fontSize:12}}>🔄 Changer</button>
+                  </div>
+                </div>
+                {/* Barre de progression */}
+                <div style={{marginTop:12}}>
+                  <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                    <span style={{fontSize:12,color:sub}}>{nbComptes} / {nbTotal} pièces comptées</span>
+                    <span style={{fontSize:13,fontWeight:800,color:pct===100?C.green:C.blue}}>{pct}%</span>
+                  </div>
+                  <div style={{background:dark?'#1a1a1a':'#d1fae5',borderRadius:20,height:8,overflow:'hidden'}}>
+                    <div style={{width:pct+'%',height:'100%',background:pct===100?C.green:C.blue,borderRadius:20,transition:'width .3s'}}/>
+                  </div>
+                  {pct===100 && (
+                    <div style={{marginTop:10,background:C.green,borderRadius:10,padding:'10px 14px',textAlign:'center'}}>
+                      <span style={{color:'#fff',fontWeight:800,fontSize:14}}>✅ Localisation complète! </span>
+                      <button onClick={changerLocalisation} style={{background:'rgba(255,255,255,.3)',border:'none',borderRadius:8,padding:'4px 12px',color:'#fff',cursor:'pointer',fontWeight:700,fontSize:13,marginLeft:8}}>
+                        Fermer →
+                      </button>
+                    </div>
+                  )}
+                  {pct<100 && nbComptes>0 && (
+                    <button onClick={changerLocalisation} style={{marginTop:8,background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'6px 14px',color:sub,cursor:'pointer',fontSize:12,width:'100%'}}>
+                      Fermer la localisation ({pct}% complété)
+                    </button>
+                  )}
+                </div>
               </div>
-              <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                {dernierComptage && (
-                  <button onClick={annulerDernier} style={{background:C.yellow+'22',border:`1px solid ${C.yellow}`,borderRadius:8,padding:'7px 12px',color:C.yellow,cursor:'pointer',fontWeight:700,fontSize:13}}>↩ Annuler</button>
-                )}
-                <button onClick={changerLocalisation} style={{background:'none',border:`1px solid ${C.green}`,borderRadius:8,padding:'7px 12px',color:C.green,cursor:'pointer',fontWeight:700,fontSize:13}}>🔄 Changer</button>
-              </div>
-            </div>
-          )}
+            )
+          })()}
 
           {/* ÉTAPE LOCALISATION */}
           {etape==='localisation' && (
@@ -1723,16 +1756,25 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                       const c = comptesDuJour.find((x:any)=>x.code_piece===p.code_piece)
                       const stockTotal = si.stock + si.reserve
                       return (
-                        <div key={p.code_piece} style={{padding:'12px 14px',borderBottom:`1px solid ${bdr}`,background:c?(dark?'#0d2a18':'#f0fff4'):'transparent',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                        <div key={p.code_piece} style={{padding:'12px 14px',borderBottom:`1px solid ${bdr}`,background:c?(dark?'#0d2a18':'#f0fff4'):'transparent',display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{fontWeight:700,fontSize:14,fontFamily:'monospace'}}>{p.code_piece}</div>
                             <div style={{fontSize:11,color:sub,marginTop:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.description}</div>
-                            <div style={{fontSize:12,marginTop:2,display:'flex',gap:10}}>
-                              <span style={{color:stockTotal<0?C.red:C.blue}}>Stock: <strong>{stockTotal}</strong></span>
-                              {si.reserve>0&&<span style={{color:C.yellow}}>Rés: <strong>{si.reserve}</strong></span>}
+                            <div style={{fontSize:12,marginTop:3,display:'flex',gap:10,flexWrap:'wrap'}}>
+                              <span style={{color:stockTotal<0?C.red:C.blue,fontWeight:600}}>Stock: <strong>{stockTotal}</strong></span>
+                              {si.reserve>0&&<span style={{color:C.yellow,fontWeight:600}}>Réservé: <strong>{si.reserve}</strong></span>}
+                              {si.stock!==stockTotal&&<span style={{color:sub,fontSize:11}}>Dispo: {si.stock}</span>}
+                            </div>
+                            {/* Toutes les localisations de la pièce */}
+                            <div style={{display:'flex',gap:4,flexWrap:'wrap',marginTop:4}}>
+                              {[p.localisation1,p.localisation2,p.localisation3,p.localisation4].filter(Boolean).map((loc:string,i:number)=>(
+                                <span key={i} style={{background:loc===locActive?(dark?'#1a233a':'#dbeafe'):dark?'#333':'#f1f5f9',color:loc===locActive?C.blue:sub,padding:'1px 6px',borderRadius:4,fontSize:10,fontWeight:loc===locActive?700:400}}>
+                                  {loc}
+                                </span>
+                              ))}
                             </div>
                           </div>
-                          <div style={{textAlign:'right',marginLeft:10}}>
+                          <div style={{textAlign:'right',marginLeft:10,flexShrink:0}}>
                             {c
                               ? <div>
                                   <div style={{fontSize:18,fontWeight:900,color:c.ecart===0?C.green:C.red}}>{c.qte_comptee}</div>
