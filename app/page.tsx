@@ -2468,7 +2468,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
   const emptyForm = () => ({
     serv_detail:'', serv_interne:'', serv_gar:'', pce_detail:'',
     recept_comm:'', dec_physique:'', autre:'', qte_reelle:'',
-    cause:'', commentaire_compta:''
+    cause:'', causeIdx:-1, commentaire_compta:''
   })
 
   const [form, setForm] = useState<any>(emptyForm())
@@ -2493,9 +2493,9 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     return champsDef.every(c => f[c.key] !== '') && f.qte_reelle !== '' && f.cause !== '' && f.commentaire_compta !== ''
   }
 
-  function photoObligatoire(ajust: number, cause?: string) {
-    // Exempter si cause = premiere cause de la liste (pièce non receptionnee)
-    if (cause && cause === CAUSES[0]) return false
+  function photoObligatoire(ajust: number, cause?: string, causeIdx?: number) {
+    // Index 0 = Pièce non réceptionnée mais facturée — pas de photo
+    if (causeIdx === 0 || (cause && CAUSES.indexOf(cause) === 0)) return false
     return Math.abs(ajust) > 1
   }
 
@@ -2536,9 +2536,9 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     const hasAlt = altCodes.length > 0
 
     const ajust = getAjust(stockSys, form)
-    const photoObl = photoObligatoire(ajust, form.cause)
+    const photoObl = photoObligatoire(ajust, form.cause, form.causeIdx)
 
-    const photoObl2 = photoObligatoire(ajust, form.cause)
+    const photoObl2 = photoObligatoire(ajust, form.cause, form.causeIdx)
     if (photoObl2 && photoFiles.length === 0) {
       alert('📸 Photo obligatoire car écart > 1 unité !')
       photoRef.current?.click()
@@ -2713,7 +2713,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
       const ajust = getAjust(stockSys, form)
       const altQteTab = qteTablette(altForm)
       const altAjust = hasAlt ? getAjust(altStockSys, altForm) : null
-      const photoObl = photoObligatoire(ajust, form.cause)
+      const photoObl = photoObligatoire(ajust, form.cause, form.causeIdx)
       const allFormsComplet = formComplet(form) && (!hasAlt || formComplet(altForm))
 
       return (
@@ -2813,7 +2813,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                       {form.qte_reelle} tablette − {stockSys} système = {ajust > 0 ? '+' : ''}{ajust.toFixed(0)}
                     </div>
                   )}
-                  {photoObligatoire(ajust, form.cause) && photoFiles.length === 0 && (
+                  {photoObligatoire(ajust, form.cause, form.causeIdx) && photoFiles.length === 0 && (
                     <div style={{marginTop:8,background:C.red+'22',borderRadius:8,padding:'8px 12px',color:C.red,fontSize:13,fontWeight:700,textAlign:'center'}}>
                       📸 Photo obligatoire car écart &gt; 1 unité
                     </div>
@@ -2860,9 +2860,9 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
               <div style={{marginBottom:12}}>
                 <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Cause principale *</div>
                 <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                  {CAUSES.map(cause => (
+                  {CAUSES.map((cause, causeIdx) => (
                     <label key={cause} style={{display:'flex',alignItems:'center',gap:10,background:form.cause===cause?(dark?'#1a233a':'#e8f0fe'):dark?'#1a1a1a':'#f8f9fa',borderRadius:10,padding:'12px 14px',border:`2px solid ${form.cause===cause?C.blue:bdr}`,cursor:'pointer'}}>
-                      <input type="radio" name="cause" value={cause} checked={form.cause===cause} onChange={()=>setForm((p:any)=>({...p,cause}))} style={{accentColor:C.blue,width:18,height:18}}/>
+                      <input type="radio" name="cause" value={cause} checked={form.cause===cause} onChange={()=>setForm((p:any)=>({...p,cause:cause,causeIdx:causeIdx}))} style={{accentColor:C.blue,width:18,height:18}}/>
                       <span style={{fontSize:13,fontWeight:form.cause===cause?700:400,color:form.cause===cause?C.blue:'inherit'}}>{cause}</span>
                     </label>
                   ))}
@@ -2878,9 +2878,9 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
             </div>
 
             {/* Photos */}
-            <div style={{background:card,borderRadius:14,padding:'16px',marginBottom:16,border:`2px solid ${photoObligatoire(ajust,form.cause)&&photoFiles.length===0?C.red:photoFiles.length>0?C.green:bdr}`}}>
+            <div style={{background:card,borderRadius:14,padding:'16px',marginBottom:16,border:`2px solid ${photoObligatoire(ajust, form.cause, form.causeIdx)&&photoFiles.length===0?C.red:photoFiles.length>0?C.green:bdr}`}}>
               <div style={{fontSize:15,fontWeight:800,marginBottom:10}}>
-                📸 Photos {photoObligatoire(ajust, form.cause)?'(obligatoire — écart > 1)':'(optionnel)'}
+                📸 Photos {photoObligatoire(ajust, form.cause, form.causeIdx)?'(obligatoire — écart > 1)':'(optionnel)'}
               </div>
               {photoPreviews.length > 0 && (
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
@@ -2930,7 +2930,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
 
             {/* Bouton soumettre */}
             <button onClick={soumettre} disabled={loading||!allFormsComplet||(photoObligatoire(getAjust(Number(noteModal?.stock_negatif),form),form.cause)&&photoFiles.length===0)}
-              style={{...btnStyle,background:allFormsComplet&&(!photoObligatoire(ajust,form.cause)||photoFiles.length>0)?C.green:'#94a3b8',marginBottom:32,fontSize:18,padding:'18px 0'}}>
+              style={{...btnStyle,background:allFormsComplet&&(!photoObligatoire(ajust, form.cause, form.causeIdx)||photoFiles.length>0)?C.green:'#94a3b8',marginBottom:32,fontSize:18,padding:'18px 0'}}>
               {loading?'Enregistrement...':'✅ Confirmer la vérification'}
             </button>
           </div>
