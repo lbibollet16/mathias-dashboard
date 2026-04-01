@@ -2401,7 +2401,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
 
   const CAUSES = [
     'Stock vendu non reçu en inventaire',
-    'Erreur de comptage lors d'un inventaire antérieur',
+    "Erreur de comptage lors d'un inventaire antérieur",
     'Ajustement incorrect (Déc. physique ou Autre)',
     'Pièce alternative utilisée sous ce SKU',
     'Retour fournisseur non traité',
