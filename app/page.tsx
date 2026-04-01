@@ -526,19 +526,16 @@ export default function Dashboard() {
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:10}}>
             <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
               <button onClick={async()=>{
-                  setSyncing(true); setSyncLog('Analyse des réceptions...')
+                  setSyncing(true); setSyncLog('')
                   try {
-                    const r = await fetch('/api/lots/sync', {method:'POST'})
-                    const j = await r.json()
-                    if (j.success) {
-                      setSyncLog(`✅ ${j.nouveaux} nouveau${j.nouveaux!==1?'x':''} lot${j.nouveaux!==1?'s':''}`)
-                      const r2 = await fetch('/api/lots'); if(r2.ok) setLots(await r2.json())
-                    } else setSyncLog('❌ '+j.erreur)
+                    const r = await fetch('/api/lots')
+                    if (r.ok) { setLots(await r.json()); setSyncLog('✅ Liste mise à jour') }
+                    else setSyncLog('❌ Erreur')
                   } catch(e:any) { setSyncLog('❌ '+e.message) }
                   setSyncing(false)
                 }} disabled={syncing}
                 style={{background:syncing?sub:C.green,color:'#fff',border:'none',borderRadius:8,padding:'9px 18px',fontSize:13,fontWeight:700,cursor:syncing?'default':'pointer'}}>
-                {syncing?'⏳ Analyse en cours...':'🔄 Rafraîchir les lots'}
+                {syncing?'⏳...':'🔄 Rafraîchir'}
               </button>
               {syncLog && <span style={{fontSize:12,color:syncLog.startsWith('✅')?C.green:C.red}}>{syncLog}</span>}
             </div>
