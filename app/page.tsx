@@ -1285,8 +1285,66 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     if (sousOnglet === 'rapport') chargerComptages()
   }, [sousOnglet])
 
-  function sonOk() { try { const a = new AudioContext(), o = a.createOscillator(), g = a.createGain(); o.connect(g); g.connect(a.destination); o.frequency.value=880; g.gain.setValueAtTime(0.3,a.currentTime); g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+0.15); o.start(); o.stop(a.currentTime+0.15); } catch {} }
-  function sonErr() { try { const a = new AudioContext(), o = a.createOscillator(), g = a.createGain(); o.connect(g); g.connect(a.destination); o.frequency.value=200; g.gain.setValueAtTime(0.3,a.currentTime); g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+0.4); o.start(); o.stop(a.currentTime+0.4); } catch {} }
+  function sonOk() {
+    try {
+      const a = new AudioContext()
+      const g = a.createGain()
+      g.connect(a.destination)
+      // Bip double positif
+      const play = (freq:number, start:number, dur:number) => {
+        const o = a.createOscillator()
+        o.connect(g); o.frequency.value = freq; o.type = 'sine'
+        g.gain.setValueAtTime(0.3, a.currentTime + start)
+        g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + start + dur)
+        o.start(a.currentTime + start); o.stop(a.currentTime + start + dur)
+      }
+      play(880, 0, 0.1)
+      play(1320, 0.12, 0.1)
+    } catch {}
+  }
+
+  function sonErr() {
+    try {
+      const a = new AudioContext()
+      const g = a.createGain()
+      g.connect(a.destination)
+      const o = a.createOscillator()
+      o.connect(g); o.type = 'sawtooth'
+      o.frequency.setValueAtTime(400, a.currentTime)
+      o.frequency.exponentialRampToValueAtTime(150, a.currentTime + 0.5)
+      g.gain.setValueAtTime(0.4, a.currentTime)
+      g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + 0.5)
+      o.start(); o.stop(a.currentTime + 0.5)
+    } catch {}
+  }
+
+  function sonBut() {
+    try {
+      const a = new AudioContext()
+      const g = a.createGain()
+      g.connect(a.destination)
+      // Fanfare NHL style — notes montantes
+      const notes = [
+        {f:523, t:0,    d:0.12}, // DO
+        {f:659, t:0.13, d:0.12}, // MI
+        {f:784, t:0.26, d:0.12}, // SOL
+        {f:1047,t:0.39, d:0.25}, // DO octave
+        {f:784, t:0.55, d:0.08}, // SOL
+        {f:1047,t:0.64, d:0.08}, // DO
+        {f:1319,t:0.73, d:0.4},  // MI octave — note finale longue
+      ]
+      notes.forEach(({f, t, d}) => {
+        const o = a.createOscillator()
+        const og = a.createGain()
+        o.connect(og); og.connect(a.destination)
+        o.type = 'square'; o.frequency.value = f
+        og.gain.setValueAtTime(0, a.currentTime + t)
+        og.gain.linearRampToValueAtTime(0.35, a.currentTime + t + 0.02)
+        og.gain.exponentialRampToValueAtTime(0.001, a.currentTime + t + d)
+        o.start(a.currentTime + t); o.stop(a.currentTime + t + d + 0.05)
+      })
+    } catch {}
+  }
 
   // Traiter image scannée — extraire texte du code-barres via input file
   function onLocScan(e: any) {
@@ -1596,14 +1654,20 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   <div style={{background:dark?'#1a1a1a':'#d1fae5',borderRadius:20,height:8,overflow:'hidden'}}>
                     <div style={{width:pct+'%',height:'100%',background:pct===100?C.green:C.blue,borderRadius:20,transition:'width .3s'}}/>
                   </div>
-                  {pct===100 && (
-                    <div style={{marginTop:10,background:C.green,borderRadius:10,padding:'10px 14px',textAlign:'center'}}>
-                      <span style={{color:'#fff',fontWeight:800,fontSize:14}}>✅ Localisation complète! </span>
-                      <button onClick={changerLocalisation} style={{background:'rgba(255,255,255,.3)',border:'none',borderRadius:8,padding:'4px 12px',color:'#fff',cursor:'pointer',fontWeight:700,fontSize:13,marginLeft:8}}>
-                        Fermer →
-                      </button>
-                    </div>
-                  )}
+                  {pct===100 && (() => {
+                    // Jouer le son de but une seule fois quand on atteint 100%
+                    if (comptesDuJour.length === nbTotal && nbTotal > 0) {
+                      setTimeout(() => sonBut(), 100)
+                    }
+                    return (
+                      <div style={{marginTop:10,background:C.green,borderRadius:10,padding:'10px 14px',textAlign:'center'}}>
+                        <span style={{color:'#fff',fontWeight:800,fontSize:14}}>🏒 Localisation complète! </span>
+                        <button onClick={changerLocalisation} style={{background:'rgba(255,255,255,.3)',border:'none',borderRadius:8,padding:'4px 12px',color:'#fff',cursor:'pointer',fontWeight:700,fontSize:13,marginLeft:8}}>
+                          Fermer →
+                        </button>
+                      </div>
+                    )
+                  })()}
                   {pct<100 && nbComptes>0 && (
                     <button onClick={changerLocalisation} style={{marginTop:8,background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'6px 14px',color:sub,cursor:'pointer',fontSize:12,width:'100%'}}>
                       Fermer la localisation ({pct}% complété)
