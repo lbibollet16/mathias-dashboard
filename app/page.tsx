@@ -335,10 +335,10 @@ export default function Dashboard() {
 
         {/* ── CALCULATEUR ─────────────────────────────────────────── */}
         {tab==='calc' && <>
-          <div style={{background:card,borderRadius:12,padding:'14px 18px',marginBottom:14,display:'flex',gap:12,flexWrap:'wrap',alignItems:'flex-start',border:`1px solid ${bdr}`}}>
+          <div style={{background:card,borderRadius:12,padding:isMobile?'10px 12px':'14px 18px',marginBottom:14,display:'flex',gap:isMobile?8:12,flexWrap:'wrap',alignItems:'flex-start',border:`1px solid ${bdr}`}}>
 
             {/* ABC */}
-            <div style={{flex:1,minWidth:130}}>
+            <div style={{flex:1,minWidth:isMobile?'45%':130}}>
               <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Priorité ABC</div>
               <select value={filtABC} onChange={e=>setFiltABC(e.target.value)} style={{...S,border:`2px solid ${filtABC==='A'?C.green:C.yellow}`,fontWeight:700}}>
                 <option value="A">🟢 A seulement — Top 20% CA</option>
@@ -590,6 +590,7 @@ export default function Dashboard() {
 
 // ── Commandes du Jour ────────────────────────────────────────────────────────
 function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fournituresData, setFournituresData, profil}: any) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const [filtFourn, setFiltFourn] = useState('ALL')
   const employe = profil?.nom || profil?.email || 'Inconnu'
   const [suivis, setSuivis] = useState<any[]>([])
@@ -791,21 +792,21 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
     </div>
 
     {/* Header */}
-    <div style={{background:card,borderRadius:12,padding:'14px 18px',marginBottom:14,display:'flex',gap:12,flexWrap:'wrap',alignItems:'flex-end',border:`1px solid ${bdr}`}}>
-      <div style={{flex:2,minWidth:200}}>
+    <div style={{background:card,borderRadius:12,padding:isMobile?'10px 12px':'14px 18px',marginBottom:14,display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end',border:`1px solid ${bdr}`}}>
+      <div style={{flex:2,minWidth:isMobile?'100%':200}}>
         <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Fournisseur</div>
         <select value={filtFourn} onChange={e=>setFiltFourn(e.target.value)} style={S}>
           <option value="ALL">Tous ({fournisseurs.length})</option>
           {fournisseurs.map((f:string) => <option key={f} value={f}>{f}</option>)}
         </select>
       </div>
-      <div style={{flex:1,fontSize:13,color:sub,padding:'8px 0'}}>
+      {!isMobile && <div style={{flex:1,fontSize:13,color:sub,padding:'8px 0'}}>
         <div>📅 {dateStr}</div>
-        <div style={{marginTop:4}}><strong style={{color:dark?'#e8e8e8':'#1a1a1a'}}>{suggestions.length}</strong> pièces affichées</div>
-      </div>
-      <div style={{background:dark?'#1a233a':'#e8f0fe',border:`2px solid ${C.blue}`,borderRadius:10,padding:'10px 18px',textAlign:'right',minWidth:200}}>
-        <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,marginBottom:3}}>Total affiché</div>
-        <div style={{fontSize:24,fontWeight:900,color:C.blue}}>{totalCommande.toLocaleString('fr-CA',{minimumFractionDigits:2})} $</div>
+        <div style={{marginTop:4}}><strong style={{color:dark?'#e8e8e8':'#1a1a1a'}}>{suggestions.length}</strong> pièces</div>
+      </div>}
+      <div style={{background:dark?'#1a233a':'#e8f0fe',border:`2px solid ${C.blue}`,borderRadius:10,padding:'10px 14px',textAlign:'right',minWidth:isMobile?'100%':180,flex:isMobile?1:0}}>
+        <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,marginBottom:3}}>Total</div>
+        <div style={{fontSize:isMobile?20:22,fontWeight:900,color:C.blue}}>{totalCommande.toLocaleString('fr-CA',{minimumFractionDigits:2})} $</div>
       </div>
     </div>
 
@@ -817,7 +818,59 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
             {filtreStatut==='attente'?'Aucune commande en attente':filtreStatut==='verifie'?'Aucune commande à vérifier':'Aucune commande nécessaire'}
           </div>
         </div>
-      : <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+      : isMobile
+        ? <div style={{display:'flex',flexDirection:'column',gap:0}}>
+            {Array.from(parFournisseur.entries()).map(([fourn, pieces]) => {
+              const totalF = pieces.reduce((s:number,it:any)=>s+it.totalLigne,0)
+              return (
+                <div key={fourn} style={{marginBottom:16}}>
+                  <div style={{background:dark?'#111':'#f4f6f8',padding:'10px 14px',borderRadius:'10px 10px 0 0',border:`1px solid ${bdr}`,borderBottom:'none',display:'flex',justifyContent:'space-between'}}>
+                    <strong style={{fontSize:14}}>{fourn}</strong>
+                    <strong style={{color:C.blue}}>{totalF.toLocaleString('fr-CA',{minimumFractionDigits:2})} $</strong>
+                  </div>
+                  {pieces.map((it:any) => {
+                    const suivi = getSuivi(it.pk)
+                    const estVerif = suivi?.statut === 'verifie'
+                    const estCmd = suivi?.statut === 'commande_faite'
+                    return (
+                      <div key={it.pk} style={{background:estVerif?(dark?'#2b1a00':'#fff8e1'):estCmd?(dark?'#0d2a18':'#f0fff4'):card,border:`1px solid ${bdr}`,borderTop:'none',padding:'12px 14px'}}>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+                          <div>
+                            <div style={{fontWeight:800,fontSize:15}}>{it.pk}</div>
+                            <div style={{fontSize:12,color:sub,marginTop:2}}>{it.desc}</div>
+                            {suivi?.piece_alternative && <div style={{fontSize:11,color:C.green,marginTop:2}}>✅ Alt: {suivi.piece_alternative}</div>}
+                            {!suivi?.piece_alternative && altsMap && altsMap.get(it.pk) && <div style={{fontSize:11,color:C.blue,marginTop:2}}>🔄 Alt: {(altsMap.get(it.pk)||[]).join(', ')}</div>}
+                          </div>
+                          <div style={{textAlign:'right'}}>
+                            <div style={{fontSize:20,fontWeight:900,color:C.green,background:dark?'#0d2a18':'#e6f4ea',padding:'4px 10px',borderRadius:8}}>{it.qteACommander}</div>
+                            <div style={{fontSize:12,color:sub,marginTop:2}}>{it.totalLigne.toFixed(2)} $</div>
+                          </div>
+                        </div>
+                        <div style={{display:'flex',gap:8,fontSize:12,color:sub,marginBottom:10,flexWrap:'wrap'}}>
+                          <span>Besoin: <strong style={{color:C.blue}}>{it.besoin4sem.toFixed(1)}</strong></span>
+                          <span>Stock: <strong style={{color:it.stock<0?C.red:it.stock===0?C.yellow:'inherit'}}>{it.stock}</strong></span>
+                          <span style={{color:C.red}}>{Math.round((Math.max(0,it.stock)/it.besoin4sem)*28)}j couv.</span>
+                        </div>
+                        <div style={{display:'flex',gap:6}}>
+                          {estVerif
+                            ? <span style={{background:C.red+'22',color:C.red,padding:'6px 10px',borderRadius:8,fontSize:12,fontWeight:700,flex:1,textAlign:'center'}}>⚠️ Non reçu</span>
+                            : estCmd
+                              ? <span style={{background:C.green+'22',color:C.green,padding:'6px 10px',borderRadius:8,fontSize:12,fontWeight:700,flex:1,textAlign:'center'}}>⏳ {suivi?.employe}</span>
+                              : <>
+                                  <button onClick={()=>setActionModal({item:it,type:'commande_faite'})} style={{flex:1,background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'10px 0',fontSize:13,fontWeight:700,cursor:'pointer'}}>✅ Commandé</button>
+                                  <button onClick={()=>setActionModal({item:it,type:'pas_besoin'})} style={{flex:1,background:C.red,color:'#fff',border:'none',borderRadius:8,padding:'10px 0',fontSize:13,fontWeight:700,cursor:'pointer'}}>🚫 Pas besoin</button>
+                                  <button onClick={()=>setActionModal({item:it,type:'alternative'})} style={{flex:1,background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 0',fontSize:13,fontWeight:700,cursor:'pointer'}}>🔄 Alt.</button>
+                                </>
+                          }
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+        : <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
             <thead><tr style={{background:thBg}}>
               <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center',width:50}}>ABC</th>
@@ -1768,6 +1821,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 
 // ── Utilisateurs Tab ─────────────────────────────────────────────────────────
 function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const [users, setUsers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showInvite, setShowInvite] = useState(false)
@@ -1894,7 +1948,42 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
               <div style={{fontSize:40,marginBottom:10}}>👥</div>
               <p>Aucun utilisateur — invite le premier !</p>
             </div>
-          : <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+          : isMobile
+            ? <div style={{display:'flex',flexDirection:'column',gap:10,padding:'10px'}}>
+                {users.map((u:any) => {
+                  const roleInfo = ROLES.find(r=>r.val===u.role) || ROLES[2]
+                  return (
+                    <div key={u.id} style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:12,padding:'14px 16px',border:`1px solid ${bdr}`}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:10}}>
+                        <div>
+                          <div style={{fontWeight:700,fontSize:15}}>{u.nom}</div>
+                          <div style={{fontSize:12,color:sub,marginTop:2}}>{u.email}</div>
+                        </div>
+                        <span style={{background:u.actif?C.green+'22':C.red+'22',color:u.actif?C.green:C.red,padding:'4px 10px',borderRadius:20,fontSize:12,fontWeight:700}}>
+                          {u.actif?'✅':'🚫'}
+                        </span>
+                      </div>
+                      <div style={{marginBottom:10}}>
+                        <select value={u.role} onChange={e=>changerRole(u.id,e.target.value)}
+                          style={{...S,border:`2px solid ${roleInfo.color}`,color:roleInfo.color,fontWeight:700,background:'transparent',borderRadius:8}}>
+                          {ROLES.map(r=><option key={r.val} value={r.val}>{r.label}</option>)}
+                        </select>
+                      </div>
+                      <div style={{display:'flex',gap:8}}>
+                        <button onClick={()=>toggleActif(u.id,!u.actif)}
+                          style={{flex:1,background:u.actif?C.yellow+'22':C.green+'22',color:u.actif?C.yellow:C.green,border:'none',borderRadius:8,padding:'10px 0',fontSize:13,fontWeight:700,cursor:'pointer'}}>
+                          {u.actif?'Désactiver':'Activer'}
+                        </button>
+                        <button onClick={()=>supprimer(u.id,u.nom)}
+                          style={{flex:1,background:C.red+'22',color:C.red,border:'none',borderRadius:8,padding:'10px 0',fontSize:13,fontWeight:700,cursor:'pointer'}}>
+                          Supprimer
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            : <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
               <thead><tr style={{background:thBg}}>
                 <th style={{padding:'12px 16px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Nom</th>
                 <th style={{padding:'12px 16px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Email</th>
@@ -2078,6 +2167,7 @@ function BookingTab({data,dark,card,bdr,sub,thBg,S,alts}: any) {
 }
 
 function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVerifies, setNegsVerifies, profil, data}: any) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const [filtFourn, setFiltFourn] = useState('ALL')
   const [filtLignes, setFiltLignes] = useState<string[]>([])
   const [ddLigneOpen, setDdLigneOpen] = useState(false)
@@ -2415,7 +2505,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
 
     {sousOnglet === 'actif' ? <>
       {/* Filtres + Total */}
-      <div style={{background:card,borderRadius:12,padding:'14px 18px',marginBottom:14,display:'flex',gap:12,flexWrap:'wrap',alignItems:'flex-end',border:`1px solid ${bdr}`}}>
+      <div style={{background:card,borderRadius:12,padding:isMobile?'10px 12px':'14px 18px',marginBottom:14,display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end',border:`1px solid ${bdr}`}}>
         <div style={{flex:1,minWidth:180}}>
           <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Fournisseur</div>
           <select value={filtFourn} onChange={e=>setFiltFourn(e.target.value)} style={S}>
@@ -2462,7 +2552,35 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
       </div>
 
       {/* Tableau actif */}
-      <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+      {isMobile
+        ? <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {filtered.length===0
+              ? <div style={{textAlign:'center',padding:40,color:sub}}>✅ Aucune pièce négative</div>
+              : filtered.map((n:any)=>{
+                  const val=Math.abs(n.stock_negatif*n.cout_unitaire)
+                  return (
+                    <div key={n.code_piece} style={{background:card,borderRadius:12,border:`2px solid ${val>500?C.red:val>100?C.yellow:bdr}`,padding:'14px 16px'}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+                        <div>
+                          <div style={{fontWeight:800,fontSize:15,color:C.red}}>{n.code_piece}</div>
+                          <div style={{fontSize:12,color:sub,marginTop:2}}>{n.fournisseur} • Ligne {n.ligne}</div>
+                          <div style={{fontSize:12,color:sub,marginTop:1}}>{n.description}</div>
+                        </div>
+                        <div style={{textAlign:'right'}}>
+                          <div style={{fontSize:20,fontWeight:900,color:C.red}}>{n.stock_negatif}</div>
+                          <div style={{fontSize:13,fontWeight:700,color:C.red}}>− {val.toFixed(2)} $</div>
+                        </div>
+                      </div>
+                      <button onClick={()=>setNoteModal(n)}
+                        style={{width:'100%',background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'11px 0',fontSize:14,fontWeight:700,cursor:'pointer'}}>
+                        ✓ Marquer vérifié
+                      </button>
+                    </div>
+                  )
+                })
+            }
+          </div>
+        : <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
         <div style={{overflowX:'auto'}}>
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
             <thead><tr style={{background:thBg}}>
@@ -2514,7 +2632,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
             </tbody>
           </table>
         </div>
-      </div>
+      </div>}
     </> : <>
       {/* Tableau vérifié */}
       <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
