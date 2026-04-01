@@ -2535,7 +2535,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     const hasAlt = altCodes.length > 0
 
     const ajust = getAjust(stockSys, form)
-    const photoObl = photoObligatoire(ajust)
+    const photoObl = photoObligatoire(ajust, form.cause)
 
     const photoObl2 = photoObligatoire(ajust, form.cause)
     if (photoObl2 && photoFiles.length === 0) {
@@ -2877,7 +2877,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
             </div>
 
             {/* Photos */}
-            <div style={{background:card,borderRadius:14,padding:'16px',marginBottom:16,border:`2px solid ${photoObl&&photoFiles.length===0?C.red:photoFiles.length>0?C.green:bdr}`}}>
+            <div style={{background:card,borderRadius:14,padding:'16px',marginBottom:16,border:`2px solid ${photoObligatoire(ajust,form.cause)&&photoFiles.length===0?C.red:photoFiles.length>0?C.green:bdr}`}}>
               <div style={{fontSize:15,fontWeight:800,marginBottom:10}}>
                 📸 Photos {photoObligatoire(ajust, form.cause)?'(obligatoire — écart > 1)':'(optionnel)'}
               </div>
@@ -2929,7 +2929,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
 
             {/* Bouton soumettre */}
             <button onClick={soumettre} disabled={loading||!allFormsComplet||(photoObligatoire(getAjust(Number(noteModal?.stock_negatif),form),form.cause)&&photoFiles.length===0)}
-              style={{...btnStyle,background:allFormsComplet&&(!photoObl||photoFiles.length>0)?C.green:'#94a3b8',marginBottom:32,fontSize:18,padding:'18px 0'}}>
+              style={{...btnStyle,background:allFormsComplet&&(!photoObligatoire(ajust,form.cause)||photoFiles.length>0)?C.green:'#94a3b8',marginBottom:32,fontSize:18,padding:'18px 0'}}>
               {loading?'Enregistrement...':'✅ Confirmer la vérification'}
             </button>
           </div>
