@@ -59,6 +59,13 @@ export default function Dashboard() {
   const [dark, setDark]     = useState(false)
   const [user, setUser]     = useState<any>(null)
   const [newVersion, setNewVersion] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
   const [profil, setProfil] = useState<any>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [tip, setTip]       = useState<string|null>(null)
@@ -299,27 +306,32 @@ export default function Dashboard() {
     <div style={{minHeight:'100vh',background:bg,color:txt,fontFamily:"'DM Sans','Segoe UI',sans-serif",transition:'background .2s'}}>
 
       {/* NAV */}
-      <nav style={{background:dark?'#111':C.blue,color:'#fff',padding:'0 20px',height:54,display:'flex',alignItems:'center',justifyContent:'space-between',position:'sticky',top:0,zIndex:200,boxShadow:'0 2px 8px rgba(0,0,0,.2)'}}>
-        <div style={{display:'flex',alignItems:'center',gap:10}}>
-          <span style={{fontSize:20}}>🤖</span>
-          <span style={{fontWeight:700,fontSize:15}}>Mathias Marine Sports</span>
+      <nav style={{background:dark?'#111':C.blue,color:'#fff',padding:'0 16px',height:54,display:'flex',alignItems:'center',justifyContent:'space-between',position:'sticky',top:0,zIndex:200,boxShadow:'0 2px 8px rgba(0,0,0,.2)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <span style={{fontSize:18}}>⚓</span>
+          <span style={{fontWeight:700,fontSize:isMobile?13:15}}>{isMobile?'Mathias Marine':'Mathias Marine Sports'}</span>
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:10}}>
-          {data?.calcule_le && <span style={{fontSize:11,opacity:.6,background:'rgba(255,255,255,.12)',padding:'3px 10px',borderRadius:20}}>Cache: {new Date(data.calcule_le).toLocaleDateString('fr-CA')}</span>}
-          <button onClick={()=>setDark(!dark)} style={{background:'rgba(255,255,255,.15)',border:'none',borderRadius:8,width:34,height:34,cursor:'pointer',fontSize:16,color:'#fff'}}>{dark?'☀️':'🌙'}</button>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          {!isMobile && data?.calcule_le && <span style={{fontSize:11,opacity:.6,background:'rgba(255,255,255,.12)',padding:'3px 10px',borderRadius:20}}>Cache: {new Date(data.calcule_le).toLocaleDateString('fr-CA')}</span>}
+          {!isMobile && profil && <span style={{fontSize:12,opacity:.8}}>{profil.nom}</span>}
+          <button onClick={()=>setDark(!dark)} style={{background:'rgba(255,255,255,.15)',border:'none',borderRadius:8,width:32,height:32,cursor:'pointer',fontSize:15,color:'#fff'}}>{dark?'☀️':'🌙'}</button>
+          <button onClick={async()=>{await supabaseCli.auth.signOut();window.location.href='/login'}}
+            style={{background:'rgba(255,255,255,.15)',border:'none',borderRadius:8,padding:'0 10px',height:32,fontSize:12,color:'#fff',cursor:'pointer'}}>
+            {isMobile?'↪':'Déconnexion'}
+          </button>
         </div>
       </nav>
 
       {/* TABS */}
-      <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,padding:'0 20px',display:'flex'}}>
-        {[{id:'calc',l:'Calculateur Achats'},{id:'import',l:'Importer Ventes'},{id:'retours',l:'Retours RMA'},{id:'booking',l:'Booking'},{id:'negatifs',l:'Pièces Négatives',d:true},{id:'commandes',l:'📋 Commandes du Jour'},{id:'fournitures',l:'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire Cyclique'},{id:'utilisateurs',l:'👥 Utilisateurs'}].filter(t=>(ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis']).includes(t.id)).map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:'12px 16px',border:'none',background:'transparent',cursor:'pointer',fontSize:13,fontWeight:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',transition:'all .15s'}}>
+      <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,overflowX:'auto',display:'flex',WebkitOverflowScrolling:'touch',scrollbarWidth:'none'}}>
+        {[{id:'calc',l:isMobile?'🧮 Calc':'Calculateur Achats'},{id:'import',l:isMobile?'📥 Import':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:'📋 Commandes'},{id:'fournitures',l:'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'utilisateurs',l:'👥 Utilisateurs'}].filter(t=>(ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis']).includes(t.id)).map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:isMobile?'10px 12px':'12px 16px',border:'none',background:'transparent',cursor:'pointer',fontSize:isMobile?12:13,fontWeight:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',transition:'all .15s',whiteSpace:'nowrap',flexShrink:0}}>
             {t.l}
           </button>
         ))}
       </div>
 
-      <div style={{maxWidth:1700,margin:'0 auto',padding:'18px 16px'}}>
+      <div style={{maxWidth:1700,margin:'0 auto',padding:isMobile?'10px 10px':'18px 16px'}}>
 
         {/* ── CALCULATEUR ─────────────────────────────────────────── */}
         {tab==='calc' && <>
