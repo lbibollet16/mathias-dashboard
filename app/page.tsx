@@ -8,10 +8,10 @@ const supabaseCli = createClient(
 )
 
 const ROLES_ONGLETS: Record<string, string[]> = {
-  admin:      ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','utilisateurs'],
+  admin:        ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','utilisateurs'],
   gestionnaire: ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire'],
-  commis:     ['commandes','fournitures'],
-  employe_piece: ['fournitures','negatifs'],
+  commis:       ['commandes','fournitures','retours'],
+  employe_piece: ['fournitures','negatifs','inventaire','retours'],
 }
 
 interface Item {
