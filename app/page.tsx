@@ -58,6 +58,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [dark, setDark]     = useState(false)
   const [user, setUser]     = useState<any>(null)
+  const [newVersion, setNewVersion] = useState(false)
   const [profil, setProfil] = useState<any>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [tip, setTip]       = useState<string|null>(null)
@@ -110,6 +111,23 @@ export default function Dashboard() {
       if (event === 'SIGNED_OUT') { window.location.href = '/login' }
     })
     return () => subscription.unsubscribe()
+  }, [])
+
+  // Vérifier nouvelle version toutes les 5 minutes
+  useEffect(() => {
+    let buildId: string | null = null
+    async function checkVersion() {
+      try {
+        const r = await fetch('/api/version?t=' + Date.now())
+        if (!r.ok) return
+        const j = await r.json()
+        if (!buildId) { buildId = j.buildId; return }
+        if (j.buildId !== buildId) setNewVersion(true)
+      } catch {}
+    }
+    checkVersion()
+    const interval = setInterval(checkVersion, 5 * 60 * 1000) // toutes les 5 min
+    return () => clearInterval(interval)
   }, [])
 
   useEffect(() => {
