@@ -161,7 +161,39 @@ export async function POST() {
     for (let i = 0; i < negAvecDates.length; i += 500)
       await supabaseAdmin.from('memoire_negatifs').insert(negAvecDates.slice(i, i + 500))
 
-    // 10. Recalcul cache
+    // 10. Réconciliation inventaire cyclique
+    const hier = new Date(now)
+    hier.setDate(hier.getDate() - 1)
+    const hierStr = hier.toISOString().split('T')[0]
+
+    const { data: comptagesAReconcilier } = await supabaseAdmin
+      .from('inventaire_comptages')
+      .select('*')
+      .eq('statut', 'en_attente')
+      .lte('date_comptage', hierStr + 'T23:59:59')
+
+    if (comptagesAReconcilier && comptagesAReconcilier.length > 0) {
+      let nbReconcilies = 0
+      for (const c of comptagesAReconcilier) {
+        const stockActuel = stockAuj.get(c.code_piece)
+        if (!stockActuel) continue
+        // Ecart reel = Qte comptee - Stock Traction apres sync
+        const ecartReconcilie = c.qte_comptee - stockActuel.stock
+        await supabaseAdmin
+          .from('inventaire_comptages')
+          .update({
+            stock_apres_sync: stockActuel.stock,
+            ecart_reconcilie: ecartReconcilie,
+            date_reconciliation: now.toISOString(),
+            statut: 'reconcilie'
+          })
+          .eq('id', c.id)
+        nbReconcilies++
+      }
+      log.push(`${nbReconcilies} comptages reconcilies`)
+    }
+
+    // 11. Recalcul cache
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
     try { await fetch(`${baseUrl}/api/calculateur/recalculer`, { method: 'POST' }) } catch {}
 

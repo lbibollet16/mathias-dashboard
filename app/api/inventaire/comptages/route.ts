@@ -40,7 +40,8 @@ export async function POST(req: NextRequest) {
       qte_reservee: Number(qte_reservee || 0),
       ecart, employe,
       note: note || null,
-      date_comptage: new Date().toISOString()
+      date_comptage: new Date().toISOString(),
+      statut: 'en_attente'
     })
     if (error) throw error
     return NextResponse.json({ success: true, ecart })
