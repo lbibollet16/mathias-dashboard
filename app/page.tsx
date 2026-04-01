@@ -2573,45 +2573,61 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
   function ChampTransaction({f, setF, prefix=''}: any) {
     return (
       <div style={{display:'flex',flexDirection:'column',gap:10}}>
-        {champsDef.map(c => (
-          <div key={c.key} style={{background:dark?'#111':'#f8f9fa',borderRadius:10,padding:'12px 14px',border:`1px solid ${bdr}`}}>
-            <div style={{marginBottom:8}}>
-              <div style={{fontWeight:700,fontSize:14}}>{c.label}
-                <span style={{marginLeft:8,fontSize:12,fontWeight:400,color:c.sign==='-'?C.red:c.sign==='+'?C.green:sub}}>
-                  ({c.sign === '-' ? 'sortie' : c.sign === '+' ? 'entrée' : '±'})
-                </span>
+        {champsDef.map(c => {
+          const valNum = parseInt(f[c.key]) || 0
+          const isNeg = valNum < 0
+          const absVal = Math.abs(valNum)
+          const couleur = f[c.key] !== '' ? (parseFloat(f[c.key]) < 0 && c.sign==='+' ? C.red : parseFloat(f[c.key]) > 0 && c.sign==='-' ? C.red : C.green) : bdr
+          return (
+            <div key={c.key} style={{background:dark?'#111':'#f8f9fa',borderRadius:10,padding:'12px 14px',border:`1px solid ${couleur}`}}>
+              <div style={{marginBottom:10}}>
+                <div style={{fontWeight:700,fontSize:14,display:'flex',justifyContent:'space-between'}}>
+                  <span>{c.label}</span>
+                  <span style={{fontSize:12,fontWeight:400,color:c.sign==='-'?C.red:c.sign==='+'?C.green:sub}}>
+                    {c.sign === '-' ? '(sortie −)' : c.sign === '+' ? '(entrée +)' : '(±)'}
+                  </span>
+                </div>
+                <div style={{fontSize:11,color:sub,marginTop:2}}>{c.desc}</div>
               </div>
-              <div style={{fontSize:11,color:sub,marginTop:2}}>{c.desc}</div>
+              {/* Valeur actuelle affichée en grand */}
+              <div style={{fontSize:28,fontWeight:900,textAlign:'center',color:isNeg?C.red:valNum>0?C.green:sub,marginBottom:10,minHeight:40}}>
+                {f[c.key]===''?<span style={{color:sub,fontSize:18}}>0</span>:f[c.key]}
+              </div>
+              {/* Clavier numérique custom */}
+              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:6}}>
+                {['1','2','3','4','5','6','7','8','9','±','0','⌫'].map(k => (
+                  <button key={k} type="button"
+                    onClick={()=>{
+                      let cur = f[c.key] === '' ? '0' : f[c.key]
+                      if (k === '⌫') {
+                        const next = cur.length <= 1 ? '' : cur.slice(0,-1)
+                        setF((prev:any)=>({...prev,[c.key]: next === '-' ? '' : next}))
+                      } else if (k === '±') {
+                        if (cur === '' || cur === '0') return
+                        const next = cur.startsWith('-') ? cur.slice(1) : '-' + cur
+                        setF((prev:any)=>({...prev,[c.key]: next}))
+                      } else {
+                        const next = cur === '0' ? k : cur === '-0' ? '-'+k : cur + k
+                        setF((prev:any)=>({...prev,[c.key]: next}))
+                      }
+                    }}
+                    style={{
+                      padding:'14px 0',borderRadius:10,fontWeight:700,fontSize:18,cursor:'pointer',
+                      border:`1px solid ${bdr}`,
+                      background: k==='⌫'?(dark?'#2b1113':'#fce8e6'):k==='±'?(dark?'#1a233a':'#e8f0fe'):(dark?'#222':'#fff'),
+                      color: k==='⌫'?C.red:k==='±'?C.blue:'inherit'
+                    }}>
+                    {k}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div style={{display:'flex',alignItems:'center',gap:8}}>
-              <button type="button" onClick={()=>{
-                  const cur = parseFloat(f[c.key]) || 0
-                  setF((prev:any)=>({...prev,[c.key]: cur === 0 ? '' : String(-cur)}))
-                }}
-                style={{flexShrink:0,width:48,height:48,borderRadius:10,border:`2px solid ${bdr}`,background:dark?'#333':'#e2e8f0',fontSize:22,fontWeight:900,cursor:'pointer',color:sub,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                ±
-              </button>
-              <input
-                type="text"
-                pattern="-?[0-9]*"
-                inputMode="text"
-                required
-                value={f[c.key]}
-                onChange={e => {
-                  const v = e.target.value
-                  if (v === '' || v === '-' || /^-?\d+$/.test(v)) {
-                    setF((prev:any) => ({...prev, [c.key]: v}))
-                  }
-                }}
-                placeholder="0"
-                style={{...S, flex:1, fontSize:22, fontWeight:700, textAlign:'center', padding:'12px', borderRadius:10, boxSizing:'border-box',
-                  borderColor: f[c.key] !== '' && f[c.key] !== '-' ? (parseFloat(f[c.key]) < 0 && c.sign === '+' ? C.red : parseFloat(f[c.key]) > 0 && c.sign === '-' ? C.red : C.green) : bdr}}/>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     )
   }
+
 
   return <>
     {/* Input photo caché */}
