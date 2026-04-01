@@ -2535,11 +2535,11 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
         const r = await fetch('/api/inventaire/photo', { method: 'POST', body: fd })
         const j = await r.json()
         if (j.url) urls.push(j.url)
-      } catch {}
+        else console.error('Upload photo erreur:', j)
+      } catch(err) { console.error('Upload photo exception:', err) }
     }
     return urls
   }
-
   async function soumettre(e?: any) {
     if (e) e.preventDefault()
     if (!noteModal) return
@@ -3116,8 +3116,16 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                             {Number(v.ajustement)>=0?'+':''}{Number(v.ajustement).toFixed(0)}
                           </div>
                           <div style={{display:'flex',gap:6,justifyContent:'flex-end',marginTop:4}}>
-                            {v.photo_url&&<a href={v.photo_url} target="_blank" rel="noreferrer" style={{fontSize:22}}>📸</a>}
-                            {v.photo_url2&&<a href={v.photo_url2} target="_blank" rel="noreferrer" style={{fontSize:22}}>📸</a>}
+                            {v.photo_url&&(
+                              <a href={v.photo_url} target="_blank" rel="noreferrer">
+                                <img src={v.photo_url} style={{width:50,height:50,objectFit:'cover',borderRadius:6,border:`2px solid ${C.green}`}} alt="📸"/>
+                              </a>
+                            )}
+                            {v.photo_url2&&(
+                              <a href={v.photo_url2} target="_blank" rel="noreferrer">
+                                <img src={v.photo_url2} style={{width:50,height:50,objectFit:'cover',borderRadius:6,border:`2px solid ${C.green}`,marginLeft:4}} alt="📸"/>
+                              </a>
+                            )}
                           </div>
                         </div>
                       </div>
