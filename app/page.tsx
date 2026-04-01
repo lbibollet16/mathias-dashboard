@@ -2575,28 +2575,37 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
       <div style={{display:'flex',flexDirection:'column',gap:10}}>
         {champsDef.map(c => (
           <div key={c.key} style={{background:dark?'#111':'#f8f9fa',borderRadius:10,padding:'12px 14px',border:`1px solid ${bdr}`}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
-              <div>
-                <div style={{fontWeight:700,fontSize:14}}>{c.label}
-                  <span style={{marginLeft:8,fontSize:12,fontWeight:400,color:c.sign==='-'?C.red:c.sign==='+'?C.green:sub}}>
-                    ({c.sign === '-' ? 'sortie' : c.sign === '+' ? 'entrée' : '±'})
-                  </span>
-                </div>
-                <div style={{fontSize:11,color:sub,marginTop:2}}>{c.desc}</div>
+            <div style={{marginBottom:8}}>
+              <div style={{fontWeight:700,fontSize:14}}>{c.label}
+                <span style={{marginLeft:8,fontSize:12,fontWeight:400,color:c.sign==='-'?C.red:c.sign==='+'?C.green:sub}}>
+                  ({c.sign === '-' ? 'sortie' : c.sign === '+' ? 'entrée' : '±'})
+                </span>
               </div>
+              <div style={{fontSize:11,color:sub,marginTop:2}}>{c.desc}</div>
             </div>
-            <input type="text" inputMode="decimal" required
-              value={f[c.key]}
-              onChange={e => {
-                const val = e.target.value
-                // Permettre: vide, -, chiffres, point/virgule
-                if (val === '' || val === '-' || /^-?\d*[.,]?\d*$/.test(val)) {
-                  setF((prev:any) => ({...prev, [c.key]: val.replace(',','.')}))
-                }
-              }}
-              placeholder={c.sign === '+' ? '0' : c.sign === '-' ? '-3' : '±0'}
-              style={{...S, fontSize:20, fontWeight:700, textAlign:'center', padding:'12px', borderRadius:10,
-                borderColor: f[c.key] !== '' && f[c.key] !== '-' ? (parseFloat(f[c.key]) < 0 && c.sign === '+' ? C.red : parseFloat(f[c.key]) > 0 && c.sign === '-' ? C.red : C.green) : bdr}}/>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <button type="button" onClick={()=>{
+                  const cur = parseFloat(f[c.key]) || 0
+                  setF((prev:any)=>({...prev,[c.key]: cur === 0 ? '' : String(-cur)}))
+                }}
+                style={{flexShrink:0,width:48,height:48,borderRadius:10,border:`2px solid ${bdr}`,background:dark?'#333':'#e2e8f0',fontSize:22,fontWeight:900,cursor:'pointer',color:sub,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                ±
+              </button>
+              <input
+                type="text"
+                pattern="-?[0-9]*"
+                inputMode="text"
+                required
+                value={f[c.key]}
+                onChange={e => {
+                  const v = e.target.value
+                  if (v === '' || v === '-' || /^-?\d+$/.test(v)) {
+                    setF((prev:any) => ({...prev, [c.key]: v}))
+                  }
+                }}
+                placeholder="0"
+                style={{...S, flex:1, fontSize:22, fontWeight:700, textAlign:'center', padding:'12px', borderRadius:10, boxSizing:'border-box',
+                  borderColor: f[c.key] !== '' && f[c.key] !== '-' ? (parseFloat(f[c.key]) < 0 && c.sign === '+' ? C.red : parseFloat(f[c.key]) > 0 && c.sign === '-' ? C.red : C.green) : bdr}}/>
           </div>
         ))}
       </div>
