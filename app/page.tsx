@@ -2490,9 +2490,9 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
   }
 
   function formComplet(f: any) {
-    return champsDef.every(c => f[c.key] !== '') && f.qte_reelle !== '' && f.cause !== '' && f.commentaire_compta !== ''
+    const exemptQteReelle = f.causeIdx === 0 // Pièce non réceptionnée = pas de stock physique
+    return champsDef.every(c => f[c.key] !== '') && (exemptQteReelle || f.qte_reelle !== '') && f.cause !== '' && f.commentaire_compta !== ''
   }
-
   function photoObligatoire(ajust: number, cause?: string, causeIdx?: number) {
     // Index 0 = Pièce non réceptionnée mais facturée — pas de photo
     if (causeIdx === 0 || (cause && CAUSES.indexOf(cause) === 0)) return false
@@ -2786,18 +2786,26 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                 <div style={{fontSize:11,color:sub,textAlign:'center',marginTop:2}}>= somme de toutes les transactions</div>
               </div>
 
-              {/* Champ qte_reelle pour vérification */}
-              <div style={{marginTop:12,background:dark?'#0d2a18':'#e6f4ea',borderRadius:12,padding:'14px',border:`1px solid ${C.green}33`}}>
-                <div style={{fontSize:12,fontWeight:700,color:C.green,textTransform:'uppercase',marginBottom:6}}>
-                  ✅ Stock réel sur tablette (vérification)
+              {/* Champ qte_reelle — masqué si pièce non réceptionnée */}
+              {form.causeIdx !== 0 && (
+                <div style={{marginTop:12,background:dark?'#0d2a18':'#e6f4ea',borderRadius:12,padding:'14px',border:`1px solid ${C.green}33`}}>
+                  <div style={{fontSize:12,fontWeight:700,color:C.green,textTransform:'uppercase',marginBottom:6}}>
+                    ✅ Stock réel sur tablette (vérification)
+                  </div>
+                  <input type="number" step="any" inputMode="numeric" min="0"
+                    value={form.qte_reelle}
+                    onChange={e=>setForm((prev:any)=>({...prev,qte_reelle:e.target.value}))}
+                    placeholder="Compter..."
+                    style={{...S,fontSize:22,fontWeight:900,textAlign:'center',padding:'12px',borderRadius:10,boxSizing:'border-box',width:'100%',maxWidth:'100%'}}/>
+                  <div style={{fontSize:11,color:sub,marginTop:6,textAlign:'center'}}>Doit être ≥ 0</div>
                 </div>
-                <input type="number" step="any" inputMode="numeric" required min="0"
-                  value={form.qte_reelle}
-                  onChange={e=>setForm((prev:any)=>({...prev,qte_reelle:e.target.value}))}
-                  placeholder="Compter..."
-                  style={{...S,fontSize:22,fontWeight:900,textAlign:'center',padding:'12px',borderRadius:10,boxSizing:'border-box',width:'100%',maxWidth:'100%'}}/>
-                <div style={{fontSize:11,color:sub,marginTop:6,textAlign:'center'}}>Doit être ≥ 0</div>
-              </div>
+              )}
+              {form.causeIdx === 0 && (
+                <div style={{marginTop:12,background:dark?'#1a233a':'#e8f0fe',borderRadius:12,padding:'14px',border:`1px solid ${C.blue}33`}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.blue}}>ℹ️ Pièce non réceptionnée</div>
+                  <div style={{fontSize:12,color:sub,marginTop:4}}>Aucun stock physique à compter — la pièce est un logiciel ou service.</div>
+                </div>
+              )}
 
               {/* Ajustement calculé */}
               {form.qte_reelle !== '' && (
