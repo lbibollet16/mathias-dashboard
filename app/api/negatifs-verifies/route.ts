@@ -16,11 +16,43 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { code_piece, employe, note, stock_au_moment, valeur_au_moment } = await req.json()
+    const body = await req.json()
+    const { code_piece, employe } = body
     if (!code_piece || !employe) return NextResponse.json({ erreur: 'code_piece et employe requis' }, { status: 400 })
+
     const { error } = await supabaseAdmin.from('negatifs_verifies').insert({
-      code_piece, employe, note: note || null,
-      stock_au_moment, valeur_au_moment,
+      code_piece,
+      employe,
+      stock_au_moment:  body.stock_au_moment,
+      valeur_au_moment: body.valeur_au_moment,
+      note:             body.note || null,
+      // Transactions
+      serv_detail:      body.serv_detail ?? 0,
+      serv_interne:     body.serv_interne ?? 0,
+      serv_gar:         body.serv_gar ?? 0,
+      pce_detail:       body.pce_detail ?? 0,
+      recept_comm:      body.recept_comm ?? 0,
+      dec_physique:     body.dec_physique ?? 0,
+      autre:            body.autre ?? 0,
+      qte_reelle:       body.qte_reelle ?? 0,
+      ajustement:       body.ajustement ?? 0,
+      // Justification comptabilité
+      cause:            body.cause || null,
+      commentaire:      body.commentaire || null,
+      // Photos
+      photo_url:        body.photo_url || null,
+      photo_url2:       body.photo_url2 || null,
+      // Pièce alternative
+      alt_code_piece:   body.alt_code_piece || null,
+      alt_ajustement:   body.alt_ajustement ?? null,
+      alt_serv_detail:  body.alt_serv_detail ?? 0,
+      alt_serv_interne: body.alt_serv_interne ?? 0,
+      alt_serv_gar:     body.alt_serv_gar ?? 0,
+      alt_pce_detail:   body.alt_pce_detail ?? 0,
+      alt_recept_comm:  body.alt_recept_comm ?? 0,
+      alt_dec_physique: body.alt_dec_physique ?? 0,
+      alt_autre:        body.alt_autre ?? 0,
+      alt_qte_reelle:   body.alt_qte_reelle ?? 0,
       date_verification: new Date().toISOString()
     })
     if (error) throw error
@@ -33,7 +65,6 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const body = await req.json()
-    // Supprimer par id (prioritaire) ou par code_piece
     if (body.id) {
       const { error } = await supabaseAdmin.from('negatifs_verifies').delete().eq('id', body.id)
       if (error) throw error
