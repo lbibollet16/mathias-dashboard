@@ -2490,10 +2490,10 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
   }
 
   function formComplet(f: any) {
-    const exemptQteReelle = f.causeIdx === 0 // Pièce non réceptionnée = pas de stock physique
-    return champsDef.every(c => f[c.key] !== '') && (exemptQteReelle || f.qte_reelle !== '') && f.cause !== '' && f.commentaire_compta !== ''
+    const exemptTout = f.causeIdx === 0 // Pièce non réceptionnée = juste cause + commentaire requis
+    if (exemptTout) return f.cause !== '' && f.commentaire_compta !== ''
+    return champsDef.every(c => f[c.key] !== '') && f.qte_reelle !== '' && f.cause !== '' && f.commentaire_compta !== ''
   }
-  function photoObligatoire(ajust: number, cause?: string, causeIdx?: number) {
     // Index 0 = Pièce non réceptionnée mais facturée — pas de photo
     if (causeIdx === 0 || (cause && CAUSES.indexOf(cause) === 0)) return false
     return Math.abs(ajust) > 1
