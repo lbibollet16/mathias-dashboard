@@ -2690,8 +2690,8 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                 <input type="number" step="any" inputMode="numeric" required min="0"
                   value={form.qte_reelle}
                   onChange={e=>setForm((prev:any)=>({...prev,qte_reelle:e.target.value}))}
-                  placeholder="Compter physiquement..."
-                  style={{...S,fontSize:24,fontWeight:900,textAlign:'center',padding:'14px',borderRadius:10}}/>
+                  placeholder="Compter..."
+                  style={{...S,fontSize:22,fontWeight:900,textAlign:'center',padding:'12px',borderRadius:10,boxSizing:'border-box',width:'100%',maxWidth:'100%'}}/>
                 <div style={{fontSize:11,color:sub,marginTop:6,textAlign:'center'}}>Doit être ≥ 0</div>
               </div>
 
@@ -2734,8 +2734,8 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                   <input type="number" step="any" inputMode="numeric" required min="0"
                     value={altForm.qte_reelle}
                     onChange={e=>setAltForm((prev:any)=>({...prev,qte_reelle:e.target.value}))}
-                    placeholder="Compter physiquement..."
-                    style={{...S,fontSize:24,fontWeight:900,textAlign:'center',padding:'14px',borderRadius:10}}/>
+                    placeholder="Compter..."
+                    style={{...S,fontSize:22,fontWeight:900,textAlign:'center',padding:'12px',borderRadius:10,boxSizing:'border-box',width:'100%',maxWidth:'100%'}}/>
                 </div>
                 {altForm.qte_reelle !== '' && altAjust !== null && (
                   <div style={{marginTop:12,background:altAjust===0?(dark?'#0d2a18':'#e6f4ea'):(dark?'#2b1113':'#fce8e6'),borderRadius:12,padding:'14px',border:`2px solid ${altAjust===0?C.green:C.red}`}}>
