@@ -23,6 +23,7 @@ export async function POST() {
     const idx = (n: string) => hdrs.findIndex(h => h.trim().toLowerCase() === n.toLowerCase())
     const iP = idx('PKCode'), iS = idx('QTYMINUSRESERVED'), iF = idx('PKFournisseur')
     const iC = idx('PrixCoutant'), iL = idx('CodeLigne'), iD = idx('DescFra')
+    const iQ = idx('QTY'), iR = idx('QteReserveEnStock')
 
     // Télécharger fournisseurs TSV pour avoir les noms
     const fournRes = await fetch(process.env.FOURNISSEURS_URL!)
@@ -43,8 +44,12 @@ export async function POST() {
       const pk = cols[iP]?.replace(/['"]/g, '').trim()
       if (!pk) continue
       const idF = (cols[iF] || '').replace(/['"]/g, '').trim()
+      const qtyDispo = parseFrNum(cols[iS])
+      const qtyReserve = iR >= 0 ? parseFrNum(cols[iR]) : 0
+      const qtyTotal = iQ >= 0 ? parseFrNum(cols[iQ]) : (qtyDispo + qtyReserve)
       stockAuj.set(pk, {
-        stock: parseFrNum(cols[iS]),
+        stock: qtyDispo,
+        qtyTotal,
         idF,
         nomF: dictFourn.get(idF) || ('ID:' + idF),
         ligne: (cols[iL] || '').replace(/['"]/g, '').trim() || 'N/A',
@@ -61,10 +66,14 @@ export async function POST() {
 
     // 4. Stock hier — pagination complète
     const mapHier = new Map<string, number>()
+    const mapHierQty = new Map<string, number>()
     let hierFrom = 0
     while (true) {
-      const { data: hierRows } = await supabaseAdmin.from('stock_hier').select('code_piece, quantite').range(hierFrom, hierFrom + 4999)
-      for (const r of hierRows || []) mapHier.set(r.code_piece, Number(r.quantite))
+      const { data: hierRows } = await supabaseAdmin.from('stock_hier').select('code_piece, quantite, qty_total').range(hierFrom, hierFrom + 4999)
+      for (const r of hierRows || []) {
+        mapHier.set(r.code_piece, Number(r.quantite))
+        mapHierQty.set(r.code_piece, Number(r.qty_total || r.quantite))
+      }
       if (!hierRows || hierRows.length < 5000) break
       hierFrom += 5000
     }
@@ -89,7 +98,7 @@ export async function POST() {
 
     for (const [pk, info] of stockAuj.entries()) {
       // Sauvegarder dans stock_hier (toutes les pièces)
-      nouveauStock.push({ code_piece: pk, quantite: info.stock })
+      nouveauStock.push({ code_piece: pk, quantite: info.stock, qty_total: info.qtyTotal || info.stock })
 
       // Négatifs — TOUS les fournisseurs, pas seulement ceux avec politique
       if (info.stock < 0) {
@@ -109,9 +118,11 @@ export async function POST() {
       if (!pol) continue
       if (modeInit) continue
 
-      if (!mapHier.has(pk)) continue
-      const hier = mapHier.get(pk)!
-      const diff = Math.max(0, info.stock) - Math.max(0, hier)
+      if (!mapHierQty.has(pk)) continue
+      const hierQty = mapHierQty.get(pk)!
+      const curQty = info.qtyTotal || info.stock
+      // Réception = QTY total augmente (même si QTYMINUSRESERVED baisse à cause de ventes)
+      const diff = curQty - hierQty
 
       if (diff > 0) {
         lotCtr++
