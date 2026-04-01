@@ -2492,11 +2492,11 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     // Champs transactions peuvent être vides (= 0), seuls cause, commentaire et qte_reelle sont requis
     return f.qte_reelle !== '' && f.cause !== '' && f.commentaire_compta !== ''
   }
-    // Index 0 = Pièce non réceptionnée mais facturée — pas de photo
+
+  function photoObligatoire(ajust: number, cause?: string, causeIdx?: number) {
     if (causeIdx === 0 || (cause && CAUSES.indexOf(cause) === 0)) return false
     return Math.abs(ajust) > 1
   }
-  function onPhoto(e: any) {
     const files = Array.from(e.target.files || []) as File[]
     if (files.length === 0) return
     setPhotoFiles(prev => [...prev, ...files])
