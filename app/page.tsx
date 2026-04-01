@@ -1363,14 +1363,12 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           if (barcodes.length > 0) {
             const val = barcodes[0].rawValue.trim().toUpperCase()
             setLocInput(val)
-            // Auto-submit
-            setTimeout(() => scanLocalisationVal(val), 100)
+            setTimeout(() => scanLocalisationVal(val, true), 100)
             return
           }
         } catch {}
       }
-      // Fallback — ouvrir input texte avec valeur vide si pas de détection
-      locRef.current?.focus()
+      // Fallback — ne pas ouvrir le clavier automatiquement sur mobile
     }
     reader.readAsDataURL(f)
     e.target.value = ''
@@ -1391,18 +1389,18 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           if (barcodes.length > 0) {
             const val = barcodes[0].rawValue.trim().toUpperCase()
             setPieceInput(val)
-            setTimeout(() => scanPieceVal(val), 100)
+            setTimeout(() => scanPieceVal(val, true), 100)
             return
           }
         } catch {}
       }
-      pieceRef.current?.focus()
+      // Fallback — ne pas ouvrir le clavier automatiquement sur mobile
     }
     reader.readAsDataURL(f)
     e.target.value = ''
   }
 
-  async function scanLocalisationVal(loc: string) {
+  async function scanLocalisationVal(loc: string, fromCamera = false) {
     if (!loc) return
     setLoading(true); setErreur(''); setShowCreerLoc(false)
     const r = await fetch('/api/inventaire/localisations?loc=' + encodeURIComponent(loc))
@@ -1411,7 +1409,8 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       setErreur('❌ Localisation "' + loc + '" inconnue')
       setLocInconnue(loc); setShowCreerLoc(true); sonErr()
       setLocInput(''); setLoading(false)
-      setTimeout(() => locRef.current?.focus(), 100); return
+      if (!fromCamera) setTimeout(() => locRef.current?.focus(), 100)
+      return
     }
     const codes = data.map((p:any) => p.code_piece).join(',')
     const rStock = await fetch('/api/inventaire/stock?codes=' + encodeURIComponent(codes))
@@ -1422,7 +1421,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     }
     setStockMap(map); setPiecesLoc(data); setLocActive(loc)
     setLocInput(''); setEtape('piece'); setComptesDuJour([]); sonOk(); setLoading(false)
-    setTimeout(() => pieceRef.current?.focus(), 100)
+    if (!fromCamera) setTimeout(() => pieceRef.current?.focus(), 100)
   }
 
   async function scanLocalisation(e?: any) {
@@ -1444,7 +1443,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     setTimeout(() => pieceRef.current?.focus(), 100)
   }
 
-  async function scanPieceVal(code: string) {
+  async function scanPieceVal(code: string, fromCamera = false) {
     if (!code) return
     setLoading(true); setErreur('')
     const pieceDansLoc = piecesLoc.find((p:any) => p.code_piece.trim().toUpperCase() === code)
@@ -1454,7 +1453,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       if (!j.found) {
         setErreur('❌ Piece "' + code + '" inconnue')
         sonErr(); setPieceInput(''); setLoading(false)
-        setTimeout(() => pieceRef.current?.focus(), 100); return
+        if (!fromCamera) setTimeout(() => pieceRef.current?.focus(), 100); return
       }
       const rLoc = await fetch('/api/inventaire/localisations?code=' + encodeURIComponent(code))
       const locData = await rLoc.json()
@@ -1463,7 +1462,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         ? `🚫 Piece "${code}" pas dans ${locActive}. Bonne place: ${autresLocs.join(', ')}`
         : `⚠️ Piece "${code}" sans localisation assignee.`)
       sonErr(); setPieceInput(''); setLoading(false)
-      setTimeout(() => pieceRef.current?.focus(), 100); return
+      if (!fromCamera) setTimeout(() => pieceRef.current?.focus(), 100); return
     }
     const stockInfo = stockMap.get(code) || { stock: 0, reserve: 0 }
     setPieceActive({ ...pieceDansLoc, stockSys: stockInfo.stock + stockInfo.reserve, stock: stockInfo.stock, reserve: stockInfo.reserve })
@@ -1472,7 +1471,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       await _sauvegarder(pieceDansLoc, stockInfo, 1)
     } else {
       setEtape('quantite'); setLoading(false)
-      setTimeout(() => qteRef.current?.focus(), 100)
+      if (!fromCamera) setTimeout(() => qteRef.current?.focus(), 100)
     }
   }
 
@@ -2715,14 +2714,14 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     {sousOnglet === 'actif' ? <>
       {/* Filtres + Total */}
       <div style={{background:card,borderRadius:12,padding:isMobile?'10px 12px':'14px 18px',marginBottom:14,display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end',border:`1px solid ${bdr}`}}>
-        <div style={{flex:1,minWidth:180}}>
+        <div style={{flex:1,minWidth:isMobile?'100%':180}}>
           <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Fournisseur</div>
           <select value={filtFourn} onChange={e=>setFiltFourn(e.target.value)} style={S}>
             <option value="ALL">Tous ({negsActifs.length})</option>
             {fournisseurs.map((f:string)=><option key={f} value={f}>{f} ({negsActifs.filter((n:any)=>n.fournisseur===f).length})</option>)}
           </select>
         </div>
-        <div style={{flex:1.2,minWidth:160}} ref={ddLigneRef}>
+        <div style={{flex:1.2,minWidth:isMobile?'100%':160}} ref={ddLigneRef}>
           <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>
             Lignes {filtLignes.length>0&&<span style={{color:C.blue}}>({filtLignes.length})</span>}
           </div>
