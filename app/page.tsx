@@ -2497,6 +2497,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     // Exempter si cause = premiere cause de la liste (pièce non receptionnee)
     if (cause && cause === CAUSES[0]) return false
     return Math.abs(ajust) > 1
+  }
 
   function onPhoto(e: any) {
     const files = Array.from(e.target.files || []) as File[]
