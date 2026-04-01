@@ -2491,11 +2491,11 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     if (exemptTout) return f.cause !== '' && f.commentaire_compta !== ''
     return champsDef.every(c => f[c.key] !== '') && f.qte_reelle !== '' && f.cause !== '' && f.commentaire_compta !== ''
   }
+  function photoObligatoire(ajust: number, cause?: string, causeIdx?: number) {
     // Index 0 = Pièce non réceptionnée mais facturée — pas de photo
     if (causeIdx === 0 || (cause && CAUSES.indexOf(cause) === 0)) return false
     return Math.abs(ajust) > 1
   }
-
   function onPhoto(e: any) {
     const files = Array.from(e.target.files || []) as File[]
     if (files.length === 0) return
