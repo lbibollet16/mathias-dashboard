@@ -60,6 +60,15 @@ export default function Dashboard() {
   const [user, setUser]     = useState<any>(null)
   const [newVersion, setNewVersion] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
+  // Charger ZXing pour iOS Safari (BarcodeDetector non supporté)
+  useEffect(() => {
+    if (!('BarcodeDetector' in window) && !(window as any).ZXingLibrary) {
+      const s = document.createElement('script')
+      s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js'
+      document.head.appendChild(s)
+    }
+  }, [])
+
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
     check()
@@ -1356,56 +1365,53 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   }
 
   // Traiter image scannée — extraire texte du code-barres via input file
+  async function decodeBarcodeFromFile(file: File): Promise<string|null> {
+    const dataUrl: string = await new Promise(res => {
+      const r = new FileReader(); r.onload = () => res(r.result as string); r.readAsDataURL(file)
+    })
+    const img = new Image()
+    img.src = dataUrl
+    await new Promise(r => { img.onload = r })
+    // 1. BarcodeDetector natif (Android Chrome, Chrome desktop)
+    if ('BarcodeDetector' in window) {
+      try {
+        const det = new (window as any).BarcodeDetector()
+        const codes = await det.detect(img)
+        if (codes.length > 0) return codes[0].rawValue.trim().toUpperCase()
+      } catch {}
+    }
+    // 2. ZXing fallback (iOS Safari, Firefox, etc.)
+    try {
+      const ZXing = (window as any).ZXingLibrary
+      if (ZXing) {
+        const canvas = document.createElement('canvas')
+        canvas.width = img.naturalWidth; canvas.height = img.naturalHeight
+        const ctx = canvas.getContext('2d')!
+        ctx.drawImage(img, 0, 0)
+        const hints = new Map()
+        const codeReader = new ZXing.BrowserMultiFormatReader(hints)
+        const result = await codeReader.decodeFromImageElement(img)
+        if (result) return result.getText().trim().toUpperCase()
+      }
+    } catch {}
+    return null
+  }
+
   function onLocScan(e: any) {
     const f = e.target.files?.[0]
     if (!f) return
-    // Sur mobile, le scan renvoie l'image — on utilise BarcodeDetector si disponible
-    const reader = new FileReader()
-    reader.onload = async () => {
-      if ('BarcodeDetector' in window) {
-        try {
-          const img = new Image()
-          img.src = reader.result as string
-          await new Promise(r => img.onload = r)
-          const detector = new (window as any).BarcodeDetector()
-          const barcodes = await detector.detect(img)
-          if (barcodes.length > 0) {
-            const val = barcodes[0].rawValue.trim().toUpperCase()
-            setLocInput(val)
-            setTimeout(() => scanLocalisationVal(val, true), 100)
-            return
-          }
-        } catch {}
-      }
-      // Fallback — ne pas ouvrir le clavier automatiquement sur mobile
-    }
-    reader.readAsDataURL(f)
+    decodeBarcodeFromFile(f).then(val => {
+      if (val) { setLocInput(val); setTimeout(() => scanLocalisationVal(val, true), 100) }
+    })
     e.target.value = ''
   }
 
   function onPieceScan(e: any) {
     const f = e.target.files?.[0]
     if (!f) return
-    const reader = new FileReader()
-    reader.onload = async () => {
-      if ('BarcodeDetector' in window) {
-        try {
-          const img = new Image()
-          img.src = reader.result as string
-          await new Promise(r => img.onload = r)
-          const detector = new (window as any).BarcodeDetector()
-          const barcodes = await detector.detect(img)
-          if (barcodes.length > 0) {
-            const val = barcodes[0].rawValue.trim().toUpperCase()
-            setPieceInput(val)
-            setTimeout(() => scanPieceVal(val, true), 100)
-            return
-          }
-        } catch {}
-      }
-      // Fallback — ne pas ouvrir le clavier automatiquement sur mobile
-    }
-    reader.readAsDataURL(f)
+    decodeBarcodeFromFile(f).then(val => {
+      if (val) { setPieceInput(val); setTimeout(() => scanPieceVal(val, true), 100) }
+    })
     e.target.value = ''
   }
 
