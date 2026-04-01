@@ -36,7 +36,7 @@ export async function POST() {
       if (idF && nom) dictFourn.set(idF, nom)
     }
 
-    const stockAuj = new Map<string, { stock: number; idF: string; nomF: string; ligne: string; cost: number; desc: string }>()
+    const stockAuj = new Map<string, { stock: number; qtyTotal: number; idF: string; nomF: string; ligne: string; cost: number; desc: string }>()
     for (let i = 1; i < tractionLines.length; i++) {
       if (!tractionLines[i]?.trim()) continue
       const cols = tractionLines[i].split(';')
