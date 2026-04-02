@@ -1251,7 +1251,7 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
 // ── Inventaire Cyclique Tab ───────────────────────────────────────────────────
 function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const employe = profil?.nom || profil?.email || 'Inconnu'
-  const [sousOnglet, setSousOnglet] = useState<'compter'|'rapport'|'progression'>('compter')
+  const [sousOnglet, setSousOnglet] = useState<'compter'|'suivi'>('compter')
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
@@ -1310,8 +1310,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const pieceScanRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (sousOnglet === 'rapport') chargerComptages()
-    if (sousOnglet === 'progression') chargerProgression()
+    if (sousOnglet === 'suivi') { chargerComptages(); chargerProgression() }
   }, [sousOnglet])
 
   // Reprendre la localisation sauvegardée
@@ -1783,8 +1782,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center',justifyContent:'space-between'}}>
       <div style={{display:'flex',gap:8}}>
         <button onClick={()=>setSousOnglet('compter')} style={{padding:isMobile?'10px 18px':'8px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='compter'?C.blue:bdr}`,background:sousOnglet==='compter'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='compter'?C.blue:sub,fontSize:isMobile?14:13,fontWeight:700,cursor:'pointer'}}>📦 Compter</button>
-        <button onClick={()=>setSousOnglet('rapport')} style={{padding:isMobile?'10px 18px':'8px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='rapport'?C.blue:bdr}`,background:sousOnglet==='rapport'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='rapport'?C.blue:sub,fontSize:isMobile?14:13,fontWeight:700,cursor:'pointer'}}>📊 Rapport</button>
-        <button onClick={()=>setSousOnglet('progression')} style={{padding:isMobile?'10px 18px':'8px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='progression'?C.green:bdr}`,background:sousOnglet==='progression'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:sousOnglet==='progression'?C.green:sub,fontSize:isMobile?14:13,fontWeight:700,cursor:'pointer'}}>📈 Progression</button>
+        <button onClick={()=>setSousOnglet('suivi')} style={{padding:isMobile?'10px 18px':'8px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='suivi'?C.green:bdr}`,background:sousOnglet==='suivi'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:sousOnglet==='suivi'?C.green:sub,fontSize:isMobile?14:13,fontWeight:700,cursor:'pointer'}}>📊 Suivi</button>
       </div>
       {sousOnglet==='compter' && (
         <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer'}}>
@@ -2156,18 +2154,13 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       </div>
 
     </>}
-    {sousOnglet==='rapport' && (
-      <RapportInventaire
+    {sousOnglet==='suivi' && (
+      <SuiviInventaire
         dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} isMobile={isMobile}
         comptages={comptages} filtDate={filtDate} setFiltDate={setFiltDate}
         filtEmploye={filtEmploye} setFiltEmploye={setFiltEmploye}
         filtEcart={filtEcart} setFiltEcart={setFiltEcart}
         chargerComptages={chargerComptages}
-      />
-    )}
-    {sousOnglet==='progression' && (
-      <ProgressionInventaire
-        dark={dark} card={card} bdr={bdr} sub={sub} C={C} isMobile={isMobile}
         locsStats={locsStats} loadingProg={loadingProg} chargerProgression={chargerProgression}
       />
     )}
@@ -2179,7 +2172,12 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 
 
 // ── RapportInventaire ────────────────────────────────────────────────────────
-function RapportInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile, comptages, filtDate, setFiltDate, filtEmploye, setFiltEmploye, filtEcart, setFiltEcart, chargerComptages}: any) {
+
+// ── SuiviInventaire ──────────────────────────────────────────────────────────
+function SuiviInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile,
+  comptages, filtDate, setFiltDate, filtEmploye, setFiltEmploye, filtEcart, setFiltEcart, chargerComptages,
+  locsStats, loadingProg, chargerProgression}: any) {
+  const [vue, setVue] = React.useState<'progression'|'detail'>('progression')
   const employes = Array.from(new Set(comptages.map((c:any)=>c.employe))).sort() as string[]
   const cFiltres = comptages.filter((c:any) => {
     if (filtDate && !c.date_comptage?.startsWith(filtDate)) return false
@@ -2189,6 +2187,109 @@ function RapportInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile, com
     return true
   })
   return (
+    <div>
+      {/* Toggle vue */}
+      <div style={{display:'flex',gap:8,marginBottom:16}}>
+        <button onClick={()=>setVue('progression')} style={{padding:'8px 16px',borderRadius:20,border:`2px solid ${vue==='progression'?C.green:bdr}`,background:vue==='progression'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:vue==='progression'?C.green:sub,fontWeight:700,cursor:'pointer',fontSize:13}}>
+          📈 Progression
+        </button>
+        <button onClick={()=>setVue('detail')} style={{padding:'8px 16px',borderRadius:20,border:`2px solid ${vue==='detail'?C.blue:bdr}`,background:vue==='detail'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='detail'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:13}}>
+          📋 Détail des comptages
+        </button>
+      </div>
+
+      {vue==='progression' && (() => {
+        return (
+    <div>
+      {/* Onglet Progression */}
+      <div style={{marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <div style={{fontWeight:700,fontSize:16}}>📈 Progression de l'inventaire</div>
+        <button onClick={chargerProgression} disabled={loadingProg}
+          style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:13}}>
+          {loadingProg?'⏳ Chargement...':'🔄 Actualiser'}
+        </button>
+      </div>
+      {loadingProg
+        ? <div style={{textAlign:'center',padding:40,color:sub}}>⏳ Chargement...</div>
+        : locsStats.length === 0
+          ? <div style={{textAlign:'center',padding:40,color:sub}}>
+              <div style={{fontSize:30,marginBottom:8}}>📦</div>
+              <div>Aucun comptage enregistré</div>
+            </div>
+          : <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              {locsStats.map((ls:any) => {
+                const pct = ls.pct
+                const couleur = pct===100?C.green:pct!=null&&pct>50?C.blue:pct!=null?C.yellow:'#64748b'
+                const barWidth = pct!=null ? pct : (ls.total_pieces>0 ? Math.min(100,Math.round(ls.nb_comptes/ls.total_pieces*100)) : 0)
+                return (
+                <div key={ls.localisation} style={{background:card,borderRadius:12,border:`1px solid ${pct===100?C.green:bdr}`,padding:'14px 16px',borderLeft:`4px solid ${couleur}`}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:6}}>
+                    <div style={{fontWeight:800,fontSize:16,fontFamily:'monospace'}}>{ls.localisation}</div>
+                    <div style={{display:'flex',alignItems:'center',gap:10}}>
+                      <span style={{fontSize:12,color:sub}}>
+                        {ls.nb_comptes} comptée{ls.nb_comptes>1?'s':''}
+                        {ls.total_pieces>0 && <span> / {ls.total_pieces} total</span>}
+                      </span>
+                      <span style={{background:couleur,color:'#fff',padding:'3px 10px',borderRadius:20,fontWeight:700,fontSize:13}}>
+                        {pct!=null ? pct+'%' : ls.nb_comptes+' pièce'+(ls.nb_comptes>1?'s':'')}
+                      </span>
+                    </div>
+                  </div>
+                  {/* Barre de progression */}
+                  <div style={{height:8,background:dark?'#333':'#e2e8f0',borderRadius:4,marginBottom:10,overflow:'hidden'}}>
+                    <div style={{height:'100%',width:barWidth+'%',background:couleur,borderRadius:4,transition:'width 0.5s'}}/>
+                  </div>
+                  {/* Employés avec % individuel */}
+                  {ls.employes.length > 0 && (
+                    <div style={{display:'flex',flexDirection:'column',gap:6,marginTop:4}}>
+                      {ls.employes.map((e:any) => (
+                        <div key={e.employe} style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:8,padding:'8px 12px'}}>
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+                            <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                              <span style={{fontWeight:700,color:C.blue,fontSize:13}}>👤 {e.employe}</span>
+                              <span style={{color:sub,fontSize:12}}>
+                                {e.nb}/{e.nb_attendues||ls.total_pieces} pièces
+                              </span>
+                              {e.statut==='en_cours' && <span style={{background:C.green+'22',color:C.green,fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:8}}>EN COURS</span>}
+                            </div>
+                            <span style={{background:e.pct===100?C.green:e.pct!=null&&e.pct>50?C.blue:e.pct!=null?C.yellow:'#94a3b8',color:'#fff',padding:'2px 8px',borderRadius:12,fontWeight:700,fontSize:11}}>
+                              {e.pct != null ? e.pct+'%' : '?'}
+                            </span>
+                          </div>
+                          <div style={{height:4,background:dark?'#333':'#e2e8f0',borderRadius:2,overflow:'hidden'}}>
+                            <div style={{height:'100%',width:(e.pct||0)+'%',background:e.pct===100?C.green:e.pct!=null&&e.pct>50?C.blue:C.yellow,borderRadius:2,transition:'width 0.5s'}}/>
+                          </div>
+                          {e.derniere_date && (
+                            <div style={{color:sub,fontSize:10,marginTop:3}}>
+                              Dernière: <strong>{e.derniere_piece}</strong> — {new Date(e.derniere_date).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+                            </div>
+                          )}
+                          {e.pieces_manquantes && e.pieces_manquantes.length > 0 && e.pct !== null && e.pct < 100 && (
+                            <div style={{marginTop:6,background:dark?'#2b1113':'#fff0f0',borderRadius:6,padding:'6px 8px'}}>
+                              <div style={{fontSize:10,fontWeight:700,color:'#e53e3e',marginBottom:3}}>
+                                ⚠️ {e.pieces_manquantes.length} pièce{e.pieces_manquantes.length>1?'s':''} manquante{e.pieces_manquantes.length>1?'s':''}
+                              </div>
+                              <div style={{fontSize:10,color:sub,fontFamily:'monospace',lineHeight:1.6}}>
+                                {e.pieces_manquantes.slice(0,8).join(' · ')}
+                                {e.pieces_manquantes.length > 8 && <span style={{color:'#e53e3e'}}> +{e.pieces_manquantes.length-8} autres</span>}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                )
+              })}
+            </div>
+      }
+    </div>
+        )
+      })()}
+
+      {vue==='detail' && (() => {
+        return (
     <div>
       {/* Rapport */}
       <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'12px 16px',marginBottom:12,display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
@@ -2354,96 +2455,12 @@ function RapportInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile, com
           </div>
       }
     </div>
-  )
-}
-
-// ── ProgressionInventaire ────────────────────────────────────────────────────
-function ProgressionInventaire({dark, card, bdr, sub, C, isMobile, locsStats, loadingProg, chargerProgression}: any) {
-  return (
-    <div>
-      {/* Onglet Progression */}
-      <div style={{marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-        <div style={{fontWeight:700,fontSize:16}}>📈 Progression de l'inventaire</div>
-        <button onClick={chargerProgression} disabled={loadingProg}
-          style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:13}}>
-          {loadingProg?'⏳ Chargement...':'🔄 Actualiser'}
-        </button>
-      </div>
-      {loadingProg
-        ? <div style={{textAlign:'center',padding:40,color:sub}}>⏳ Chargement...</div>
-        : locsStats.length === 0
-          ? <div style={{textAlign:'center',padding:40,color:sub}}>
-              <div style={{fontSize:30,marginBottom:8}}>📦</div>
-              <div>Aucun comptage enregistré</div>
-            </div>
-          : <div style={{display:'flex',flexDirection:'column',gap:10}}>
-              {locsStats.map((ls:any) => (
-                <div key={ls.localisation} style={{background:card,borderRadius:12,border:`1px solid ${ls.pct===100?C.green:bdr}`,padding:'14px 16px',borderLeft:`4px solid ${ls.pct===100?C.green:ls.pct!=null&&ls.pct>50?C.blue:C.yellow}`}}>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:6}}>
-                    <div style={{fontWeight:800,fontSize:16,fontFamily:'monospace'}}>{ls.localisation}</div>
-                    <div style={{display:'flex',alignItems:'center',gap:10}}>
-                      <span style={{fontSize:12,color:sub}}>
-                        {ls.nb_comptes} pièces comptées
-                        {ls.total_pieces > 0 && <span> / {ls.total_pieces} au total</span>}
-                      </span>
-                      <span style={{background:ls.pct===100?C.green:ls.pct!=null&&ls.pct>50?C.blue:ls.pct!=null?C.yellow:'#94a3b8',color:'#fff',padding:'3px 10px',borderRadius:20,fontWeight:700,fontSize:13}}>
-                        {ls.pct != null ? ls.pct+'%' : '?'}
-                      </span>
-                    </div>
-                  </div>
-                  {/* Barre de progression */}
-                  <div style={{height:8,background:dark?'#333':'#e2e8f0',borderRadius:4,marginBottom:10,overflow:'hidden'}}>
-                    <div style={{height:'100%',width:(ls.pct||0)+'%',background:ls.pct===100?C.green:ls.pct!=null&&ls.pct>50?C.blue:C.yellow,borderRadius:4,transition:'width 0.5s'}}/>
-                  </div>
-                  {/* Employés avec % individuel */}
-                  {ls.employes.length > 0 && (
-                    <div style={{display:'flex',flexDirection:'column',gap:6,marginTop:4}}>
-                      {ls.employes.map((e:any) => (
-                        <div key={e.employe} style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:8,padding:'8px 12px'}}>
-                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
-                            <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-                              <span style={{fontWeight:700,color:C.blue,fontSize:13}}>👤 {e.employe}</span>
-                              <span style={{color:sub,fontSize:12}}>
-                                {e.nb}/{e.nb_attendues||ls.total_pieces} pièces
-                              </span>
-                              {e.statut==='en_cours' && <span style={{background:C.green+'22',color:C.green,fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:8}}>EN COURS</span>}
-                            </div>
-                            <span style={{background:e.pct===100?C.green:e.pct!=null&&e.pct>50?C.blue:e.pct!=null?C.yellow:'#94a3b8',color:'#fff',padding:'2px 8px',borderRadius:12,fontWeight:700,fontSize:11}}>
-                              {e.pct != null ? e.pct+'%' : '?'}
-                            </span>
-                          </div>
-                          <div style={{height:4,background:dark?'#333':'#e2e8f0',borderRadius:2,overflow:'hidden'}}>
-                            <div style={{height:'100%',width:(e.pct||0)+'%',background:e.pct===100?C.green:e.pct!=null&&e.pct>50?C.blue:C.yellow,borderRadius:2,transition:'width 0.5s'}}/>
-                          </div>
-                          {e.derniere_date && (
-                            <div style={{color:sub,fontSize:10,marginTop:3}}>
-                              Dernière: <strong>{e.derniere_piece}</strong> — {new Date(e.derniere_date).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
-                            </div>
-                          )}
-                          {e.pieces_manquantes && e.pieces_manquantes.length > 0 && e.pct !== null && e.pct < 100 && (
-                            <div style={{marginTop:6,background:dark?'#2b1113':'#fff0f0',borderRadius:6,padding:'6px 8px'}}>
-                              <div style={{fontSize:10,fontWeight:700,color:'#e53e3e',marginBottom:3}}>
-                                ⚠️ {e.pieces_manquantes.length} pièce{e.pieces_manquantes.length>1?'s':''} manquante{e.pieces_manquantes.length>1?'s':''}
-                              </div>
-                              <div style={{fontSize:10,color:sub,fontFamily:'monospace',lineHeight:1.6}}>
-                                {e.pieces_manquantes.slice(0,8).join(' · ')}
-                                {e.pieces_manquantes.length > 8 && <span style={{color:'#e53e3e'}}> +{e.pieces_manquantes.length-8} autres</span>}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-      }
+        )
+      })()}
     </div>
   )
 }
 
-// ── Utilisateurs Tab ─────────────────────────────────────────────────────────
 function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const [users, setUsers] = useState<any[]>([])
