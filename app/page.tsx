@@ -1345,6 +1345,9 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       // Normaliser les clés en uppercase pour correspondre aux scans
       const mapTotal = new Map<string, number>()
       for (const s of statsLoc) mapTotal.set(s.localisation.trim().toUpperCase(), s.total_pieces)
+      console.log('[Progression] statsLoc count:', statsLoc.length, '| comptages count:', comptages.length)
+      console.log('[Progression] Exemple statsLoc:', statsLoc.slice(0,3))
+      console.log('[Progression] Exemple comptages:', comptages.slice(0,3))
 
       // Grouper comptages par localisation → par employé (normaliser les clés)
       const mapLoc = new Map<string, Map<string, any[]>>()
@@ -1361,6 +1364,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       const stats: any[] = []
       for (const [loc, byEmp] of mapLoc.entries()) {
         const totalPieces = mapTotal.get(loc) || 0  // déjà normalisé
+        console.log('[Progression] loc:', loc, '| totalPieces:', totalPieces, '| mapTotal has:', mapTotal.has(loc))
 
         // Pièces uniques comptées toutes personnes confondues
         const toutesComptees = new Set<string>()
