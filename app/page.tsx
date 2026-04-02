@@ -1707,14 +1707,6 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     if (r.ok) setComptages(await r.json())
   }
 
-  const employes = Array.from(new Set(comptages.map((c:any)=>c.employe))).sort() as string[]
-  const cFiltres = comptages.filter((c:any)=>{
-    if (filtDate && !c.date_comptage.startsWith(filtDate)) return false
-    if (filtEmploye!=='ALL' && c.employe!==filtEmploye) return false
-    if (filtEcart==='ecart' && c.ecart===0) return false
-    if (filtEcart==='ok' && c.ecart!==0) return false
-    return true
-  })
 
   const btnPrimary: any = {border:'none',borderRadius:12,fontWeight:800,cursor:'pointer',color:'#fff',width:'100%',padding:isMobile?'16px 0':'10px 0',fontSize:isMobile?17:14}
 
@@ -2095,10 +2087,40 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         )}
       </div>
 
-    </>}
-    {sousOnglet==='rapport' && (() => {
-      return (
-        <>
+    {sousOnglet==='rapport' && (
+      <RapportInventaire
+        dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} isMobile={isMobile}
+        comptages={comptages} filtDate={filtDate} setFiltDate={setFiltDate}
+        filtEmploye={filtEmploye} setFiltEmploye={setFiltEmploye}
+        filtEcart={filtEcart} setFiltEcart={setFiltEcart}
+        chargerComptages={chargerComptages}
+      />
+    )}
+    {sousOnglet==='progression' && (
+      <ProgressionInventaire
+        dark={dark} card={card} bdr={bdr} sub={sub} C={C} isMobile={isMobile}
+        locsStats={locsStats} loadingProg={loadingProg} chargerProgression={chargerProgression}
+      />
+    )}
+
+
+  </>
+}
+
+
+
+// ── RapportInventaire ────────────────────────────────────────────────────────
+function RapportInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile, comptages, filtDate, setFiltDate, filtEmploye, setFiltEmploye, filtEcart, setFiltEcart, chargerComptages}: any) {
+  const employes = Array.from(new Set(comptages.map((c:any)=>c.employe))).sort() as string[]
+  const cFiltres = comptages.filter((c:any) => {
+    if (filtDate && !c.date_comptage?.startsWith(filtDate)) return false
+    if (filtEmploye !== 'ALL' && c.employe !== filtEmploye) return false
+    if (filtEcart === 'ecart' && c.ecart === 0) return false
+    if (filtEcart === 'ok' && c.ecart !== 0) return false
+    return true
+  })
+  return (
+    <>
       {/* Rapport */}
       <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'12px 16px',marginBottom:12,display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
         <div style={{flex:1,minWidth:isMobile?'100%':130}}>
@@ -2261,12 +2283,14 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               </table>
             </div>
           </div>
-        </>
-      )
-    })()}
-    {sousOnglet==='progression' && (() => {
-      return (
-        <>
+    </>
+  )
+}
+
+// ── ProgressionInventaire ────────────────────────────────────────────────────
+function ProgressionInventaire({dark, card, bdr, sub, C, isMobile, locsStats, loadingProg, chargerProgression}: any) {
+  return (
+    <>
       {/* Onglet Progression */}
       <div style={{marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
         <div style={{fontWeight:700,fontSize:16}}>📈 Progression de l'inventaire</div>
@@ -2317,14 +2341,9 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 </div>
               ))}
             </div>
-        </>
-      )
-    })()}
-
-
-  </>
+    </>
+  )
 }
-
 
 // ── Utilisateurs Tab ─────────────────────────────────────────────────────────
 function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
