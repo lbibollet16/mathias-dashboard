@@ -6,153 +6,295 @@
 <title>Scanner</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
-body { background:#000; color:#fff; font-family:sans-serif; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
-#header { padding:12px 16px; background:#111; display:flex; justify-content:space-between; align-items:center; }
+body { background:#000; color:#fff; font-family:-apple-system,BlinkMacSystemFont,sans-serif; height:100dvh; display:flex; flex-direction:column; overflow:hidden; }
+#header { padding:12px 16px; background:#111; display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
 #header h2 { font-size:16px; font-weight:700; }
-#close-btn { background:rgba(255,255,255,.15); border:none; color:#fff; padding:8px 14px; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer; }
-#video-wrap { flex:1; position:relative; overflow:hidden; background:#000; }
+#close-btn { background:rgba(255,255,255,.15); border:none; color:#fff; padding:8px 14px; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+#video-wrap { flex:1; position:relative; overflow:hidden; background:#000; min-height:0; }
 video { width:100%; height:100%; object-fit:cover; display:block; }
-#finder { position:absolute; top:50%; left:50%; transform:translate(-50%,-60%); width:70%; max-width:280px; aspect-ratio:3/2; border:3px solid rgba(255,100,100,.9); border-radius:8px; box-shadow:0 0 0 9999px rgba(0,0,0,.5); }
-#line { position:absolute; top:15%; left:0; right:0; height:2px; background:rgba(255,80,80,.8); box-shadow:0 0 8px red; animation:scan 2s ease-in-out infinite; }
-@keyframes scan { 0%,100%{top:15%} 50%{top:85%} }
-#status { position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,.7); padding:10px 16px; text-align:center; font-size:14px; }
-#result-banner { display:none; position:absolute; inset:0; background:rgba(0,150,0,.92); flex-direction:column; align-items:center; justify-content:center; gap:16px; }
+#finder { position:absolute; top:50%; left:50%; transform:translate(-50%,-60%); width:72%; max-width:290px; aspect-ratio:3/2; border:3px solid rgba(255,80,80,.9); border-radius:10px; box-shadow:0 0 0 9999px rgba(0,0,0,.55); }
+#line { position:absolute; left:4%; right:4%; height:2px; background:rgba(255,60,60,.9); box-shadow:0 0 10px 2px rgba(255,60,60,.7); animation:scan 2s ease-in-out infinite; }
+@keyframes scan { 0%,100%{top:10%} 50%{top:88%} }
+#status { position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,.75); padding:10px 16px; text-align:center; font-size:13px; line-height:1.4; }
+#result-banner { display:none; position:absolute; inset:0; background:rgba(0,160,0,.93); flex-direction:column; align-items:center; justify-content:center; gap:14px; }
 #result-banner.show { display:flex; }
-#result-code { font-size:26px; font-weight:900; font-family:monospace; letter-spacing:2px; text-align:center; padding:0 20px; word-break:break-all; }
-#manual-wrap { padding:12px 16px; background:#111; display:flex; gap:8px; }
-#manual-input { flex:1; background:#222; border:1px solid #444; color:#fff; padding:10px 12px; border-radius:8px; font-size:16px; }
-#manual-btn { background:#2563eb; color:#fff; border:none; padding:10px 16px; border-radius:8px; font-weight:700; cursor:pointer; }
+#result-code { font-size:24px; font-weight:900; font-family:monospace; letter-spacing:2px; text-align:center; padding:0 20px; word-break:break-all; }
+#manual-wrap { padding:12px 16px; background:#111; display:flex; gap:8px; flex-shrink:0; }
+#manual-input { flex:1; background:#222; border:1px solid #555; color:#fff; padding:11px 12px; border-radius:8px; font-size:16px; -webkit-appearance:none; }
+#manual-input::placeholder { color:#666; }
+#manual-btn { background:#2563eb; color:#fff; border:none; padding:11px 18px; border-radius:8px; font-weight:700; cursor:pointer; font-size:15px; -webkit-tap-highlight-color:transparent; }
+#debug { position:absolute; top:8px; left:8px; right:8px; background:rgba(0,0,0,.7); color:#0f0; font-size:10px; padding:4px 6px; border-radius:4px; font-family:monospace; display:none; }
 </style>
 </head>
 <body>
+
 <div id="header">
   <h2 id="title">📷 Scanner</h2>
   <button id="close-btn" onclick="closeScanner()">✕ Fermer</button>
 </div>
+
 <div id="video-wrap">
-  <video id="video" autoplay playsinline muted></video>
+  <video id="video" autoplay playsinline muted webkit-playsinline></video>
   <div id="finder"><div id="line"></div></div>
   <div id="result-banner">
-    <div style="font-size:48px">✅</div>
+    <div style="font-size:56px">✅</div>
     <div id="result-code"></div>
   </div>
-  <div id="status">Démarrage...</div>
-</div>
-<div id="manual-wrap">
-  <input id="manual-input" type="text" placeholder="Entrer manuellement..." autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"/>
-  <button id="manual-btn" onclick="submitManual()">✓</button>
+  <div id="status" id="status">Chargement...</div>
+  <div id="debug"></div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js"></script>
+<div id="manual-wrap">
+  <input id="manual-input" type="text" placeholder="Code-barres manuellement..." 
+    autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"/>
+  <button id="manual-btn" onclick="submitManual()">✓ OK</button>
+</div>
 
 <script>
-var params = new URLSearchParams(window.location.search)
-var mode = params.get('mode') || 'loc'
-var scanning = true
-var codeReader = null
-var stream = null
+// ─── Variables globales ───────────────────────────────────────────────────────
+var params = new URLSearchParams(window.location.search);
+var mode = params.get('mode') || 'loc';
+var scanning = true;
+var videoStream = null;
+var rafId = null;
+var canvas = null;
+var ctx = null;
 
-document.getElementById('title').textContent = mode === 'loc' ? '📍 Localisation' : '📦 Pièce'
+document.getElementById('title').textContent = mode === 'loc' ? '📍 Localisation' : '📦 Pièce';
 
+// ─── Debug ────────────────────────────────────────────────────────────────────
+function dbg(msg) {
+  // console.log('[Scanner]', msg);
+}
+
+// ─── Status ───────────────────────────────────────────────────────────────────
 function setStatus(msg, color) {
-  var el = document.getElementById('status')
-  el.textContent = msg
-  el.style.color = color || '#fff'
+  var el = document.getElementById('status');
+  el.textContent = msg;
+  el.style.color = color || '#fff';
 }
 
-function sendToParent(value) {
-  var clean = value.trim().toUpperCase()
-  // Essayer toutes les méthodes possibles
-  try { window.opener && window.opener.postMessage({type:'SCAN_RESULT',mode:mode,value:clean},'*') } catch(e){}
-  try { window.parent !== window && window.parent.postMessage({type:'SCAN_RESULT',mode:mode,value:clean},'*') } catch(e){}
-  // localStorage comme fallback universel
-  try {
-    localStorage.setItem('scanner_result', JSON.stringify({type:'SCAN_RESULT',mode:mode,value:clean,ts:Date.now()}))
-  } catch(e){}
+// ─── Envoyer résultat ─────────────────────────────────────────────────────────
+function sendResult(value) {
+  var clean = (value || '').trim().toUpperCase();
+  if (!clean) return;
+  dbg('Result: ' + clean);
+
+  // Méthode 1: postMessage vers opener (popup)
+  try { if (window.opener) window.opener.postMessage({type:'SCAN_RESULT',mode:mode,value:clean}, '*'); } catch(e){}
+  // Méthode 2: postMessage vers parent (iframe)
+  try { if (window.parent && window.parent !== window) window.parent.postMessage({type:'SCAN_RESULT',mode:mode,value:clean}, '*'); } catch(e){}
+  // Méthode 3: localStorage (fallback universel iOS)
+  try { localStorage.setItem('scanner_result', JSON.stringify({type:'SCAN_RESULT',mode:mode,value:clean,ts:Date.now()})); } catch(e){}
 }
 
+// ─── Soumettre ────────────────────────────────────────────────────────────────
 function submitResult(value) {
-  if (!scanning) return
-  scanning = false
-  var clean = value.trim().toUpperCase()
-  document.getElementById('result-code').textContent = clean
-  document.getElementById('result-banner').classList.add('show')
-  sendToParent(clean)
-  stopCamera()
-  setTimeout(closeScanner, 1000)
+  if (!scanning) return;
+  scanning = false;
+  var clean = (value || '').trim().toUpperCase();
+  
+  // Afficher succès
+  document.getElementById('result-code').textContent = clean;
+  document.getElementById('result-banner').classList.add('show');
+  
+  sendResult(clean);
+  stopAll();
+  setTimeout(closeScanner, 900);
 }
 
 function submitManual() {
-  var val = document.getElementById('manual-input').value.trim()
-  if (val) submitResult(val)
+  var val = document.getElementById('manual-input').value.trim();
+  if (val) submitResult(val);
 }
 
 document.getElementById('manual-input').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') submitManual()
-})
+  if (e.key === 'Enter') submitManual();
+});
 
+// ─── Fermer ───────────────────────────────────────────────────────────────────
 function closeScanner() {
-  stopCamera()
-  try { window.close() } catch(e) {}
+  stopAll();
+  try { window.close(); } catch(e) {}
 }
 
-function stopCamera() {
-  if (codeReader) { try { codeReader.reset() } catch(e){} codeReader = null }
-  if (stream) { stream.getTracks().forEach(function(t){t.stop()}); stream = null }
+function stopAll() {
+  scanning = false;
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  if (videoStream) {
+    try { videoStream.getTracks().forEach(function(t){ t.stop(); }); } catch(e){}
+    videoStream = null;
+  }
+  var v = document.getElementById('video');
+  if (v) { v.srcObject = null; v.pause(); }
 }
 
-async function startScanner() {
-  var video = document.getElementById('video')
+// ─── Démarrer caméra ─────────────────────────────────────────────────────────
+async function startCamera() {
+  setStatus('Démarrage caméra...');
+  var video = document.getElementById('video');
+  
   try {
-    setStatus('Démarrage caméra...')
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}})
-    } catch(e1) {
-      try { stream = await navigator.mediaDevices.getUserMedia({video:true}) }
-      catch(e2) { throw new Error('Caméra inaccessible: ' + e2.message) }
-    }
-    video.srcObject = stream
-    await video.play()
-    setStatus('Pointez vers le code-barres...')
-
-    // Méthode 1: ZXingBrowser (meilleure compatibilité iOS/Android)
-    if (typeof ZXingBrowser !== 'undefined') {
-      try {
-        codeReader = new ZXingBrowser.BrowserMultiFormatReader()
-        codeReader.decodeFromVideoElement(video, function(result, err, controls) {
-          if (!scanning) return
-          if (result) submitResult(result.getText())
-        })
-        return
-      } catch(e) { console.warn('ZXingBrowser failed:', e) }
-    }
-
-    // Méthode 2: BarcodeDetector natif (Chrome Android récent)
-    if ('BarcodeDetector' in window) {
-      var detector = new BarcodeDetector()
-      var detect = async function() {
-        if (!scanning) return
-        try {
-          var codes = await detector.detect(video)
-          if (codes.length > 0) { submitResult(codes[0].rawValue); return }
-        } catch(e) {}
-        if (scanning) setTimeout(detect, 250)
+    // iOS a besoin de constraints spécifiques
+    var constraints = {
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920, min: 640 },
+        height: { ideal: 1080, min: 480 }
       }
-      setTimeout(detect, 500)
-      return
+    };
+    
+    try {
+      videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch(e1) {
+      dbg('Constraint failed, trying simple: ' + e1.message);
+      try {
+        videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      } catch(e2) {
+        dbg('Environment failed, trying any: ' + e2.message);
+        videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      }
     }
-
-    setStatus('⚠️ Scan automatique non supporté — entrez manuellement', '#f59e0b')
-    document.getElementById('manual-input').focus()
-
+    
+    video.srcObject = videoStream;
+    
+    // iOS nécessite d'attendre l'event loadedmetadata
+    await new Promise(function(resolve) {
+      video.addEventListener('loadedmetadata', resolve, { once: true });
+      video.play().catch(function(){});
+    });
+    
+    await video.play().catch(function(){});
+    setStatus('Pointez le code-barres dans le cadre rouge...');
+    
+    // Préparer canvas pour décodage
+    canvas = document.createElement('canvas');
+    ctx = canvas.getContext('2d');
+    
+    // Attendre que la vidéo soit vraiment prête
+    await new Promise(function(r){ setTimeout(r, 800); });
+    
+    startDecoding(video);
+    
   } catch(err) {
-    setStatus('❌ ' + err.message + ' — entrez manuellement ci-dessous', '#ef4444')
-    document.getElementById('manual-input').focus()
+    dbg('Camera error: ' + err.message);
+    setStatus('❌ Caméra inaccessible (' + err.message + ')\nEntrez le code manuellement ↓', '#ef4444');
+    document.getElementById('manual-input').focus();
   }
 }
 
-window.addEventListener('load', startScanner)
-window.addEventListener('beforeunload', stopCamera)
+// ─── Décodage ─────────────────────────────────────────────────────────────────
+function startDecoding(video) {
+  var lastAttempt = 0;
+  var interval = 350; // ms entre chaque tentative
+  
+  function decode() {
+    if (!scanning) return;
+    rafId = requestAnimationFrame(function() {
+      var now = Date.now();
+      if (now - lastAttempt >= interval) {
+        lastAttempt = now;
+        tryDecode(video);
+      }
+      decode();
+    });
+  }
+  
+  decode();
+}
+
+async function tryDecode(video) {
+  if (!scanning || !video || video.readyState < 2 || video.videoWidth === 0) return;
+  
+  // Méthode 1: BarcodeDetector natif (Chrome Android, iOS 17+)
+  if (window.BarcodeDetector) {
+    try {
+      var codes = await window.BarcodeDetector.detect(video);
+      if (codes && codes.length > 0) {
+        submitResult(codes[0].rawValue);
+        return;
+      }
+    } catch(e) { dbg('BarcodeDetector err: ' + e.message); }
+  }
+  
+  // Méthode 2: ZXing via canvas
+  if (!canvas) return;
+  try {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    var result = await decodeWithZXing(canvas);
+    if (result) {
+      submitResult(result);
+      return;
+    }
+  } catch(e) { /* silence */ }
+}
+
+// ─── ZXing multi-méthodes ─────────────────────────────────────────────────────
+var zxingReader = null;
+
+async function decodeWithZXing(canvasEl) {
+  // Essayer les différents namespaces selon la version chargée
+  var ZB = window.ZXingBrowser || window['@zxing/browser'];
+  var ZL = window.ZXing || window.ZXingLibrary;
+  
+  // Option A: ZXingBrowser.BrowserMultiFormatReader
+  if (ZB && ZB.BrowserMultiFormatReader) {
+    try {
+      if (!zxingReader) zxingReader = new ZB.BrowserMultiFormatReader();
+      var img = new Image();
+      img.src = canvasEl.toDataURL('image/png', 0.8);
+      await new Promise(function(r, rej){ img.onload=r; img.onerror=rej; setTimeout(rej,1000); });
+      var result = await zxingReader.decodeFromImageElement(img);
+      if (result) return result.getText();
+    } catch(e) {}
+  }
+  
+  // Option B: ZXing.MultiFormatReader + LuminanceSource
+  if (ZL && ZL.MultiFormatReader) {
+    try {
+      var imageData = canvasEl.getContext('2d').getImageData(0, 0, canvasEl.width, canvasEl.height);
+      var lum = new ZL.RGBLuminanceSource(imageData.data, canvasEl.width, canvasEl.height);
+      var bmp = new ZL.BinaryBitmap(new ZL.HybridBinarizer(lum));
+      var reader = new ZL.MultiFormatReader();
+      var result = reader.decode(bmp);
+      if (result) return result.getText();
+    } catch(e) {}
+  }
+  
+  // Option C: ZXing.BrowserMultiFormatReader (ancienne API)
+  if (ZL && ZL.BrowserMultiFormatReader) {
+    try {
+      if (!zxingReader) zxingReader = new ZL.BrowserMultiFormatReader();
+      var result = await zxingReader.decodeFromCanvas(canvasEl);
+      if (result) return result.getText();
+    } catch(e) {}
+  }
+  
+  return null;
+}
+
+// ─── Chargement des librairies ────────────────────────────────────────────────
+function loadScript(src, cb) {
+  var s = document.createElement('script');
+  s.src = src;
+  s.onload = cb;
+  s.onerror = function() { cb(new Error('Failed: ' + src)); };
+  document.head.appendChild(s);
+}
+
+// Charger ZXing puis démarrer
+loadScript('https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js', function(e1) {
+  dbg('ZXingBrowser loaded: ' + (window.ZXingBrowser ? 'YES' : 'NO'));
+  loadScript('https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js', function(e2) {
+    dbg('ZXingLibrary loaded: ' + (window.ZXing ? 'YES' : 'NO'));
+    startCamera();
+  });
+});
+
+window.addEventListener('beforeunload', stopAll);
+window.addEventListener('pagehide', stopAll);
 </script>
 </body>
 </html>
