@@ -1332,24 +1332,42 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   async function chargerProgression() {
     setLoadingProg(true)
     try {
-      // Charger comptages + stats localisations en parallèle
-      const [rCompt, rStats] = await Promise.all([
+      // Charger comptages ET sessions en parallèle
+      // Les sessions contiennent la liste exacte des pièces au moment du scan
+      const [rCompt, rSess] = await Promise.all([
         fetch('/api/inventaire/comptages?all=1'),
-        fetch('/api/inventaire/localisations?stats=1')
+        fetch('/api/inventaire/sessions?all=1')
       ])
       const comptages: any[] = rCompt.ok ? await rCompt.json() : []
-      const statsLoc: any[] = rStats.ok ? await rStats.json() : []
-      const sessions: any[] = []  // gardé pour compatibilité future
+      const sessions: any[] = rSess.ok ? await rSess.json() : []
 
-      // Map total pièces par localisation (depuis inventaire_localisations)
-      // Normaliser les clés en uppercase pour correspondre aux scans
-      const mapTotal = new Map<string, number>()
-      for (const s of statsLoc) mapTotal.set(s.localisation.trim().toUpperCase(), s.total_pieces)
-      console.log('[Progression] statsLoc count:', statsLoc.length, '| comptages count:', comptages.length)
-      console.log('[Progression] Exemple statsLoc:', statsLoc.slice(0,3))
-      console.log('[Progression] Exemple comptages:', comptages.slice(0,3))
+      // Helper: extraire nb_attendues d'une session (robuste)
+      const getNbAttendues = (s: any): number => {
+        if (s.nb_attendues && Number(s.nb_attendues) > 0) return Number(s.nb_attendues)
+        if (Array.isArray(s.pieces_attendues) && s.pieces_attendues.length > 0) return s.pieces_attendues.length
+        // pieces_attendues peut être une string JSON
+        if (typeof s.pieces_attendues === 'string') {
+          try { const arr = JSON.parse(s.pieces_attendues); if (Array.isArray(arr)) return arr.length } catch {}
+        }
+        return 0
+      }
 
-      // Grouper comptages par localisation → par employé (normaliser les clés)
+      // Map sessions par localisation+employe → nb_attendues
+      const mapSessions = new Map<string, number>()
+      for (const s of sessions) {
+        const key = (s.localisation||'').trim().toUpperCase() + '|' + (s.employe||'')
+        const nb = getNbAttendues(s)
+        if (nb > (mapSessions.get(key)||0)) mapSessions.set(key, nb)
+      }
+      // Total par localisation = max des sessions de tous les employés
+      const mapTotalLoc = new Map<string, number>()
+      for (const s of sessions) {
+        const locKey = (s.localisation||'').trim().toUpperCase()
+        const nb = getNbAttendues(s)
+        if (nb > (mapTotalLoc.get(locKey)||0)) mapTotalLoc.set(locKey, nb)
+      }
+
+      // Grouper comptages par localisation → par employé
       const mapLoc = new Map<string, Map<string, any[]>>()
       for (const c of comptages) {
         const locKey = (c.localisation || '').trim().toUpperCase()
@@ -1360,29 +1378,27 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         byEmp.get(c.employe)!.push(c)
       }
 
-      // Construire stats par localisation
+      // Construire stats
       const stats: any[] = []
       for (const [loc, byEmp] of mapLoc.entries()) {
-        const totalPieces = mapTotal.get(loc) || 0  // déjà normalisé
-        console.log('[Progression] loc:', loc, '| totalPieces:', totalPieces, '| mapTotal has:', mapTotal.has(loc))
-
-        // Pièces uniques comptées toutes personnes confondues
+        // Total depuis session (exact) ou fallback 0
+        const totalPieces = mapTotalLoc.get(loc) || 0
         const toutesComptees = new Set<string>()
         for (const comps of byEmp.values()) comps.forEach((c:any) => toutesComptees.add(c.code_piece))
         const nb_comptes = toutesComptees.size
         const pct = totalPieces > 0 ? Math.min(100, Math.round((nb_comptes / totalPieces) * 100)) : null
 
-        // Stats par employé
         const employes = Array.from(byEmp.entries()).map(([emp, comps]) => {
+          const sessKey = loc + '|' + emp
+          const nbAttEmp = mapSessions.get(sessKey) || totalPieces
           const piecesComptees = new Set(comps.map((c:any) => c.code_piece))
           const nb_emp = piecesComptees.size
-          const pctEmp = totalPieces > 0 ? Math.min(100, Math.round((nb_emp / totalPieces) * 100)) : null
+          const pctEmp = nbAttEmp > 0 ? Math.min(100, Math.round((nb_emp / nbAttEmp) * 100)) : null
           const sorted = [...comps].sort((a:any,b:any) => new Date(b.date_comptage).getTime() - new Date(a.date_comptage).getTime())
-          // Pièces manquantes = toutes les pièces de la loc moins celles comptées
           return {
             employe: emp,
             nb: nb_emp,
-            nb_attendues: totalPieces,
+            nb_attendues: nbAttEmp,
             pct: pctEmp,
             derniere_piece: sorted[0]?.code_piece,
             derniere_date: sorted[0]?.date_comptage,
