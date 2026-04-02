@@ -2343,6 +2343,7 @@ function ProgressionInventaire({dark, card, bdr, sub, C, isMobile, locsStats, lo
                 </div>
               ))}
             </div>
+      }
     </div>
   )
 }
