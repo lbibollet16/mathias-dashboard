@@ -2177,7 +2177,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 function SuiviInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile,
   comptages, filtDate, setFiltDate, filtEmploye, setFiltEmploye, filtEcart, setFiltEcart, chargerComptages,
   locsStats, loadingProg, chargerProgression}: any) {
-  const [vue, setVue] = React.useState<'progression'|'detail'>('progression')
+  const [vue, setVue] = useState<'progression'|'detail'>('progression')
   const employes = Array.from(new Set(comptages.map((c:any)=>c.employe))).sort() as string[]
   const cFiltres = comptages.filter((c:any) => {
     if (filtDate && !c.date_comptage?.startsWith(filtDate)) return false
