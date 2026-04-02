@@ -2121,7 +2121,7 @@ function RapportInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile, com
     return true
   })
   return (
-    <>
+    <div>
       {/* Rapport */}
       <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'12px 16px',marginBottom:12,display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
         <div style={{flex:1,minWidth:isMobile?'100%':130}}>
@@ -2284,14 +2284,14 @@ function RapportInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile, com
               </table>
             </div>
           </div>
-    </>
+    </div>
   )
 }
 
 // ── ProgressionInventaire ────────────────────────────────────────────────────
 function ProgressionInventaire({dark, card, bdr, sub, C, isMobile, locsStats, loadingProg, chargerProgression}: any) {
   return (
-    <>
+    <div>
       {/* Onglet Progression */}
       <div style={{marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
         <div style={{fontWeight:700,fontSize:16}}>📈 Progression de l'inventaire</div>
@@ -2342,7 +2342,7 @@ function ProgressionInventaire({dark, card, bdr, sub, C, isMobile, locsStats, lo
                 </div>
               ))}
             </div>
-    </>
+    </div>
   )
 }
 
