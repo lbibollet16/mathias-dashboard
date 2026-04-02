@@ -2087,6 +2087,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         )}
       </div>
 
+    </>}
     {sousOnglet==='rapport' && (
       <RapportInventaire
         dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} isMobile={isMobile}
