@@ -1332,93 +1332,58 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   async function chargerProgression() {
     setLoadingProg(true)
     try {
-      // Charger toutes les sessions (source de vérité pour les pièces attendues)
-      const [rSess, rCompt] = await Promise.all([
-        fetch('/api/inventaire/sessions?all=1'),
-        fetch('/api/inventaire/comptages?all=1')
+      // Charger comptages + stats localisations en parallèle
+      const [rCompt, rStats] = await Promise.all([
+        fetch('/api/inventaire/comptages?all=1'),
+        fetch('/api/inventaire/localisations?stats=1')
       ])
-      const sessions: any[] = rSess.ok ? await rSess.json() : []
       const comptages: any[] = rCompt.ok ? await rCompt.json() : []
+      const statsLoc: any[] = rStats.ok ? await rStats.json() : []
+      const sessions: any[] = []  // gardé pour compatibilité future
 
-      // Map des comptages par localisation+employé
-      const mapComptages = new Map<string, Map<string, Set<string>>>()
+      // Map total pièces par localisation (depuis inventaire_localisations)
+      const mapTotal = new Map<string, number>()
+      for (const s of statsLoc) mapTotal.set(s.localisation, s.total_pieces)
+
+      // Grouper comptages par localisation → par employé
+      const mapLoc = new Map<string, Map<string, any[]>>()
       for (const c of comptages) {
-        if (!mapComptages.has(c.localisation)) mapComptages.set(c.localisation, new Map())
-        const byEmp = mapComptages.get(c.localisation)!
-        if (!byEmp.has(c.employe)) byEmp.set(c.employe, new Set())
-        byEmp.get(c.employe)!.add(c.code_piece)
-      }
-
-      // Grouper sessions par localisation — prendre la plus récente par employé
-      const mapSessions = new Map<string, Map<string, any>>()
-      for (const s of sessions) {
-        if (!mapSessions.has(s.localisation)) mapSessions.set(s.localisation, new Map())
-        const byEmp = mapSessions.get(s.localisation)!
-        const existing = byEmp.get(s.employe)
-        if (!existing || new Date(s.date_debut) > new Date(existing.date_debut)) {
-          byEmp.set(s.employe, s)
-        }
+        if (!mapLoc.has(c.localisation)) mapLoc.set(c.localisation, new Map())
+        const byEmp = mapLoc.get(c.localisation)!
+        if (!byEmp.has(c.employe)) byEmp.set(c.employe, [])
+        byEmp.get(c.employe)!.push(c)
       }
 
       // Construire stats par localisation
       const stats: any[] = []
-      for (const [loc, empSessions] of mapSessions.entries()) {
-        // Toutes les pièces attendues dans cette loc (union de toutes les sessions)
-        const toutesAttendues = new Set<string>()
-        for (const sess of empSessions.values()) {
-          const pa = Array.isArray(sess.pieces_attendues) ? sess.pieces_attendues : []
-          pa.forEach((p:string) => toutesAttendues.add(p))
-        }
-        const totalPieces = toutesAttendues.size || 0
+      for (const [loc, byEmp] of mapLoc.entries()) {
+        const totalPieces = mapTotal.get(loc) || 0
 
-        // Pièces comptées globalement dans cette loc
-        const byEmpCompt = mapComptages.get(loc) || new Map()
+        // Pièces uniques comptées toutes personnes confondues
         const toutesComptees = new Set<string>()
-        for (const pieces of byEmpCompt.values()) pieces.forEach(p => toutesComptees.add(p))
-
+        for (const comps of byEmp.values()) comps.forEach((c:any) => toutesComptees.add(c.code_piece))
         const nb_comptes = toutesComptees.size
         const pct = totalPieces > 0 ? Math.min(100, Math.round((nb_comptes / totalPieces) * 100)) : null
 
         // Stats par employé
-        const employes = Array.from(empSessions.entries()).map(([emp, sess]) => {
-          const piecesAttenduesEmp: string[] = Array.isArray(sess.pieces_attendues) ? sess.pieces_attendues : []
-          const nb_attendues_emp = sess.nb_attendues || piecesAttenduesEmp.length
-          const piecesComptees = byEmpCompt.get(emp) || new Set()
-          const nb_comptes_emp = piecesComptees.size
-          const pctEmp = nb_attendues_emp > 0 ? Math.min(100, Math.round((nb_comptes_emp / nb_attendues_emp) * 100)) : null
-          // Dernière pièce comptée
-          const compsEmp = comptages.filter((c:any) => c.localisation === loc && c.employe === emp)
-            .sort((a:any,b:any) => new Date(b.date_comptage).getTime() - new Date(a.date_comptage).getTime())
+        const employes = Array.from(byEmp.entries()).map(([emp, comps]) => {
+          const piecesComptees = new Set(comps.map((c:any) => c.code_piece))
+          const nb_emp = piecesComptees.size
+          const pctEmp = totalPieces > 0 ? Math.min(100, Math.round((nb_emp / totalPieces) * 100)) : null
+          const sorted = [...comps].sort((a:any,b:any) => new Date(b.date_comptage).getTime() - new Date(a.date_comptage).getTime())
+          // Pièces manquantes = toutes les pièces de la loc moins celles comptées
           return {
             employe: emp,
-            nb: nb_comptes_emp,
-            nb_attendues: nb_attendues_emp,
+            nb: nb_emp,
+            nb_attendues: totalPieces,
             pct: pctEmp,
-            statut: sess.statut,
-            date_debut: sess.date_debut,
-            derniere_piece: compsEmp[0]?.code_piece,
-            derniere_date: compsEmp[0]?.date_comptage,
-            // Liste des pièces manquantes
-            pieces_manquantes: piecesAttenduesEmp.filter(p => !piecesComptees.has(p)),
+            derniere_piece: sorted[0]?.code_piece,
+            derniere_date: sorted[0]?.date_comptage,
+            pieces_comptees: Array.from(piecesComptees),
           }
-        }).sort((a:any,b:any) => (b.pct||0) - (a.pct||0))
+        }).sort((a:any,b:any) => (b.nb||0) - (a.nb||0))
 
         stats.push({ localisation: loc, nb_comptes, total_pieces: totalPieces, pct, employes })
-      }
-
-      // Ajouter localisations avec comptages mais sans session (ancien comportement)
-      for (const [loc, byEmpCompt] of mapComptages.entries()) {
-        if (mapSessions.has(loc)) continue
-        const toutesComptees = new Set<string>()
-        for (const pieces of byEmpCompt.values()) pieces.forEach(p => toutesComptees.add(p))
-        stats.push({
-          localisation: loc, nb_comptes: toutesComptees.size,
-          total_pieces: 0, pct: null,
-          employes: Array.from(byEmpCompt.entries()).map(([emp, pieces]) => ({
-            employe: emp, nb: pieces.size, nb_attendues: 0, pct: null,
-            statut: 'legacy', derniere_date: null, derniere_piece: null, pieces_manquantes: []
-          }))
-        })
       }
 
       stats.sort((a,b) => (b.pct||0) - (a.pct||0))
@@ -2248,9 +2213,8 @@ function SuiviInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile,
                             <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
                               <span style={{fontWeight:700,color:C.blue,fontSize:13}}>👤 {e.employe}</span>
                               <span style={{color:sub,fontSize:12}}>
-                                {e.nb}/{e.nb_attendues||ls.total_pieces} pièces
+                                {e.nb}/{ls.total_pieces||e.nb_attendues} pièces
                               </span>
-                              {e.statut==='en_cours' && <span style={{background:C.green+'22',color:C.green,fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:8}}>EN COURS</span>}
                             </div>
                             <span style={{background:e.pct===100?C.green:e.pct!=null&&e.pct>50?C.blue:e.pct!=null?C.yellow:'#94a3b8',color:'#fff',padding:'2px 8px',borderRadius:12,fontWeight:700,fontSize:11}}>
                               {e.pct != null ? e.pct+'%' : '?'}
@@ -2264,14 +2228,16 @@ function SuiviInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile,
                               Dernière: <strong>{e.derniere_piece}</strong> — {new Date(e.derniere_date).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
                             </div>
                           )}
-                          {e.pieces_manquantes && e.pieces_manquantes.length > 0 && e.pct !== null && e.pct < 100 && (
-                            <div style={{marginTop:6,background:dark?'#2b1113':'#fff0f0',borderRadius:6,padding:'6px 8px'}}>
-                              <div style={{fontSize:10,fontWeight:700,color:'#e53e3e',marginBottom:3}}>
-                                ⚠️ {e.pieces_manquantes.length} pièce{e.pieces_manquantes.length>1?'s':''} manquante{e.pieces_manquantes.length>1?'s':''}
+                          {/* Pièces comptées */}
+                          {e.pieces_comptees && e.pieces_comptees.length > 0 && (
+                            <div style={{marginTop:6,background:dark?'#0d2a18':'#e6f4ea',borderRadius:6,padding:'6px 8px'}}>
+                              <div style={{fontSize:10,fontWeight:700,color:C.green,marginBottom:3}}>
+                                ✅ {e.pieces_comptees.length} pièce{e.pieces_comptees.length>1?'s':''} comptée{e.pieces_comptees.length>1?'s':''}
                               </div>
-                              <div style={{fontSize:10,color:sub,fontFamily:'monospace',lineHeight:1.6}}>
-                                {e.pieces_manquantes.slice(0,8).join(' · ')}
-                                {e.pieces_manquantes.length > 8 && <span style={{color:'#e53e3e'}}> +{e.pieces_manquantes.length-8} autres</span>}
+                              <div style={{fontSize:10,color:sub,fontFamily:'monospace',lineHeight:1.8,flexWrap:'wrap',display:'flex',gap:'4px 8px'}}>
+                                {e.pieces_comptees.slice().sort().map((p:string) => (
+                                  <span key={p} style={{background:dark?'#1a2a1a':'#d1fae5',color:C.green,padding:'1px 4px',borderRadius:3}}>{p}</span>
+                                ))}
                               </div>
                             </div>
                           )}
