@@ -2284,6 +2284,7 @@ function RapportInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile, com
               </table>
             </div>
           </div>
+      }
     </div>
   )
 }
