@@ -1297,6 +1297,12 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const qteRef = useRef<HTMLInputElement>(null)
   const photoRef = useRef<HTMLInputElement>(null)
   const locScanRef = useRef<HTMLInputElement>(null)
+  const pieceScanRef2 = useRef<HTMLInputElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [scanModal, setScanModal] = useState<'loc'|'piece'|null>(null)
+  const [scanLog, setScanLog] = useState('')
+  const scanIntervalRef = useRef<any>(null)
+  const streamRef = useRef<MediaStream|null>(null)
   const pieceScanRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -1365,54 +1371,102 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   }
 
   // Traiter image scannée — extraire texte du code-barres via input file
-  async function decodeBarcodeFromFile(file: File): Promise<string|null> {
-    const dataUrl: string = await new Promise(res => {
-      const r = new FileReader(); r.onload = () => res(r.result as string); r.readAsDataURL(file)
-    })
-    const img = new Image()
-    img.src = dataUrl
-    await new Promise(r => { img.onload = r })
-    // 1. BarcodeDetector natif (Android Chrome, Chrome desktop)
-    if ('BarcodeDetector' in window) {
-      try {
-        const det = new (window as any).BarcodeDetector()
-        const codes = await det.detect(img)
-        if (codes.length > 0) return codes[0].rawValue.trim().toUpperCase()
-      } catch {}
-    }
-    // 2. ZXing fallback (iOS Safari, Firefox, etc.)
+  function stopCamera() {
+    if (scanIntervalRef.current) { clearInterval(scanIntervalRef.current); scanIntervalRef.current = null }
+    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
+    setScanLog('')
+  }
+
+  async function startCamera(mode: 'loc'|'piece') {
+    setScanModal(mode)
+    setScanLog('Démarrage caméra...')
     try {
-      const ZXing = (window as any).ZXingLibrary
-      if (ZXing) {
-        const canvas = document.createElement('canvas')
-        canvas.width = img.naturalWidth; canvas.height = img.naturalHeight
-        const ctx = canvas.getContext('2d')!
-        ctx.drawImage(img, 0, 0)
-        const hints = new Map()
-        const codeReader = new ZXing.BrowserMultiFormatReader(hints)
-        const result = await codeReader.decodeFromImageElement(img)
-        if (result) return result.getText().trim().toUpperCase()
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+      })
+      streamRef.current = stream
+      await new Promise(r => setTimeout(r, 300))
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play()
       }
-    } catch {}
-    return null
+      setScanLog('Pointez vers le code-barres...')
+
+      // Détecter en continu chaque 400ms
+      scanIntervalRef.current = setInterval(async () => {
+        const video = videoRef.current
+        if (!video || video.readyState < 2) return
+        try {
+          if ('BarcodeDetector' in window) {
+            const det = new (window as any).BarcodeDetector({ formats: ['code_128', 'code_39', 'ean_13', 'ean_8', 'qr_code', 'data_matrix', 'upc_a', 'upc_e', 'itf', 'pdf417', 'aztec'] })
+            const codes = await det.detect(video)
+            if (codes.length > 0) {
+              const val = codes[0].rawValue.trim().toUpperCase()
+              stopCamera()
+              setScanModal(null)
+              if (mode === 'loc') { setLocInput(val); setTimeout(() => scanLocalisationVal(val, true), 100) }
+              else { setPieceInput(val); setTimeout(() => scanPieceVal(val, true), 100) }
+            }
+          } else {
+            // Canvas snapshot pour ZXing (iOS)
+            const ZXing = (window as any).ZXingLibrary
+            if (!ZXing) { setScanLog('Chargement décodeur...'); return }
+            const canvas = document.createElement('canvas')
+            canvas.width = video.videoWidth; canvas.height = video.videoHeight
+            const ctx = canvas.getContext('2d')!
+            ctx.drawImage(video, 0, 0)
+            const codeReader = new ZXing.BrowserMultiFormatReader()
+            try {
+              const result = codeReader.decodeFromCanvas(canvas)
+              if (result) {
+                const val = result.getText().trim().toUpperCase()
+                stopCamera()
+                setScanModal(null)
+                if (mode === 'loc') { setLocInput(val); setTimeout(() => scanLocalisationVal(val, true), 100) }
+                else { setPieceInput(val); setTimeout(() => scanPieceVal(val, true), 100) }
+              }
+            } catch {}
+          }
+        } catch {}
+      }, 400)
+    } catch(err: any) {
+      setScanLog('Erreur caméra: ' + err.message)
+    }
   }
 
   function onLocScan(e: any) {
-    const f = e.target.files?.[0]
-    if (!f) return
-    decodeBarcodeFromFile(f).then(val => {
-      if (val) { setLocInput(val); setTimeout(() => scanLocalisationVal(val, true), 100) }
-    })
-    e.target.value = ''
+    const f = e.target.files?.[0]; if (!f) return
+    // Fallback photo si getUserMedia échoue
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const img = new Image(); img.src = reader.result as string
+      await new Promise(r => { img.onload = r })
+      if ('BarcodeDetector' in window) {
+        try {
+          const det = new (window as any).BarcodeDetector()
+          const codes = await det.detect(img)
+          if (codes.length > 0) { const v = codes[0].rawValue.trim().toUpperCase(); setLocInput(v); setTimeout(() => scanLocalisationVal(v, true), 100); return }
+        } catch {}
+      }
+    }
+    reader.readAsDataURL(f); e.target.value = ''
   }
 
   function onPieceScan(e: any) {
-    const f = e.target.files?.[0]
-    if (!f) return
-    decodeBarcodeFromFile(f).then(val => {
-      if (val) { setPieceInput(val); setTimeout(() => scanPieceVal(val, true), 100) }
-    })
-    e.target.value = ''
+    const f = e.target.files?.[0]; if (!f) return
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const img = new Image(); img.src = reader.result as string
+      await new Promise(r => { img.onload = r })
+      if ('BarcodeDetector' in window) {
+        try {
+          const det = new (window as any).BarcodeDetector()
+          const codes = await det.detect(img)
+          if (codes.length > 0) { const v = codes[0].rawValue.trim().toUpperCase(); setPieceInput(v); setTimeout(() => scanPieceVal(v, true), 100); return }
+        } catch {}
+      }
+    }
+    reader.readAsDataURL(f); e.target.value = ''
   }
 
   async function scanLocalisationVal(loc: string, fromCamera = false) {
@@ -1629,6 +1683,26 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       )}
 
       {/* Inputs cachés pour scan caméra */}
+      {/* Modal scan caméra en direct — fonctionne iOS et Android */}
+      {scanModal && (
+        <div style={{position:'fixed',inset:0,zIndex:99999,background:'#000',display:'flex',flexDirection:'column'}}>
+          <div style={{background:'#111',padding:'12px 16px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <div style={{color:'#fff',fontWeight:700,fontSize:16}}>📷 Scanner {scanModal==='loc'?'Localisation':'Pièce'}</div>
+            <button onClick={()=>{setScanModal(null);stopCamera()}} style={{background:'rgba(255,255,255,.2)',border:'none',borderRadius:8,color:'#fff',padding:'8px 14px',fontSize:14,fontWeight:700,cursor:'pointer'}}>✕ Fermer</button>
+          </div>
+          <div style={{flex:1,position:'relative',overflow:'hidden'}}>
+            <video ref={videoRef} autoPlay playsInline muted style={{width:'100%',height:'100%',objectFit:'cover'}} />
+            {/* Ligne de visée */}
+            <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'none'}}>
+              <div style={{width:'80%',maxWidth:300,height:2,background:'rgba(255,80,80,.8)',boxShadow:'0 0 8px red'}}/>
+            </div>
+            <div style={{position:'absolute',inset:0,border:'60px solid rgba(0,0,0,.5)',borderRadius:4,boxSizing:'border-box',pointerEvents:'none'}}/>
+          </div>
+          <div style={{background:'#111',padding:'12px',textAlign:'center',color:'rgba(255,255,255,.6)',fontSize:13}}>
+            {scanLog || 'Pointez la caméra vers le code-barres...'}
+          </div>
+        </div>
+      )}
       <input ref={locScanRef} type="file" accept="image/*" capture="environment" onChange={onLocScan} style={{display:'none'}}/>
       <input ref={pieceScanRef} type="file" accept="image/*" capture="environment" onChange={onPieceScan} style={{display:'none'}}/>
       <input ref={photoRef} type="file" accept="image/*" capture="environment" onChange={onPhotoChange} style={{display:'none'}}/>
@@ -1702,7 +1776,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   style={{...S,fontSize:isMobile?20:16,fontWeight:700,padding:isMobile?'16px 14px':'10px 14px',borderRadius:12,textAlign:'center',letterSpacing:2}} autoCapitalize="characters"/>
                 <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'1fr auto',gap:10}}>
                   {isMobile && (
-                    <button type="button" onClick={()=>locScanRef.current?.click()}
+                    <button type="button" onClick={()=>startCamera('loc')}
                       style={{...btnPrimary,background:dark?'#1a233a':'#e8f0fe',color:C.blue,border:`2px solid ${C.blue}`,fontSize:15}}>
                       📷 Scanner
                     </button>
@@ -1738,7 +1812,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   style={{...S,fontSize:isMobile?20:16,fontWeight:700,padding:isMobile?'16px 14px':'10px 14px',borderRadius:12,textAlign:'center'}} autoCapitalize="characters"/>
                 <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'1fr auto',gap:10}}>
                   {isMobile && (
-                    <button type="button" onClick={()=>pieceScanRef.current?.click()}
+                    <button type="button" onClick={()=>startCamera('piece')}
                       style={{...btnPrimary,background:dark?'#2b2411':'#fff8e1',color:C.yellow,border:`2px solid ${C.yellow}`,fontSize:15}}>
                       📷 Scanner
                     </button>
