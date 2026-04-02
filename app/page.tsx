@@ -1328,57 +1328,101 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   }, [])
 
   const [showReprendreMsg, setShowReprendreMsg] = useState(false)
+  const [sessionActive, setSessionActive] = useState<any>(null)
 
   async function chargerProgression() {
     setLoadingProg(true)
     try {
-      // Charger tous les comptages du mois
-      const r = await fetch('/api/inventaire/comptages?all=1')
-      if (!r.ok) return
-      const tous = await r.json()
+      // Charger toutes les sessions (source de vérité pour les pièces attendues)
+      const [rSess, rCompt] = await Promise.all([
+        fetch('/api/inventaire/sessions?all=1'),
+        fetch('/api/inventaire/comptages?all=1')
+      ])
+      const sessions: any[] = rSess.ok ? await rSess.json() : []
+      const comptages: any[] = rCompt.ok ? await rCompt.json() : []
 
-      // Charger toutes les localisations connues
-      const r2 = await fetch('/api/inventaire/localisations?stats=1')
-      const statsLoc = r2.ok ? await r2.json() : []
+      // Map des comptages par localisation+employé
+      const mapComptages = new Map<string, Map<string, Set<string>>>()
+      for (const c of comptages) {
+        if (!mapComptages.has(c.localisation)) mapComptages.set(c.localisation, new Map())
+        const byEmp = mapComptages.get(c.localisation)!
+        if (!byEmp.has(c.employe)) byEmp.set(c.employe, new Set())
+        byEmp.get(c.employe)!.add(c.code_piece)
+      }
 
-      // Grouper comptages par localisation
-      const mapLoc = new Map<string, { pieces: Set<string>, employes: Map<string,any[]> }>()
-      for (const c of tous) {
-        if (!mapLoc.has(c.localisation)) mapLoc.set(c.localisation, { pieces: new Set(), employes: new Map() })
-        const entry = mapLoc.get(c.localisation)!
-        entry.pieces.add(c.code_piece)
-        if (!entry.employes.has(c.employe)) entry.employes.set(c.employe, [])
-        entry.employes.get(c.employe)!.push(c)
+      // Grouper sessions par localisation — prendre la plus récente par employé
+      const mapSessions = new Map<string, Map<string, any>>()
+      for (const s of sessions) {
+        if (!mapSessions.has(s.localisation)) mapSessions.set(s.localisation, new Map())
+        const byEmp = mapSessions.get(s.localisation)!
+        const existing = byEmp.get(s.employe)
+        if (!existing || new Date(s.date_debut) > new Date(existing.date_debut)) {
+          byEmp.set(s.employe, s)
+        }
       }
 
       // Construire stats par localisation
-      const stats = Array.from(mapLoc.entries()).map(([loc, data]) => {
-        // Total pièces dans cette localisation (depuis inventaire_localisations)
-        const totalPieces = statsLoc.find((s:any) => s.localisation === loc)?.total_pieces || data.pieces.size
-        // % global = pièces uniques comptées / total pièces de la localisation
-        const pct = totalPieces > 0 ? Math.round((data.pieces.size / totalPieces) * 100) : 100
-        return {
-          localisation: loc,
-          nb_comptes: data.pieces.size,
-          total_pieces: totalPieces,
-          pct,
-          employes: Array.from(data.employes.entries()).map(([emp, comps]) => {
-            // Pièces uniques comptées par cet employé dans cette localisation
-            const piecesEmp = new Set(comps.map((c:any) => c.code_piece)).size
-            const pctEmp = totalPieces > 0 ? Math.round((piecesEmp / totalPieces) * 100) : 100
-            const sortedComps = [...comps].sort((a:any,b:any) => new Date(b.date_comptage).getTime() - new Date(a.date_comptage).getTime())
-            return {
-              employe: emp,
-              nb: piecesEmp,            // pièces uniques
-              nb_total: comps.length,   // entrées totales (avec doublons)
-              pct: pctEmp,              // % de la localisation fait par cet employé
-              derniere_piece: sortedComps[0]?.code_piece,
-              derniere_date: sortedComps[0]?.date_comptage,
-            }
-          }).sort((a:any,b:any) => b.nb - a.nb)
+      const stats: any[] = []
+      for (const [loc, empSessions] of mapSessions.entries()) {
+        // Toutes les pièces attendues dans cette loc (union de toutes les sessions)
+        const toutesAttendues = new Set<string>()
+        for (const sess of empSessions.values()) {
+          const pa = Array.isArray(sess.pieces_attendues) ? sess.pieces_attendues : []
+          pa.forEach((p:string) => toutesAttendues.add(p))
         }
-      }).sort((a,b) => b.pct - a.pct)
+        const totalPieces = toutesAttendues.size || 0
 
+        // Pièces comptées globalement dans cette loc
+        const byEmpCompt = mapComptages.get(loc) || new Map()
+        const toutesComptees = new Set<string>()
+        for (const pieces of byEmpCompt.values()) pieces.forEach(p => toutesComptees.add(p))
+
+        const nb_comptes = toutesComptees.size
+        const pct = totalPieces > 0 ? Math.min(100, Math.round((nb_comptes / totalPieces) * 100)) : null
+
+        // Stats par employé
+        const employes = Array.from(empSessions.entries()).map(([emp, sess]) => {
+          const piecesAttenduesEmp: string[] = Array.isArray(sess.pieces_attendues) ? sess.pieces_attendues : []
+          const nb_attendues_emp = sess.nb_attendues || piecesAttenduesEmp.length
+          const piecesComptees = byEmpCompt.get(emp) || new Set()
+          const nb_comptes_emp = piecesComptees.size
+          const pctEmp = nb_attendues_emp > 0 ? Math.min(100, Math.round((nb_comptes_emp / nb_attendues_emp) * 100)) : null
+          // Dernière pièce comptée
+          const compsEmp = comptages.filter((c:any) => c.localisation === loc && c.employe === emp)
+            .sort((a:any,b:any) => new Date(b.date_comptage).getTime() - new Date(a.date_comptage).getTime())
+          return {
+            employe: emp,
+            nb: nb_comptes_emp,
+            nb_attendues: nb_attendues_emp,
+            pct: pctEmp,
+            statut: sess.statut,
+            date_debut: sess.date_debut,
+            derniere_piece: compsEmp[0]?.code_piece,
+            derniere_date: compsEmp[0]?.date_comptage,
+            // Liste des pièces manquantes
+            pieces_manquantes: piecesAttenduesEmp.filter(p => !piecesComptees.has(p)),
+          }
+        }).sort((a:any,b:any) => (b.pct||0) - (a.pct||0))
+
+        stats.push({ localisation: loc, nb_comptes, total_pieces: totalPieces, pct, employes })
+      }
+
+      // Ajouter localisations avec comptages mais sans session (ancien comportement)
+      for (const [loc, byEmpCompt] of mapComptages.entries()) {
+        if (mapSessions.has(loc)) continue
+        const toutesComptees = new Set<string>()
+        for (const pieces of byEmpCompt.values()) pieces.forEach(p => toutesComptees.add(p))
+        stats.push({
+          localisation: loc, nb_comptes: toutesComptees.size,
+          total_pieces: 0, pct: null,
+          employes: Array.from(byEmpCompt.entries()).map(([emp, pieces]) => ({
+            employe: emp, nb: pieces.size, nb_attendues: 0, pct: null,
+            statut: 'legacy', derniere_date: null, derniere_piece: null, pieces_manquantes: []
+          }))
+        })
+      }
+
+      stats.sort((a,b) => (b.pct||0) - (a.pct||0))
       setLocsStats(stats)
     } finally {
       setLoadingProg(false)
@@ -1567,6 +1611,21 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       for (const s of stocks) map.set(s.code_piece, { stock: s.stock, reserve: s.reserve })
     }
     setStockMap(map); setPiecesLoc(data); setLocActive(loc)
+
+    // Créer/reprendre une session pour cette localisation
+    try {
+      const pieces_attendues = data.map((p:any) => p.code_piece)
+      const sessR = await fetch('/api/inventaire/sessions', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ localisation: loc, employe, pieces_attendues, nb_attendues: pieces_attendues.length })
+      })
+      if (sessR.ok) {
+        const sessJ = await sessR.json()
+        setSessionActive(sessJ.session)
+      }
+    } catch {}
+
     setLocInput(''); setEtape('piece'); setComptesDuJour([]); sonOk(); setLoading(false)
     if (!fromCamera) setTimeout(() => pieceRef.current?.focus(), 100)
   }
@@ -2319,19 +2378,22 @@ function ProgressionInventaire({dark, card, bdr, sub, C, isMobile, locsStats, lo
             </div>
           : <div style={{display:'flex',flexDirection:'column',gap:10}}>
               {locsStats.map((ls:any) => (
-                <div key={ls.localisation} style={{background:card,borderRadius:12,border:`1px solid ${ls.pct===100?C.green:bdr}`,padding:'14px 16px',borderLeft:`4px solid ${ls.pct===100?C.green:ls.pct>50?C.blue:C.yellow}`}}>
+                <div key={ls.localisation} style={{background:card,borderRadius:12,border:`1px solid ${ls.pct===100?C.green:bdr}`,padding:'14px 16px',borderLeft:`4px solid ${ls.pct===100?C.green:ls.pct!=null&&ls.pct>50?C.blue:C.yellow}`}}>
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:6}}>
                     <div style={{fontWeight:800,fontSize:16,fontFamily:'monospace'}}>{ls.localisation}</div>
                     <div style={{display:'flex',alignItems:'center',gap:10}}>
-                      <span style={{fontSize:12,color:sub}}>{ls.nb_comptes}/{ls.total_pieces} pièces</span>
-                      <span style={{background:ls.pct===100?C.green:ls.pct>50?C.blue:C.yellow,color:'#fff',padding:'3px 10px',borderRadius:20,fontWeight:700,fontSize:13}}>
-                        {ls.pct}%
+                      <span style={{fontSize:12,color:sub}}>
+                        {ls.nb_comptes} pièces comptées
+                        {ls.total_pieces > 0 && <span> / {ls.total_pieces} au total</span>}
+                      </span>
+                      <span style={{background:ls.pct===100?C.green:ls.pct!=null&&ls.pct>50?C.blue:ls.pct!=null?C.yellow:'#94a3b8',color:'#fff',padding:'3px 10px',borderRadius:20,fontWeight:700,fontSize:13}}>
+                        {ls.pct != null ? ls.pct+'%' : '?'}
                       </span>
                     </div>
                   </div>
                   {/* Barre de progression */}
                   <div style={{height:8,background:dark?'#333':'#e2e8f0',borderRadius:4,marginBottom:10,overflow:'hidden'}}>
-                    <div style={{height:'100%',width:ls.pct+'%',background:ls.pct===100?C.green:ls.pct>50?C.blue:C.yellow,borderRadius:4,transition:'width 0.5s'}}/>
+                    <div style={{height:'100%',width:(ls.pct||0)+'%',background:ls.pct===100?C.green:ls.pct!=null&&ls.pct>50?C.blue:C.yellow,borderRadius:4,transition:'width 0.5s'}}/>
                   </div>
                   {/* Employés avec % individuel */}
                   {ls.employes.length > 0 && (
@@ -2339,20 +2401,34 @@ function ProgressionInventaire({dark, card, bdr, sub, C, isMobile, locsStats, lo
                       {ls.employes.map((e:any) => (
                         <div key={e.employe} style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:8,padding:'8px 12px'}}>
                           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
-                            <div style={{display:'flex',alignItems:'center',gap:8}}>
+                            <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
                               <span style={{fontWeight:700,color:C.blue,fontSize:13}}>👤 {e.employe}</span>
-                              <span style={{color:sub,fontSize:12}}>{e.nb}/{ls.total_pieces} pièces</span>
+                              <span style={{color:sub,fontSize:12}}>
+                                {e.nb}/{e.nb_attendues||ls.total_pieces} pièces
+                              </span>
+                              {e.statut==='en_cours' && <span style={{background:C.green+'22',color:C.green,fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:8}}>EN COURS</span>}
                             </div>
-                            <span style={{background:e.pct===100?C.green:e.pct>50?C.blue:C.yellow,color:'#fff',padding:'2px 8px',borderRadius:12,fontWeight:700,fontSize:11}}>
-                              {e.pct}%
+                            <span style={{background:e.pct===100?C.green:e.pct!=null&&e.pct>50?C.blue:e.pct!=null?C.yellow:'#94a3b8',color:'#fff',padding:'2px 8px',borderRadius:12,fontWeight:700,fontSize:11}}>
+                              {e.pct != null ? e.pct+'%' : '?'}
                             </span>
                           </div>
                           <div style={{height:4,background:dark?'#333':'#e2e8f0',borderRadius:2,overflow:'hidden'}}>
-                            <div style={{height:'100%',width:e.pct+'%',background:e.pct===100?C.green:e.pct>50?C.blue:C.yellow,borderRadius:2,transition:'width 0.5s'}}/>
+                            <div style={{height:'100%',width:(e.pct||0)+'%',background:e.pct===100?C.green:e.pct!=null&&e.pct>50?C.blue:C.yellow,borderRadius:2,transition:'width 0.5s'}}/>
                           </div>
                           {e.derniere_date && (
                             <div style={{color:sub,fontSize:10,marginTop:3}}>
-                              Dernière: {e.derniere_piece} — {new Date(e.derniere_date).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+                              Dernière: <strong>{e.derniere_piece}</strong> — {new Date(e.derniere_date).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+                            </div>
+                          )}
+                          {e.pieces_manquantes && e.pieces_manquantes.length > 0 && e.pct !== null && e.pct < 100 && (
+                            <div style={{marginTop:6,background:dark?'#2b1113':'#fff0f0',borderRadius:6,padding:'6px 8px'}}>
+                              <div style={{fontSize:10,fontWeight:700,color:'#e53e3e',marginBottom:3}}>
+                                ⚠️ {e.pieces_manquantes.length} pièce{e.pieces_manquantes.length>1?'s':''} manquante{e.pieces_manquantes.length>1?'s':''}
+                              </div>
+                              <div style={{fontSize:10,color:sub,fontFamily:'monospace',lineHeight:1.6}}>
+                                {e.pieces_manquantes.slice(0,8).join(' · ')}
+                                {e.pieces_manquantes.length > 8 && <span style={{color:'#e53e3e'}}> +{e.pieces_manquantes.length-8} autres</span>}
+                              </div>
                             </div>
                           )}
                         </div>

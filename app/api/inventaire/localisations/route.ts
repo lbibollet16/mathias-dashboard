@@ -6,11 +6,23 @@ export async function GET(req: NextRequest) {
   try {
     const stats = req.nextUrl.searchParams.get('stats')
     if (stats === '1') {
-      const { data, error } = await supabaseAdmin.from('inventaire_localisations').select('localisation')
+      // Compter les pièces uniques par localisation (colonnes localisation1,2,3,4)
+      const { data, error } = await supabaseAdmin
+        .from('inventaire_localisations')
+        .select('code_piece, localisation1, localisation2, localisation3, localisation4')
       if (error) throw error
-      const map = new Map<string, number>()
-      for (const r of data || []) map.set(r.localisation, (map.get(r.localisation) || 0) + 1)
-      return NextResponse.json(Array.from(map.entries()).map(([localisation, total_pieces]) => ({ localisation, total_pieces })))
+      const map = new Map<string, Set<string>>()
+      for (const r of data || []) {
+        const locs = [r.localisation1, r.localisation2, r.localisation3, r.localisation4].filter(Boolean)
+        for (const loc of locs) {
+          if (!map.has(loc)) map.set(loc, new Set())
+          map.get(loc)!.add(r.code_piece)
+        }
+      }
+      return NextResponse.json(Array.from(map.entries()).map(([localisation, pieces]) => ({
+        localisation,
+        total_pieces: pieces.size
+      })))
     }
     const loc = req.nextUrl.searchParams.get('loc')?.trim()
     const code = req.nextUrl.searchParams.get('code')?.trim()
