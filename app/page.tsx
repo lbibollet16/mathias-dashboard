@@ -1332,89 +1332,108 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   async function chargerProgression() {
     setLoadingProg(true)
     try {
-      // Charger comptages ET sessions en parallèle
-      // Les sessions contiennent la liste exacte des pièces au moment du scan
-      const [rCompt, rSess] = await Promise.all([
-        fetch('/api/inventaire/comptages?all=1'),
-        fetch('/api/inventaire/sessions?all=1')
-      ])
+      // 1. Charger tous les comptages
+      const rCompt = await fetch('/api/inventaire/comptages?all=1')
       const comptages: any[] = rCompt.ok ? await rCompt.json() : []
-      const sessions: any[] = rSess.ok ? await rSess.json() : []
 
-      // Helper: extraire nb_attendues d'une session (robuste)
-      const getNbAttendues = (s: any): number => {
-        if (s.nb_attendues && Number(s.nb_attendues) > 0) return Number(s.nb_attendues)
-        if (Array.isArray(s.pieces_attendues) && s.pieces_attendues.length > 0) return s.pieces_attendues.length
-        // pieces_attendues peut être une string JSON
-        if (typeof s.pieces_attendues === 'string') {
-          try { const arr = JSON.parse(s.pieces_attendues); if (Array.isArray(arr)) return arr.length } catch {}
-        }
-        return 0
-      }
+      // 2. Trouver les localisations uniques dans les comptages
+      const locsUniques = Array.from(new Set(
+        comptages.map((c:any) => (c.localisation||'').trim().toUpperCase()).filter(Boolean)
+      ))
 
-      // Map sessions par localisation+employe → nb_attendues
-      const mapSessions = new Map<string, number>()
-      for (const s of sessions) {
-        const key = (s.localisation||'').trim().toUpperCase() + '|' + (s.employe||'')
-        const nb = getNbAttendues(s)
-        if (nb > (mapSessions.get(key)||0)) mapSessions.set(key, nb)
-      }
-      // Total par localisation = max des sessions de tous les employés
-      const mapTotalLoc = new Map<string, number>()
-      for (const s of sessions) {
-        const locKey = (s.localisation||'').trim().toUpperCase()
-        const nb = getNbAttendues(s)
-        if (nb > (mapTotalLoc.get(locKey)||0)) mapTotalLoc.set(locKey, nb)
-      }
+      if (locsUniques.length === 0) { setLocsStats([]); return }
 
-      // Grouper comptages par localisation → par employé
-      const mapLoc = new Map<string, Map<string, any[]>>()
+      // 3. Pour chaque localisation, charger ses pièces depuis inventaire_localisations
+      const mapPiecesLoc = new Map<string, Set<string>>()
+      await Promise.all(locsUniques.map(async (loc) => {
+        try {
+          const r = await fetch('/api/inventaire/localisations?loc=' + encodeURIComponent(loc))
+          if (!r.ok) return
+          const pieces: any[] = await r.json()
+          const set = new Set<string>()
+          for (const p of pieces) {
+            const pk = (p.code_piece||'').trim()
+            if (pk && !pk.startsWith('LOC_')) set.add(pk)
+          }
+          mapPiecesLoc.set(loc, set)
+        } catch {}
+      }))
+
+      // 4. Grouper comptages par localisation → par employé
+      const mapLoc = new Map<string, Map<string, Set<string>>>()
+      const mapDates = new Map<string, {piece:string, date:string}>()
       for (const c of comptages) {
-        const locKey = (c.localisation || '').trim().toUpperCase()
+        const locKey = (c.localisation||'').trim().toUpperCase()
         if (!locKey) continue
         if (!mapLoc.has(locKey)) mapLoc.set(locKey, new Map())
         const byEmp = mapLoc.get(locKey)!
-        if (!byEmp.has(c.employe)) byEmp.set(c.employe, [])
-        byEmp.get(c.employe)!.push(c)
+        if (!byEmp.has(c.employe)) byEmp.set(c.employe, new Set())
+        byEmp.get(c.employe)!.add((c.code_piece||'').trim())
+        // Garder la dernière date par employe+loc
+        const dk = locKey+'|'+c.employe
+        const existing = mapDates.get(dk)
+        if (!existing || c.date_comptage > existing.date) {
+          mapDates.set(dk, {piece: c.code_piece, date: c.date_comptage})
+        }
       }
 
-      // Construire stats
+      // 5. Construire stats
       const stats: any[] = []
       for (const [loc, byEmp] of mapLoc.entries()) {
-        // Total depuis session (exact) ou fallback 0
-        const totalPieces = mapTotalLoc.get(loc) || 0
+        const piecesLoc = mapPiecesLoc.get(loc) || new Set<string>()
+        const totalPieces = piecesLoc.size
+
+        // Pièces uniques comptées (toutes personnes)
         const toutesComptees = new Set<string>()
-        for (const comps of byEmp.values()) comps.forEach((c:any) => toutesComptees.add(c.code_piece))
+        for (const pieces of byEmp.values()) pieces.forEach(p => toutesComptees.add(p))
         const nb_comptes = toutesComptees.size
         const pct = totalPieces > 0 ? Math.min(100, Math.round((nb_comptes / totalPieces) * 100)) : null
 
-        const employes = Array.from(byEmp.entries()).map(([emp, comps]) => {
-          const sessKey = loc + '|' + emp
-          const nbAttEmp = mapSessions.get(sessKey) || totalPieces
-          const piecesComptees = new Set(comps.map((c:any) => c.code_piece))
-          const nb_emp = piecesComptees.size
-          const pctEmp = nbAttEmp > 0 ? Math.min(100, Math.round((nb_emp / nbAttEmp) * 100)) : null
-          const sorted = [...comps].sort((a:any,b:any) => new Date(b.date_comptage).getTime() - new Date(a.date_comptage).getTime())
+        // Liste complète: comptées + manquantes
+        const piecesCompteesList = Array.from(toutesComptees).sort()
+        const piecesManquantes = totalPieces > 0
+          ? Array.from(piecesLoc).filter(p => !toutesComptees.has(p)).sort()
+          : []
+
+        const employes = Array.from(byEmp.entries()).map(([emp, pieces]) => {
+          const nb_emp = pieces.size
+          const pctEmp = totalPieces > 0 ? Math.min(100, Math.round((nb_emp / totalPieces) * 100)) : null
+          const dk = loc+'|'+emp
+          const last = mapDates.get(dk)
+          const piecesEmpList = Array.from(pieces).sort()
+          const manqEmp = totalPieces > 0
+            ? Array.from(piecesLoc).filter(p => !pieces.has(p)).sort()
+            : []
           return {
             employe: emp,
             nb: nb_emp,
-            nb_attendues: nbAttEmp,
+            total: totalPieces,
             pct: pctEmp,
-            derniere_piece: sorted[0]?.code_piece,
-            derniere_date: sorted[0]?.date_comptage,
-            pieces_comptees: Array.from(piecesComptees),
+            derniere_piece: last?.piece,
+            derniere_date: last?.date,
+            pieces_comptees: piecesEmpList,
+            pieces_manquantes: manqEmp,
           }
         }).sort((a:any,b:any) => (b.nb||0) - (a.nb||0))
 
-        stats.push({ localisation: loc, nb_comptes, total_pieces: totalPieces, pct, employes })
+        stats.push({
+          localisation: loc,
+          nb_comptes,
+          total_pieces: totalPieces,
+          pct,
+          pieces_comptees: piecesCompteesList,
+          pieces_manquantes: piecesManquantes,
+          employes
+        })
       }
 
-      stats.sort((a,b) => (b.pct||0) - (a.pct||0))
+      stats.sort((a,b) => (b.pct!=null?b.pct:-1) - (a.pct!=null?a.pct:-1))
       setLocsStats(stats)
     } finally {
       setLoadingProg(false)
     }
   }
+
 
   function sonOk() {
     try {
@@ -2436,6 +2455,120 @@ function SuiviInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile,
     </div>
   )
 }
+
+
+function ProgressionInventaire({dark, card, bdr, sub, C, isMobile, locsStats, loadingProg, chargerProgression}: any) {
+  const [locExpand, setLocExpand] = React.useState<string|null>(null)
+  return (
+    <div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:8}}>
+        <div style={{fontWeight:700,fontSize:15,color:sub}}>
+          {locsStats.length} localisation{locsStats.length>1?'s':''} comptée{locsStats.length>1?'s':''}
+        </div>
+        <button onClick={chargerProgression} disabled={loadingProg}
+          style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:13}}>
+          {loadingProg?'⏳':'🔄'} Actualiser
+        </button>
+      </div>
+
+      {loadingProg
+        ? <div style={{textAlign:'center',padding:60,color:sub}}>⏳ Chargement...</div>
+        : locsStats.length === 0
+          ? <div style={{textAlign:'center',padding:60,color:sub}}>
+              <div style={{fontSize:36,marginBottom:10}}>📦</div>
+              <div style={{fontWeight:600}}>Aucun comptage enregistré</div>
+              <div style={{fontSize:13,marginTop:6}}>Scannez une localisation dans l'onglet Compter</div>
+            </div>
+          : <div style={{display:'flex',flexDirection:'column',gap:12}}>
+              {locsStats.map((ls:any) => {
+                const pct = ls.pct
+                const couleur = pct===100?C.green:pct!=null&&pct>50?C.blue:pct!=null?C.yellow:'#64748b'
+                const isExpanded = locExpand === ls.localisation
+                return (
+                  <div key={ls.localisation} style={{background:card,borderRadius:14,border:`1px solid ${pct===100?C.green:bdr}`,overflow:'hidden'}}>
+                    {/* Header localisation */}
+                    <div onClick={()=>setLocExpand(isExpanded?null:ls.localisation)}
+                      style={{padding:'14px 16px',cursor:'pointer',borderLeft:`5px solid ${couleur}`,display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+                      <div>
+                        <div style={{fontWeight:900,fontSize:17,fontFamily:'monospace',letterSpacing:1}}>{ls.localisation}</div>
+                        <div style={{fontSize:12,color:sub,marginTop:3}}>
+                          {ls.nb_comptes} / {ls.total_pieces>0?ls.total_pieces:'?'} pièces comptées
+                          {ls.employes.length>0 && <span style={{marginLeft:8}}>• {ls.employes.map((e:any)=>e.employe).join(', ')}</span>}
+                        </div>
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
+                        <span style={{background:couleur,color:'#fff',padding:'4px 12px',borderRadius:20,fontWeight:900,fontSize:14}}>
+                          {pct!=null?pct+'%':ls.nb_comptes+'✓'}
+                        </span>
+                        <span style={{color:sub,fontSize:16}}>{isExpanded?'▲':'▼'}</span>
+                      </div>
+                    </div>
+
+                    {/* Barre de progression */}
+                    <div style={{height:6,background:dark?'#2a2a2a':'#e2e8f0'}}>
+                      <div style={{height:'100%',width:(pct||0)+'%',background:couleur,transition:'width 0.5s'}}/>
+                    </div>
+
+                    {/* Détail expandable */}
+                    {isExpanded && (
+                      <div style={{padding:'12px 16px',borderTop:`1px solid ${bdr}`}}>
+                        {/* Stats par employé */}
+                        {ls.employes.map((e:any) => (
+                          <div key={e.employe} style={{marginBottom:12,background:dark?'#1a1a1a':'#f8f9fa',borderRadius:10,padding:'10px 12px'}}>
+                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+                              <div>
+                                <span style={{fontWeight:700,color:C.blue}}>👤 {e.employe}</span>
+                                <span style={{color:sub,fontSize:12,marginLeft:8}}>{e.nb}/{e.total>0?e.total:'?'} pièces</span>
+                              </div>
+                              <span style={{background:e.pct===100?C.green:e.pct!=null&&e.pct>50?C.blue:e.pct!=null?C.yellow:'#64748b',color:'#fff',padding:'2px 8px',borderRadius:10,fontWeight:700,fontSize:12}}>
+                                {e.pct!=null?e.pct+'%':e.nb+'✓'}
+                              </span>
+                            </div>
+                            {/* Barre employé */}
+                            <div style={{height:4,background:dark?'#333':'#e2e8f0',borderRadius:2,marginBottom:8,overflow:'hidden'}}>
+                              <div style={{height:'100%',width:(e.pct||0)+'%',background:e.pct===100?C.green:e.pct!=null&&e.pct>50?C.blue:C.yellow,transition:'width 0.5s'}}/>
+                            </div>
+                            {e.derniere_date && (
+                              <div style={{fontSize:11,color:sub,marginBottom:8}}>
+                                Dernière: <strong>{e.derniere_piece}</strong> — {new Date(e.derniere_date).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+                              </div>
+                            )}
+                            {/* Pièces comptées */}
+                            {e.pieces_comptees.length>0 && (
+                              <div style={{marginBottom:6}}>
+                                <div style={{fontSize:11,fontWeight:700,color:C.green,marginBottom:4}}>✅ Comptées ({e.pieces_comptees.length})</div>
+                                <div style={{display:'flex',flexWrap:'wrap',gap:'3px 6px'}}>
+                                  {e.pieces_comptees.map((p:string)=>(
+                                    <span key={p} style={{background:dark?'#0d2a18':'#d1fae5',color:C.green,padding:'2px 6px',borderRadius:4,fontSize:10,fontFamily:'monospace'}}>{p}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {/* Pièces manquantes */}
+                            {e.pieces_manquantes.length>0 && (
+                              <div>
+                                <div style={{fontSize:11,fontWeight:700,color:C.red,marginBottom:4}}>⬜ Manquantes ({e.pieces_manquantes.length})</div>
+                                <div style={{display:'flex',flexWrap:'wrap',gap:'3px 6px'}}>
+                                  {e.pieces_manquantes.map((p:string)=>(
+                                    <span key={p} style={{background:dark?'#2b1113':'#fee2e2',color:C.red,padding:'2px 6px',borderRadius:4,fontSize:10,fontFamily:'monospace'}}>{p}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+      }
+    </div>
+  )
+}
+
+
 
 function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
@@ -3608,5 +3741,4 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     </>}
   </>
 }
-
 
