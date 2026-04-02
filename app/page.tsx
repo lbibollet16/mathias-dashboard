@@ -1464,61 +1464,55 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     setScanLog('')
   }
 
-  async function startCamera(mode: 'loc'|'piece') {
-    setScanModal(mode)
-    setScanLog('Démarrage caméra...')
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-      })
-      streamRef.current = stream
-      await new Promise(r => setTimeout(r, 300))
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        await videoRef.current.play()
-      }
-      setScanLog('Pointez vers le code-barres...')
+  function startCamera(mode: 'loc'|'piece') {
+    // Ouvrir le scanner universel dans une popup
+    const url = '/scanner.html?mode=' + mode
+    const w = Math.min(500, window.screen.width)
+    const h = Math.min(700, window.screen.height)
+    const left = Math.round((window.screen.width - w) / 2)
+    const top = Math.round((window.screen.height - h) / 2)
+    const popup = window.open(url, 'scanner', `width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=no`)
 
-      // Détecter en continu chaque 400ms
-      scanIntervalRef.current = setInterval(async () => {
-        const video = videoRef.current
-        if (!video || video.readyState < 2) return
-        try {
-          if ('BarcodeDetector' in window) {
-            const det = new (window as any).BarcodeDetector({ formats: ['code_128', 'code_39', 'ean_13', 'ean_8', 'qr_code', 'data_matrix', 'upc_a', 'upc_e', 'itf', 'pdf417', 'aztec'] })
-            const codes = await det.detect(video)
-            if (codes.length > 0) {
-              const val = codes[0].rawValue.trim().toUpperCase()
-              stopCamera()
-              setScanModal(null)
-              if (mode === 'loc') { setLocInput(val); setTimeout(() => scanLocalisationVal(val, true), 100) }
-              else { setPieceInput(val); setTimeout(() => scanPieceVal(val, true), 100) }
-            }
-          } else {
-            // Canvas snapshot pour ZXing (iOS)
-            const ZXing = (window as any).ZXingLibrary
-            if (!ZXing) { setScanLog('Chargement décodeur...'); return }
-            const canvas = document.createElement('canvas')
-            canvas.width = video.videoWidth; canvas.height = video.videoHeight
-            const ctx = canvas.getContext('2d')!
-            ctx.drawImage(video, 0, 0)
-            const codeReader = new ZXing.BrowserMultiFormatReader()
-            try {
-              const result = codeReader.decodeFromCanvas(canvas)
-              if (result) {
-                const val = result.getText().trim().toUpperCase()
-                stopCamera()
-                setScanModal(null)
-                if (mode === 'loc') { setLocInput(val); setTimeout(() => scanLocalisationVal(val, true), 100) }
-                else { setPieceInput(val); setTimeout(() => scanPieceVal(val, true), 100) }
-              }
-            } catch {}
-          }
-        } catch {}
-      }, 400)
-    } catch(err: any) {
-      setScanLog('Erreur caméra: ' + err.message)
+    // Écouter le résultat via postMessage
+    const onMsg = (e: MessageEvent) => {
+      if (e.data?.type === 'SCAN_RESULT' && e.data.mode === mode) {
+        window.removeEventListener('message', onMsg)
+        clearInterval(lsInterval)
+        const val = e.data.value
+        if (mode === 'loc') { setLocInput(val); setTimeout(() => scanLocalisationVal(val, true), 100) }
+        else { setPieceInput(val); setTimeout(() => scanPieceVal(val, true), 100) }
+        try { popup?.close() } catch {}
+      }
     }
+    window.addEventListener('message', onMsg)
+
+    // Fallback localStorage pour les cas où postMessage ne fonctionne pas (certains iOS)
+    const lsInterval = setInterval(() => {
+      try {
+        const raw = localStorage.getItem('scanner_result')
+        if (!raw) return
+        const data = JSON.parse(raw)
+        if (data.mode === mode && Date.now() - data.ts < 5000) {
+          localStorage.removeItem('scanner_result')
+          clearInterval(lsInterval)
+          window.removeEventListener('message', onMsg)
+          const val = data.value
+          if (mode === 'loc') { setLocInput(val); setTimeout(() => scanLocalisationVal(val, true), 100) }
+          else { setPieceInput(val); setTimeout(() => scanPieceVal(val, true), 100) }
+          try { popup?.close() } catch {}
+        }
+      } catch {}
+    }, 300)
+
+    // Nettoyer si la popup est fermée sans résultat
+    const checkClosed = setInterval(() => {
+      if (popup?.closed) {
+        clearInterval(checkClosed)
+        clearInterval(lsInterval)
+        window.removeEventListener('message', onMsg)
+        localStorage.removeItem('scanner_result')
+      }
+    }, 500)
   }
 
   function onLocScan(e: any) {
@@ -1798,26 +1792,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       )}
 
       {/* Inputs cachés pour scan caméra */}
-      {/* Modal scan caméra en direct — fonctionne iOS et Android */}
-      {scanModal && (
-        <div style={{position:'fixed',inset:0,zIndex:99999,background:'#000',display:'flex',flexDirection:'column'}}>
-          <div style={{background:'#111',padding:'12px 16px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-            <div style={{color:'#fff',fontWeight:700,fontSize:16}}>📷 Scanner {scanModal==='loc'?'Localisation':'Pièce'}</div>
-            <button onClick={()=>{setScanModal(null);stopCamera()}} style={{background:'rgba(255,255,255,.2)',border:'none',borderRadius:8,color:'#fff',padding:'8px 14px',fontSize:14,fontWeight:700,cursor:'pointer'}}>✕ Fermer</button>
-          </div>
-          <div style={{flex:1,position:'relative',overflow:'hidden'}}>
-            <video ref={videoRef} autoPlay playsInline muted style={{width:'100%',height:'100%',objectFit:'cover'}} />
-            {/* Ligne de visée */}
-            <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'none'}}>
-              <div style={{width:'80%',maxWidth:300,height:2,background:'rgba(255,80,80,.8)',boxShadow:'0 0 8px red'}}/>
-            </div>
-            <div style={{position:'absolute',inset:0,border:'60px solid rgba(0,0,0,.5)',borderRadius:4,boxSizing:'border-box',pointerEvents:'none'}}/>
-          </div>
-          <div style={{background:'#111',padding:'12px',textAlign:'center',color:'rgba(255,255,255,.6)',fontSize:13}}>
-            {scanLog || 'Pointez la caméra vers le code-barres...'}
-          </div>
-        </div>
-      )}
+      {/* Scanner dans popup externe scanner.html */}
       <input ref={locScanRef} type="file" accept="image/*" capture="environment" onChange={onLocScan} style={{display:'none'}}/>
       <input ref={pieceScanRef} type="file" accept="image/*" capture="environment" onChange={onPieceScan} style={{display:'none'}}/>
       <input ref={photoRef} type="file" accept="image/*" capture="environment" onChange={onPhotoChange} style={{display:'none'}}/>
