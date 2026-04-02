@@ -77,3 +77,17 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ erreur: e.message }, { status: 500 })
   }
 }
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const all = req.nextUrl.searchParams.get('all')
+    if (all === '1') {
+      const { error } = await supabaseAdmin.from('inventaire_sessions').delete().neq('id', 0)
+      if (error) throw error
+      return NextResponse.json({ success: true })
+    }
+    return NextResponse.json({ success: true })
+  } catch (e: any) {
+    return NextResponse.json({ erreur: e.message }, { status: 500 })
+  }
+}

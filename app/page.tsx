@@ -2157,12 +2157,24 @@ function SuiviInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile,
   return (
     <div>
       {/* Toggle vue */}
-      <div style={{display:'flex',gap:8,marginBottom:16}}>
-        <button onClick={()=>setVue('progression')} style={{padding:'8px 16px',borderRadius:20,border:`2px solid ${vue==='progression'?C.green:bdr}`,background:vue==='progression'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:vue==='progression'?C.green:sub,fontWeight:700,cursor:'pointer',fontSize:13}}>
-          📈 Progression
-        </button>
-        <button onClick={()=>setVue('detail')} style={{padding:'8px 16px',borderRadius:20,border:`2px solid ${vue==='detail'?C.blue:bdr}`,background:vue==='detail'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='detail'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:13}}>
-          📋 Détail des comptages
+      <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',justifyContent:'space-between',alignItems:'center'}}>
+        <div style={{display:'flex',gap:8}}>
+          <button onClick={()=>setVue('progression')} style={{padding:'8px 16px',borderRadius:20,border:`2px solid ${vue==='progression'?C.green:bdr}`,background:vue==='progression'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:vue==='progression'?C.green:sub,fontWeight:700,cursor:'pointer',fontSize:13}}>
+            📈 Progression
+          </button>
+          <button onClick={()=>setVue('detail')} style={{padding:'8px 16px',borderRadius:20,border:`2px solid ${vue==='detail'?C.blue:bdr}`,background:vue==='detail'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='detail'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:13}}>
+            📋 Détail des comptages
+          </button>
+        </div>
+        <button onClick={async()=>{
+          if(!confirm('⚠️ Effacer TOUS les comptages et sessions ? Cette action est irréversible.')) return
+          await Promise.all([
+            fetch('/api/inventaire/comptages?all=1', {method:'DELETE'}),
+            fetch('/api/inventaire/sessions?all=1', {method:'DELETE'}),
+          ])
+          chargerComptages(); chargerProgression()
+        }} style={{background:'#e53e3e22',color:'#e53e3e',border:'1px solid #e53e3e',borderRadius:8,padding:'6px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+          🗑️ Effacer tout (test)
         </button>
       </div>
 
