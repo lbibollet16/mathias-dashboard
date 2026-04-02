@@ -4,6 +4,14 @@ import { supabaseAdmin } from '@/lib/supabase'
 // GET — chercher par localisation ou par code pièce
 export async function GET(req: NextRequest) {
   try {
+    const stats = req.nextUrl.searchParams.get('stats')
+    if (stats === '1') {
+      const { data, error } = await supabaseAdmin.from('inventaire_localisations').select('localisation')
+      if (error) throw error
+      const map = new Map<string, number>()
+      for (const r of data || []) map.set(r.localisation, (map.get(r.localisation) || 0) + 1)
+      return NextResponse.json(Array.from(map.entries()).map(([localisation, total_pieces]) => ({ localisation, total_pieces })))
+    }
     const loc = req.nextUrl.searchParams.get('loc')?.trim()
     const code = req.nextUrl.searchParams.get('code')?.trim()
 

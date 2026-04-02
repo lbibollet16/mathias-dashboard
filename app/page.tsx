@@ -1251,7 +1251,7 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
 // ── Inventaire Cyclique Tab ───────────────────────────────────────────────────
 function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const employe = profil?.nom || profil?.email || 'Inconnu'
-  const [sousOnglet, setSousOnglet] = useState<'compter'|'rapport'>('compter')
+  const [sousOnglet, setSousOnglet] = useState<'compter'|'rapport'|'progression'>('compter')
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
@@ -1286,6 +1286,10 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [pendingComptage, setPendingComptage] = useState<any>(null)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
 
+  // Progression
+  const [locsStats, setLocsStats] = useState<any[]>([])
+  const [loadingProg, setLoadingProg] = useState(false)
+
   // Rapport
   const [comptages, setComptages] = useState<any[]>([])
   const [filtDate, setFiltDate] = useState(new Date().toISOString().split('T')[0])
@@ -1307,7 +1311,70 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 
   useEffect(() => {
     if (sousOnglet === 'rapport') chargerComptages()
+    if (sousOnglet === 'progression') chargerProgression()
   }, [sousOnglet])
+
+  // Reprendre la localisation sauvegardée
+  useEffect(() => {
+    try {
+      const savedLoc = localStorage.getItem('inv_loc_active')
+      if (savedLoc) {
+        setLocInput(savedLoc)
+        setErreur('')
+        // Proposer de reprendre
+        setShowReprendreMsg(true)
+      }
+    } catch {}
+  }, [])
+
+  const [showReprendreMsg, setShowReprendreMsg] = useState(false)
+
+  async function chargerProgression() {
+    setLoadingProg(true)
+    try {
+      // Charger tous les comptages du mois
+      const r = await fetch('/api/inventaire/comptages?all=1')
+      if (!r.ok) return
+      const tous = await r.json()
+
+      // Charger toutes les localisations connues
+      const r2 = await fetch('/api/inventaire/localisations?stats=1')
+      const statsLoc = r2.ok ? await r2.json() : []
+
+      // Grouper comptages par localisation
+      const mapLoc = new Map<string, { pieces: Set<string>, employes: Map<string,any[]> }>()
+      for (const c of tous) {
+        if (!mapLoc.has(c.localisation)) mapLoc.set(c.localisation, { pieces: new Set(), employes: new Map() })
+        const entry = mapLoc.get(c.localisation)!
+        entry.pieces.add(c.code_piece)
+        if (!entry.employes.has(c.employe)) entry.employes.set(c.employe, [])
+        entry.employes.get(c.employe)!.push(c)
+      }
+
+      // Construire stats par localisation
+      const stats = Array.from(mapLoc.entries()).map(([loc, data]) => {
+        // Total pièces dans cette localisation (depuis inventaire_localisations)
+        const totalPieces = statsLoc.find((s:any) => s.localisation === loc)?.total_pieces || data.pieces.size
+        const pct = totalPieces > 0 ? Math.round((data.pieces.size / totalPieces) * 100) : 100
+        return {
+          localisation: loc,
+          nb_comptes: data.pieces.size,
+          total_pieces: totalPieces,
+          pct,
+          employes: Array.from(data.employes.entries()).map(([emp, comps]) => ({
+            employe: emp,
+            nb: comps.length,
+            derniere_piece: comps[comps.length-1]?.code_piece,
+            derniere_date: comps[comps.length-1]?.date_comptage,
+          }))
+        }
+      }).sort((a,b) => b.pct - a.pct)
+
+      setLocsStats(stats)
+    } finally {
+      setLoadingProg(false)
+    }
+  }
 
   function sonOk() {
     try {
@@ -1472,6 +1539,8 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   async function scanLocalisationVal(loc: string, fromCamera = false) {
     if (!loc) return
     setLoading(true); setErreur(''); setShowCreerLoc(false)
+    // Sauvegarder la localisation active pour reprendre si on quitte
+    try { localStorage.setItem('inv_loc_active', loc) } catch {}
     const r = await fetch('/api/inventaire/localisations?loc=' + encodeURIComponent(loc))
     const data = await r.json()
     if (!Array.isArray(data) || data.length === 0) {
@@ -1655,6 +1724,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       <div style={{display:'flex',gap:8}}>
         <button onClick={()=>setSousOnglet('compter')} style={{padding:isMobile?'10px 18px':'8px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='compter'?C.blue:bdr}`,background:sousOnglet==='compter'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='compter'?C.blue:sub,fontSize:isMobile?14:13,fontWeight:700,cursor:'pointer'}}>📦 Compter</button>
         <button onClick={()=>setSousOnglet('rapport')} style={{padding:isMobile?'10px 18px':'8px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='rapport'?C.blue:bdr}`,background:sousOnglet==='rapport'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='rapport'?C.blue:sub,fontSize:isMobile?14:13,fontWeight:700,cursor:'pointer'}}>📊 Rapport</button>
+        <button onClick={()=>setSousOnglet('progression')} style={{padding:isMobile?'10px 18px':'8px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='progression'?C.green:bdr}`,background:sousOnglet==='progression'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:sousOnglet==='progression'?C.green:sub,fontSize:isMobile?14:13,fontWeight:700,cursor:'pointer'}}>📈 Progression</button>
       </div>
       {sousOnglet==='compter' && (
         <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer'}}>
@@ -1667,6 +1737,25 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     </div>
 
     {sousOnglet==='compter' ? <>
+      {/* Message reprendre localisation */}
+      {showReprendreMsg && locInput && (
+        <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:12,padding:'14px 16px',marginBottom:14,border:`2px solid ${C.blue}`,display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
+          <div>
+            <div style={{fontWeight:700,color:C.blue,fontSize:14}}>📍 Reprendre la localisation ?</div>
+            <div style={{fontSize:13,color:sub,marginTop:2}}>Tu as laissé <strong>{locInput}</strong> en cours</div>
+          </div>
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={()=>{setShowReprendreMsg(false);scanLocalisationVal(locInput,false)}}
+              style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:13}}>
+              ▶ Reprendre
+            </button>
+            <button onClick={()=>{setShowReprendreMsg(false);try{localStorage.removeItem('inv_loc_active')}catch{}}}
+              style={{background:'transparent',color:sub,border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:13}}>
+              ✕ Ignorer
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Import — desktop seulement */}
       {!isMobile && (
@@ -2006,7 +2095,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         )}
       </div>
 
-    </> : <>
+    </> : sousOnglet==='rapport' ? <>
       {/* Rapport */}
       <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'12px 16px',marginBottom:12,display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
         <div style={{flex:1,minWidth:isMobile?'100%':130}}>
@@ -2169,6 +2258,58 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               </table>
             </div>
           </div>
+    </> : <>
+      {/* Onglet Progression */}
+      <div style={{marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <div style={{fontWeight:700,fontSize:16}}>📈 Progression de l'inventaire</div>
+        <button onClick={chargerProgression} disabled={loadingProg}
+          style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:13}}>
+          {loadingProg?'⏳ Chargement...':'🔄 Actualiser'}
+        </button>
+      </div>
+      {loadingProg
+        ? <div style={{textAlign:'center',padding:40,color:sub}}>⏳ Chargement...</div>
+        : locsStats.length === 0
+          ? <div style={{textAlign:'center',padding:40,color:sub}}>
+              <div style={{fontSize:30,marginBottom:8}}>📦</div>
+              <div>Aucun comptage enregistré</div>
+            </div>
+          : <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              {locsStats.map((ls:any) => (
+                <div key={ls.localisation} style={{background:card,borderRadius:12,border:`1px solid ${ls.pct===100?C.green:bdr}`,padding:'14px 16px',borderLeft:`4px solid ${ls.pct===100?C.green:ls.pct>50?C.blue:C.yellow}`}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:6}}>
+                    <div style={{fontWeight:800,fontSize:16,fontFamily:'monospace'}}>{ls.localisation}</div>
+                    <div style={{display:'flex',alignItems:'center',gap:10}}>
+                      <span style={{fontSize:12,color:sub}}>{ls.nb_comptes}/{ls.total_pieces} pièces</span>
+                      <span style={{background:ls.pct===100?C.green:ls.pct>50?C.blue:C.yellow,color:'#fff',padding:'3px 10px',borderRadius:20,fontWeight:700,fontSize:13}}>
+                        {ls.pct}%
+                      </span>
+                    </div>
+                  </div>
+                  {/* Barre de progression */}
+                  <div style={{height:8,background:dark?'#333':'#e2e8f0',borderRadius:4,marginBottom:10,overflow:'hidden'}}>
+                    <div style={{height:'100%',width:ls.pct+'%',background:ls.pct===100?C.green:ls.pct>50?C.blue:C.yellow,borderRadius:4,transition:'width 0.5s'}}/>
+                  </div>
+                  {/* Employés */}
+                  {ls.employes.length > 0 && (
+                    <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                      {ls.employes.map((e:any) => (
+                        <div key={e.employe} style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:8,padding:'6px 10px',fontSize:12}}>
+                          <span style={{fontWeight:700,color:C.blue}}>👤 {e.employe}</span>
+                          <span style={{color:sub,marginLeft:6}}>{e.nb} pièces</span>
+                          {e.derniere_date && (
+                            <span style={{color:sub,marginLeft:6,fontSize:11}}>
+                              — {new Date(e.derniere_date).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+      }
       }
     </>}
   </>
