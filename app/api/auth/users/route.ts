@@ -24,11 +24,12 @@ export async function GET() {
 // PATCH — modifier rôle ou statut
 export async function PATCH(req: NextRequest) {
   try {
-    const { id, role, actif, nom } = await req.json()
+    const { id, role, actif, nom, onglets_custom } = await req.json()
     const updates: any = {}
     if (role !== undefined) updates.role = role
     if (actif !== undefined) updates.actif = actif
     if (nom !== undefined) updates.nom = nom
+    if (onglets_custom !== undefined) updates.onglets_custom = onglets_custom
 
     const { error } = await supabaseAdmin
       .from('profils_utilisateurs')

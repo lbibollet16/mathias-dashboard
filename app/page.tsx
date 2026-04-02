@@ -333,7 +333,7 @@ export default function Dashboard() {
 
       {/* TABS */}
       <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,overflowX:'auto',display:'flex',WebkitOverflowScrolling:'touch',scrollbarWidth:'none'}}>
-        {[{id:'calc',l:isMobile?'🧮 Calc':'Calculateur Achats'},{id:'import',l:isMobile?'📥 Import':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:'📋 Commandes'},{id:'fournitures',l:'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'utilisateurs',l:'👥 Utilisateurs'}].filter(t=>(ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis']).includes(t.id)).map(t=>(
+        {[{id:'calc',l:isMobile?'🧮 Calc':'Calculateur Achats'},{id:'import',l:isMobile?'📥 Import':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:'📋 Commandes'},{id:'fournitures',l:'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'utilisateurs',l:'👥 Utilisateurs'}].filter(t=>(profil?.onglets_custom && Array.isArray(profil.onglets_custom) && profil.onglets_custom.length>0 ? profil.onglets_custom : (ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis'])).includes(t.id)).map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:isMobile?'10px 12px':'12px 16px',border:'none',background:'transparent',cursor:'pointer',fontSize:isMobile?12:13,fontWeight:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',transition:'all .15s',whiteSpace:'nowrap',flexShrink:0}}>
             {t.l}
           </button>
@@ -2581,12 +2581,35 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
   const [invLoading, setInvLoading] = useState(false)
   const [msgOk, setMsgOk] = useState('')
   const [erreur, setErreur] = useState('')
+  const [editUser, setEditUser] = useState<any>(null)
+  const [editOnglets, setEditOnglets] = useState<string[]>([])
+  const [editLoading, setEditLoading] = useState(false)
+
+  // Tous les onglets disponibles
+  const TOUS_ONGLETS = [
+    { id: 'calc',        label: '🧮 Calculateur Achats',  desc: 'Calcul des achats et stocks' },
+    { id: 'import',      label: '📥 Importer Ventes',     desc: 'Import des données de ventes' },
+    { id: 'booking',     label: '📅 Booking',             desc: 'Planification et réservations' },
+    { id: 'retours',     label: '🔄 Retours RMA',         desc: 'Gestion des retours fournisseurs' },
+    { id: 'negatifs',    label: '🔴 Pièces Négatives',    desc: 'Suivi des pièces en négatif' },
+    { id: 'commandes',   label: '📋 Commandes du jour',   desc: 'Commandes journalières' },
+    { id: 'fournitures', label: '💡 Suggestions',         desc: 'Suggestions de réapprovisionnement' },
+    { id: 'inventaire',  label: '📦 Inventaire',          desc: 'Inventaire cyclique et comptage' },
+    { id: 'utilisateurs',label: '👥 Utilisateurs',        desc: 'Gestion des accès et utilisateurs' },
+  ]
+
+  const ROLES_LEGACY: Record<string, string[]> = {
+    admin:         ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','utilisateurs'],
+    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire'],
+    commis:        ['commandes','fournitures','retours'],
+    employe_piece: ['fournitures','negatifs','inventaire','retours'],
+  }
 
   const ROLES = [
-    {val:'admin', label:'Admin', desc:'Accès complet + gestion utilisateurs', color:C.red},
-    {val:'gestionnaire', label:'Gestionnaire', desc:'Tous les onglets sauf utilisateurs', color:C.blue},
-    {val:'commis', label:'Commis', desc:'Commandes du Jour + Suggestions', color:C.green},
-    {val:'employe_piece', label:'Employé pièce', desc:'Suggestions + Pièces Négatives', color:C.yellow},
+    {val:'admin',        label:'Admin',         color:C.red},
+    {val:'gestionnaire', label:'Gestionnaire',   color:C.blue},
+    {val:'commis',       label:'Commis',         color:C.green},
+    {val:'employe_piece',label:'Employé pièce',  color:C.yellow},
   ]
 
   useEffect(() => { chargerUsers() }, [])
@@ -2596,6 +2619,39 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
     const r = await fetch('/api/auth/users')
     if (r.ok) setUsers(await r.json())
     setLoading(false)
+  }
+
+  function getOngletsEffectifs(u: any): string[] {
+    if (u.onglets_custom && Array.isArray(u.onglets_custom) && u.onglets_custom.length > 0)
+      return u.onglets_custom
+    return ROLES_LEGACY[u.role] || ROLES_LEGACY['commis']
+  }
+
+  function ouvrirEdit(u: any) {
+    setEditUser(u)
+    setEditOnglets(getOngletsEffectifs(u))
+    setErreur('')
+  }
+
+  async function sauvegarderOnglets() {
+    if (!editUser) return
+    setEditLoading(true)
+    await fetch('/api/auth/users', {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ id: editUser.id, onglets_custom: editOnglets })
+    })
+    await chargerUsers()
+    setEditUser(null)
+    setEditLoading(false)
+    setMsgOk(`✅ Accès de ${editUser.nom} mis à jour`)
+    setTimeout(() => setMsgOk(''), 4000)
+  }
+
+  function toggleOnglet(id: string) {
+    setEditOnglets(prev =>
+      prev.includes(id) ? prev.filter(o => o !== id) : [...prev, id]
+    )
   }
 
   async function inviter(e: any) {
@@ -2618,11 +2674,6 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
     setInvLoading(false)
   }
 
-  async function changerRole(id: string, role: string) {
-    await fetch('/api/auth/users', { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id, role }) })
-    await chargerUsers()
-  }
-
   async function toggleActif(id: string, actif: boolean) {
     await fetch('/api/auth/users', { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id, actif }) })
     await chargerUsers()
@@ -2634,162 +2685,197 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
     await chargerUsers()
   }
 
-  return <>
-    {/* Modal invitation */}
-    {showInvite && (
-      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
-        <div style={{background:card,borderRadius:16,padding:32,width:480,border:`1px solid ${bdr}`,boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
-          <h3 style={{margin:'0 0 6px',fontSize:18}}>📧 Inviter un utilisateur</h3>
-          <p style={{color:sub,fontSize:13,margin:'0 0 20px'}}>Un email d'invitation sera envoyé automatiquement.</p>
-          {erreur && <div style={{background:C.red+'22',border:`1px solid ${C.red}`,borderRadius:8,padding:'8px 12px',marginBottom:12,color:C.red,fontSize:13}}>{erreur}</div>}
-          <form onSubmit={inviter}>
-            <div style={{marginBottom:12}}>
-              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Nom complet *</label>
-              <input value={invNom} onChange={e=>setInvNom(e.target.value)} placeholder="Ex: Marie Tremblay" required style={S}/>
-            </div>
-            <div style={{marginBottom:12}}>
-              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Email *</label>
-              <input type="email" value={invEmail} onChange={e=>setInvEmail(e.target.value)} placeholder="marie@mathiasmarine.com" required style={S}/>
-            </div>
-            <div style={{marginBottom:20}}>
-              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:8}}>Rôle *</label>
-              <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                {ROLES.map(r => (
-                  <label key={r.val} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',borderRadius:10,border:`2px solid ${invRole===r.val?r.color:bdr}`,cursor:'pointer',background:invRole===r.val?r.color+'11':'transparent'}}>
-                    <input type="radio" name="role" value={r.val} checked={invRole===r.val} onChange={()=>setInvRole(r.val)} style={{accentColor:r.color}}/>
-                    <div>
-                      <div style={{fontWeight:700,fontSize:13,color:invRole===r.val?r.color:'inherit'}}>{r.label}</div>
-                      <div style={{fontSize:11,color:sub}}>{r.desc}</div>
-                    </div>
-                  </label>
-                ))}
+  return (
+    <div>
+      {/* ── Modal Modifier Accès ── */}
+      {editUser && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div style={{background:card,borderRadius:20,padding:28,width:'100%',maxWidth:520,border:`1px solid ${bdr}`,boxShadow:'0 24px 80px rgba(0,0,0,.4)',maxHeight:'90vh',overflowY:'auto'}}>
+            {/* Header modal */}
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+              <div>
+                <div style={{fontWeight:800,fontSize:18}}>🔐 Accès de {editUser.nom}</div>
+                <div style={{color:sub,fontSize:13,marginTop:2}}>{editUser.email}</div>
               </div>
+              <button onClick={()=>setEditUser(null)}
+                style={{background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'6px 12px',cursor:'pointer',color:sub,fontSize:20}}>✕</button>
             </div>
+
+            {/* Raccourcis */}
+            <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
+              <button onClick={()=>setEditOnglets(TOUS_ONGLETS.map(o=>o.id))}
+                style={{background:C.blue+'22',color:C.blue,border:`1px solid ${C.blue}`,borderRadius:8,padding:'5px 12px',fontSize:12,fontWeight:700,cursor:'pointer'}}>
+                ✅ Tout cocher
+              </button>
+              <button onClick={()=>setEditOnglets([])}
+                style={{background:C.red+'22',color:C.red,border:`1px solid ${C.red}`,borderRadius:8,padding:'5px 12px',fontSize:12,fontWeight:700,cursor:'pointer'}}>
+                ☐ Tout décocher
+              </button>
+              {ROLES.map(r => (
+                <button key={r.val} onClick={()=>setEditOnglets(ROLES_LEGACY[r.val]||[])}
+                  style={{background:r.color+'22',color:r.color,border:`1px solid ${r.color}`,borderRadius:8,padding:'5px 12px',fontSize:12,fontWeight:700,cursor:'pointer'}}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Checkboxes onglets */}
+            <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:24}}>
+              {TOUS_ONGLETS.map(o => {
+                const checked = editOnglets.includes(o.id)
+                return (
+                  <div key={o.id} onClick={()=>toggleOnglet(o.id)}
+                    style={{display:'flex',alignItems:'center',gap:14,padding:'12px 16px',borderRadius:12,border:`2px solid ${checked?C.blue:bdr}`,background:checked?(dark?'#1a233a':'#e8f0fe'):'transparent',cursor:'pointer',transition:'all .15s'}}>
+                    <div style={{width:22,height:22,borderRadius:6,border:`2px solid ${checked?C.blue:sub}`,background:checked?C.blue:'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .15s'}}>
+                      {checked && <span style={{color:'#fff',fontSize:14,fontWeight:900}}>✓</span>}
+                    </div>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:14,color:checked?C.blue:'inherit'}}>{o.label}</div>
+                      <div style={{fontSize:12,color:sub,marginTop:1}}>{o.desc}</div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Résumé */}
+            <div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:10,padding:'10px 14px',marginBottom:20,fontSize:12,color:sub}}>
+              <strong style={{color:C.blue}}>{editOnglets.length}</strong> onglet{editOnglets.length>1?'s':''} sélectionné{editOnglets.length>1?'s':''}
+              {editOnglets.length > 0 && <span style={{marginLeft:6}}>→ {editOnglets.map(id=>TOUS_ONGLETS.find(o=>o.id===id)?.label.replace(/^[\S]+\s/,'')||id).join(', ')}</span>}
+            </div>
+
+            {/* Boutons */}
             <div style={{display:'flex',gap:10}}>
-              <button type="button" onClick={()=>{setShowInvite(false);setErreur('')}} style={{flex:1,background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 0',cursor:'pointer',color:sub,fontWeight:600}}>Annuler</button>
-              <button type="submit" disabled={invLoading} style={{flex:2,background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 0',fontWeight:700,cursor:'pointer',fontSize:14}}>
-                {invLoading ? 'Envoi...' : '📧 Envoyer invitation'}
+              <button onClick={()=>setEditUser(null)}
+                style={{flex:1,background:'none',border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 0',cursor:'pointer',color:sub,fontWeight:600,fontSize:14}}>
+                Annuler
+              </button>
+              <button onClick={sauvegarderOnglets} disabled={editLoading}
+                style={{flex:2,background:C.blue,color:'#fff',border:'none',borderRadius:10,padding:'12px 0',fontWeight:700,cursor:'pointer',fontSize:14}}>
+                {editLoading?'Sauvegarde...':'💾 Sauvegarder les accès'}
               </button>
             </div>
-          </form>
+          </div>
         </div>
+      )}
+
+      {/* ── Modal Invitation ── */}
+      {showInvite && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div style={{background:card,borderRadius:20,padding:28,width:'100%',maxWidth:460,border:`1px solid ${bdr}`,boxShadow:'0 24px 80px rgba(0,0,0,.4)'}}>
+            <h3 style={{margin:'0 0 6px',fontSize:18,fontWeight:800}}>📧 Inviter un utilisateur</h3>
+            <p style={{color:sub,fontSize:13,margin:'0 0 20px'}}>Un email d'invitation sera envoyé automatiquement.</p>
+            {erreur && <div style={{background:C.red+'22',border:`1px solid ${C.red}`,borderRadius:8,padding:'10px 14px',marginBottom:12,color:C.red,fontSize:13}}>{erreur}</div>}
+            <form onSubmit={inviter}>
+              <div style={{marginBottom:12}}>
+                <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Nom complet *</label>
+                <input value={invNom} onChange={e=>setInvNom(e.target.value)} placeholder="Ex: Marie Tremblay" required style={S}/>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:4}}>Email *</label>
+                <input type="email" value={invEmail} onChange={e=>setInvEmail(e.target.value)} placeholder="marie@mathiasmarine.com" required style={S}/>
+              </div>
+              <div style={{marginBottom:20}}>
+                <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:8}}>Rôle initial *</label>
+                <select value={invRole} onChange={e=>setInvRole(e.target.value)} style={S}>
+                  {ROLES.map(r=><option key={r.val} value={r.val}>{r.label}</option>)}
+                </select>
+                <div style={{fontSize:11,color:sub,marginTop:4}}>Vous pourrez ajuster les accès précis après l'invitation.</div>
+              </div>
+              <div style={{display:'flex',gap:10}}>
+                <button type="button" onClick={()=>{setShowInvite(false);setErreur('')}}
+                  style={{flex:1,background:'none',border:`1px solid ${bdr}`,borderRadius:10,padding:'11px 0',cursor:'pointer',color:sub,fontWeight:600}}>
+                  Annuler
+                </button>
+                <button type="submit" disabled={invLoading}
+                  style={{flex:2,background:C.blue,color:'#fff',border:'none',borderRadius:10,padding:'11px 0',fontWeight:700,cursor:'pointer',fontSize:14}}>
+                  {invLoading?'Envoi...':'📧 Envoyer invitation'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Header ── */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,flexWrap:'wrap',gap:10}}>
+        <div>
+          <h2 style={{margin:0,fontSize:20,fontWeight:800}}>👥 Gestion des utilisateurs</h2>
+          <p style={{color:sub,fontSize:13,margin:'4px 0 0'}}>{users.length} utilisateur{users.length>1?'s':''}</p>
+        </div>
+        <button onClick={()=>setShowInvite(true)}
+          style={{background:C.blue,color:'#fff',border:'none',borderRadius:10,padding:'10px 20px',fontSize:14,fontWeight:700,cursor:'pointer'}}>
+          + Inviter un utilisateur
+        </button>
       </div>
-    )}
 
-    {/* Header */}
-    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20,flexWrap:'wrap',gap:10}}>
-      <div>
-        <h2 style={{margin:0,fontSize:20,fontWeight:800}}>👥 Gestion des utilisateurs</h2>
-        <p style={{color:sub,fontSize:13,margin:'4px 0 0'}}>{users.length} utilisateur{users.length>1?'s':''}</p>
-      </div>
-      <button onClick={()=>setShowInvite(true)} style={{background:C.blue,color:'#fff',border:'none',borderRadius:10,padding:'10px 20px',fontSize:14,fontWeight:700,cursor:'pointer'}}>
-        + Inviter un utilisateur
-      </button>
-    </div>
+      {msgOk && <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}`,borderRadius:10,padding:'12px 16px',marginBottom:16,color:C.green,fontWeight:700}}>{msgOk}</div>}
 
-    {msgOk && <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}`,borderRadius:10,padding:'12px 16px',marginBottom:16,color:C.green,fontWeight:700}}>{msgOk}</div>}
-
-    {/* Tableau utilisateurs */}
-    <div style={{background:card,borderRadius:14,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+      {/* ── Liste utilisateurs ── */}
       {loading
         ? <div style={{textAlign:'center',padding:60,color:sub}}>Chargement...</div>
         : users.length === 0
           ? <div style={{textAlign:'center',padding:60,color:sub}}>
               <div style={{fontSize:40,marginBottom:10}}>👥</div>
-              <p>Aucun utilisateur — invite le premier !</p>
+              <p>Aucun utilisateur — invitez le premier !</p>
             </div>
-          : isMobile
-            ? <div style={{display:'flex',flexDirection:'column',gap:10,padding:'10px'}}>
-                {users.map((u:any) => {
-                  const roleInfo = ROLES.find(r=>r.val===u.role) || ROLES[2]
-                  return (
-                    <div key={u.id} style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:12,padding:'14px 16px',border:`1px solid ${bdr}`}}>
-                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:10}}>
-                        <div>
-                          <div style={{fontWeight:700,fontSize:15}}>{u.nom}</div>
-                          <div style={{fontSize:12,color:sub,marginTop:2}}>{u.email}</div>
-                        </div>
-                        <span style={{background:u.actif?C.green+'22':C.red+'22',color:u.actif?C.green:C.red,padding:'4px 10px',borderRadius:20,fontSize:12,fontWeight:700}}>
-                          {u.actif?'✅':'🚫'}
-                        </span>
-                      </div>
-                      <div style={{marginBottom:10}}>
-                        <select value={u.role} onChange={e=>changerRole(u.id,e.target.value)}
-                          style={{...S,border:`2px solid ${roleInfo.color}`,color:roleInfo.color,fontWeight:700,background:'transparent',borderRadius:8}}>
-                          {ROLES.map(r=><option key={r.val} value={r.val}>{r.label}</option>)}
-                        </select>
-                      </div>
-                      <div style={{display:'flex',gap:8}}>
-                        <button onClick={()=>toggleActif(u.id,!u.actif)}
-                          style={{flex:1,background:u.actif?C.yellow+'22':C.green+'22',color:u.actif?C.yellow:C.green,border:'none',borderRadius:8,padding:'10px 0',fontSize:13,fontWeight:700,cursor:'pointer'}}>
-                          {u.actif?'Désactiver':'Activer'}
-                        </button>
-                        <button onClick={()=>supprimer(u.id,u.nom)}
-                          style={{flex:1,background:C.red+'22',color:C.red,border:'none',borderRadius:8,padding:'10px 0',fontSize:13,fontWeight:700,cursor:'pointer'}}>
-                          Supprimer
-                        </button>
-                      </div>
+          : <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              {users.map((u:any) => {
+                const onglets = getOngletsEffectifs(u)
+                const aCustom = u.onglets_custom && Array.isArray(u.onglets_custom) && u.onglets_custom.length > 0
+                const roleInfo = ROLES.find(r=>r.val===u.role) || ROLES[2]
+                return (
+                  <div key={u.id} style={{background:card,borderRadius:14,border:`1px solid ${bdr}`,padding:'16px 20px',display:'flex',alignItems:'center',gap:16,flexWrap:'wrap'}}>
+                    {/* Avatar */}
+                    <div style={{width:44,height:44,borderRadius:'50%',background:roleInfo.color+'33',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,flexShrink:0}}>
+                      {(u.nom||'?')[0].toUpperCase()}
                     </div>
-                  )
-                })}
-              </div>
-            : <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-              <thead><tr style={{background:thBg}}>
-                <th style={{padding:'12px 16px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Nom</th>
-                <th style={{padding:'12px 16px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Email</th>
-                <th style={{padding:'12px 16px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Rôle</th>
-                <th style={{padding:'12px 16px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Statut</th>
-                <th style={{padding:'12px 16px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Actions</th>
-              </tr></thead>
-              <tbody>
-                {users.map((u:any) => {
-                  const roleInfo = ROLES.find(r=>r.val===u.role) || ROLES[2]
-                  return (
-                    <tr key={u.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                      <td style={{padding:'12px 16px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{u.nom}</td>
-                      <td style={{padding:'12px 16px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{u.email}</td>
-                      <td style={{padding:'12px 16px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                        <select value={u.role} onChange={e=>changerRole(u.id,e.target.value)}
-                          style={{...S,fontSize:12,padding:'4px 8px',border:`1px solid ${roleInfo.color}`,color:roleInfo.color,fontWeight:700,background:'transparent',borderRadius:8,cursor:'pointer'}}>
-                          {ROLES.map(r=><option key={r.val} value={r.val}>{r.label}</option>)}
-                        </select>
-                      </td>
-                      <td style={{padding:'12px 16px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                        <span style={{background:u.actif?C.green+'22':C.red+'22',color:u.actif?C.green:C.red,padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:700}}>
+                    {/* Info */}
+                    <div style={{flex:1,minWidth:180}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                        <span style={{fontWeight:800,fontSize:15}}>{u.nom}</span>
+                        <span style={{background:u.actif?C.green+'22':C.red+'22',color:u.actif?C.green:C.red,padding:'2px 8px',borderRadius:10,fontSize:11,fontWeight:700}}>
                           {u.actif?'✅ Actif':'🚫 Inactif'}
                         </span>
-                      </td>
-                      <td style={{padding:'12px 16px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                        <div style={{display:'flex',gap:6,justifyContent:'center'}}>
-                          <button onClick={()=>toggleActif(u.id,!u.actif)}
-                            style={{background:u.actif?C.yellow+'22':C.green+'22',color:u.actif?C.yellow:C.green,border:'none',borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}}>
-                            {u.actif?'Désactiver':'Activer'}
-                          </button>
-                          <button onClick={()=>supprimer(u.id,u.nom)}
-                            style={{background:C.red+'22',color:C.red,border:'none',borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}}>
-                            Supprimer
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                        <span style={{background:roleInfo.color+'22',color:roleInfo.color,padding:'2px 8px',borderRadius:10,fontSize:11,fontWeight:700}}>
+                          {roleInfo.label}
+                        </span>
+                        {aCustom && <span style={{background:C.blue+'22',color:C.blue,padding:'2px 8px',borderRadius:10,fontSize:11,fontWeight:700}}>Accès personnalisé</span>}
+                      </div>
+                      <div style={{fontSize:12,color:sub,marginTop:3}}>{u.email}</div>
+                      {/* Onglets actifs */}
+                      <div style={{display:'flex',flexWrap:'wrap',gap:'3px 6px',marginTop:8}}>
+                        {TOUS_ONGLETS.filter(o=>onglets.includes(o.id)).map(o=>(
+                          <span key={o.id} style={{background:dark?'#1a233a':'#e8f0fe',color:C.blue,padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:600}}>
+                            {o.label.replace(/^[\S]+\s/,'')}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    {/* Actions */}
+                    <div style={{display:'flex',gap:8,flexShrink:0}}>
+                      <button onClick={()=>ouvrirEdit(u)}
+                        style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontSize:13,fontWeight:700,cursor:'pointer'}}>
+                        🔐 Modifier accès
+                      </button>
+                      <button onClick={()=>toggleActif(u.id,!u.actif)}
+                        style={{background:u.actif?C.yellow+'22':C.green+'22',color:u.actif?C.yellow:C.green,border:'none',borderRadius:8,padding:'8px 12px',fontSize:13,fontWeight:700,cursor:'pointer'}}>
+                        {u.actif?'Désactiver':'Activer'}
+                      </button>
+                      <button onClick={()=>supprimer(u.id,u.nom)}
+                        style={{background:C.red+'22',color:C.red,border:'none',borderRadius:8,padding:'8px 12px',fontSize:13,fontWeight:700,cursor:'pointer'}}>
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
       }
     </div>
-
-    {/* Légende des rôles */}
-    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:10,marginTop:16}}>
-      {ROLES.map(r=>(
-        <div key={r.val} style={{background:card,borderRadius:10,padding:'12px 16px',border:`1px solid ${r.color}22`}}>
-          <div style={{fontWeight:700,fontSize:13,color:r.color,marginBottom:4}}>{r.label}</div>
-          <div style={{fontSize:12,color:sub}}>{r.desc}</div>
-        </div>
-      ))}
-    </div>
-  </>
+  )
 }
+
 
 // ── Négatifs Tab ────────────────────────────────────────────────────────────
 // ── Booking Tab ──────────────────────────────────────────────────────────────
