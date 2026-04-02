@@ -1736,7 +1736,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       )}
     </div>
 
-    {sousOnglet==='compter' ? <>
+    {sousOnglet==='compter' && <>
       {/* Message reprendre localisation */}
       {showReprendreMsg && locInput && (
         <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:12,padding:'14px 16px',marginBottom:14,border:`2px solid ${C.blue}`,display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
@@ -2095,7 +2095,8 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         )}
       </div>
 
-    </> : sousOnglet==='rapport' ? <>
+    </> }
+    {sousOnglet==='rapport' && <>
       {/* Rapport */}
       <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'12px 16px',marginBottom:12,display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
         <div style={{flex:1,minWidth:isMobile?'100%':130}}>
@@ -2258,7 +2259,8 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               </table>
             </div>
           </div>
-    </> : <>
+    </> }
+    {sousOnglet==='progression' && <>
       {/* Onglet Progression */}
       <div style={{marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
         <div style={{fontWeight:700,fontSize:16}}>📈 Progression de l'inventaire</div>
@@ -2309,9 +2311,9 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 </div>
               ))}
             </div>
-      }
-      }
-    </>}
+    </> }
+
+
   </>
 }
 
