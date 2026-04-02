@@ -2458,7 +2458,7 @@ function SuiviInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile,
 
 
 function ProgressionInventaire({dark, card, bdr, sub, C, isMobile, locsStats, loadingProg, chargerProgression}: any) {
-  const [locExpand, setLocExpand] = React.useState<string|null>(null)
+  const [locExpand, setLocExpand] = useState<string|null>(null)
   return (
     <div>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:8}}>
