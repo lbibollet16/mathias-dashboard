@@ -2017,7 +2017,10 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                             <a href={c.photo_url} target="_blank" rel="noreferrer">
                               <img src={c.photo_url} style={{width:'100%',maxWidth:140,height:90,objectFit:'cover',borderRadius:8,border:`2px solid ${C.green}`,display:'block'}} alt="Photo écart"/>
                             </a>
-                            <div style={{fontSize:10,color:C.green,marginTop:2,fontWeight:700}}>📸 Photo de l'écart</div>
+                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:4}}>
+                              <div style={{fontSize:10,color:C.green,fontWeight:700}}>📸 Photo de l'écart</div>
+                              <a href={c.photo_url} download target="_blank" rel="noreferrer" style={{fontSize:11,color:C.blue,fontWeight:700,textDecoration:'none',background:C.blue+'22',padding:'2px 8px',borderRadius:6}}>⬇ Télécharger</a>
+                            </div>
                           </div>
                         )}
                         {estReconcilie&&c.ecart!==c.ecart_reconcilie&&(
@@ -3123,14 +3126,20 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                           </div>
                           <div style={{display:'flex',gap:6,justifyContent:'flex-end',marginTop:4}}>
                             {v.photo_url&&(
-                              <a href={v.photo_url} target="_blank" rel="noreferrer">
-                                <img src={v.photo_url} style={{width:50,height:50,objectFit:'cover',borderRadius:6,border:`2px solid ${C.green}`}} alt="📸"/>
-                              </a>
+                              <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
+                                <a href={v.photo_url} target="_blank" rel="noreferrer">
+                                  <img src={v.photo_url} style={{width:54,height:54,objectFit:'cover',borderRadius:6,border:`2px solid ${C.green}`}} alt="📸"/>
+                                </a>
+                                <a href={v.photo_url} download target="_blank" rel="noreferrer" style={{fontSize:10,color:C.blue,textDecoration:'none',fontWeight:700}}>⬇ DL</a>
+                              </div>
                             )}
                             {v.photo_url2&&(
-                              <a href={v.photo_url2} target="_blank" rel="noreferrer">
-                                <img src={v.photo_url2} style={{width:50,height:50,objectFit:'cover',borderRadius:6,border:`2px solid ${C.green}`,marginLeft:4}} alt="📸"/>
-                              </a>
+                              <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2,marginLeft:4}}>
+                                <a href={v.photo_url2} target="_blank" rel="noreferrer">
+                                  <img src={v.photo_url2} style={{width:54,height:54,objectFit:'cover',borderRadius:6,border:`2px solid ${C.green}`}} alt="📸"/>
+                                </a>
+                                <a href={v.photo_url2} download target="_blank" rel="noreferrer" style={{fontSize:10,color:C.blue,textDecoration:'none',fontWeight:700}}>⬇ DL</a>
+                              </div>
                             )}
                           </div>
                         </div>
@@ -3154,8 +3163,8 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                           ))}
                         </div>
                       </div>
-                      {v.cause&&<div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:8,padding:'10px 12px',fontSize:13,color:C.blue,marginBottom:8,fontWeight:600}}>📋 {v.cause}</div>}
-                      {v.commentaire&&<div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:8,padding:'10px 12px',fontSize:12,color:sub,marginBottom:8}}>💬 {v.commentaire}</div>}
+                      {v.cause&&<div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:8,padding:'10px 12px',fontSize:13,whiteSpace:'pre-wrap',wordBreak:'break-word',color:C.blue,marginBottom:8,fontWeight:600}}>📋 {v.cause}</div>}
+                      {v.commentaire&&<div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:8,padding:'10px 12px',fontSize:12,color:sub,marginBottom:8,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>💬 {v.commentaire}</div>}
                       {v.alt_code_piece&&(
                         <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:10,padding:'10px 12px',marginBottom:8,border:`1px solid ${C.green}33`}}>
                           <div style={{fontSize:12,fontWeight:700,color:C.green,marginBottom:4}}>🔄 Alternative — {v.alt_code_piece}</div>
@@ -3212,15 +3221,29 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                           <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:900,color:Number(v.ajustement)>=0?C.green:C.red}}>
                             {Number(v.ajustement)>=0?'+':''}{Number(v.ajustement).toFixed(0)}
                           </td>
-                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:C.blue,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={v.cause}>{v.cause||'—'}</td>
-                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={v.commentaire}>{v.commentaire||'—'}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:C.blue,maxWidth:180,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>{v.cause||'—'}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:200,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>{v.commentaire||'—'}</td>
                           <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>
                             {v.alt_code_piece&&<div style={{color:C.green,fontWeight:700}}>{v.alt_code_piece}<br/><span style={{color:Number(v.alt_ajustement)>=0?C.green:C.red}}>{Number(v.alt_ajustement)>=0?'+':''}{Number(v.alt_ajustement)?.toFixed(0)}</span></div>}
                           </td>
                           <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                            <div style={{display:'flex',gap:4,justifyContent:'center'}}>
-                              {v.photo_url&&<a href={v.photo_url} target="_blank" rel="noreferrer" style={{fontSize:16}}>📸</a>}
-                              {v.photo_url2&&<a href={v.photo_url2} target="_blank" rel="noreferrer" style={{fontSize:16}}>📸</a>}
+                            <div style={{display:'flex',gap:6,justifyContent:'center',flexWrap:'wrap'}}>
+                              {v.photo_url&&(
+                                <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:1}}>
+                                  <a href={v.photo_url} target="_blank" rel="noreferrer">
+                                    <img src={v.photo_url} style={{width:36,height:36,objectFit:'cover',borderRadius:4,border:`1px solid ${C.green}`}} alt="📸"/>
+                                  </a>
+                                  <a href={v.photo_url} download target="_blank" rel="noreferrer" style={{fontSize:9,color:C.blue,textDecoration:'none',fontWeight:700}}>⬇ DL</a>
+                                </div>
+                              )}
+                              {v.photo_url2&&(
+                                <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:1}}>
+                                  <a href={v.photo_url2} target="_blank" rel="noreferrer">
+                                    <img src={v.photo_url2} style={{width:36,height:36,objectFit:'cover',borderRadius:4,border:`1px solid ${C.green}`}} alt="📸"/>
+                                  </a>
+                                  <a href={v.photo_url2} download target="_blank" rel="noreferrer" style={{fontSize:9,color:C.blue,textDecoration:'none',fontWeight:700}}>⬇ DL</a>
+                                </div>
+                              )}
                               {!v.photo_url&&<span style={{color:sub,fontSize:11}}>—</span>}
                             </div>
                           </td>
