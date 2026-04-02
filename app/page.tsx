@@ -1355,18 +1355,27 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       const stats = Array.from(mapLoc.entries()).map(([loc, data]) => {
         // Total pièces dans cette localisation (depuis inventaire_localisations)
         const totalPieces = statsLoc.find((s:any) => s.localisation === loc)?.total_pieces || data.pieces.size
+        // % global = pièces uniques comptées / total pièces de la localisation
         const pct = totalPieces > 0 ? Math.round((data.pieces.size / totalPieces) * 100) : 100
         return {
           localisation: loc,
           nb_comptes: data.pieces.size,
           total_pieces: totalPieces,
           pct,
-          employes: Array.from(data.employes.entries()).map(([emp, comps]) => ({
-            employe: emp,
-            nb: comps.length,
-            derniere_piece: comps[comps.length-1]?.code_piece,
-            derniere_date: comps[comps.length-1]?.date_comptage,
-          }))
+          employes: Array.from(data.employes.entries()).map(([emp, comps]) => {
+            // Pièces uniques comptées par cet employé dans cette localisation
+            const piecesEmp = new Set(comps.map((c:any) => c.code_piece)).size
+            const pctEmp = totalPieces > 0 ? Math.round((piecesEmp / totalPieces) * 100) : 100
+            const sortedComps = [...comps].sort((a:any,b:any) => new Date(b.date_comptage).getTime() - new Date(a.date_comptage).getTime())
+            return {
+              employe: emp,
+              nb: piecesEmp,            // pièces uniques
+              nb_total: comps.length,   // entrées totales (avec doublons)
+              pct: pctEmp,              // % de la localisation fait par cet employé
+              derniere_piece: sortedComps[0]?.code_piece,
+              derniere_date: sortedComps[0]?.date_comptage,
+            }
+          }).sort((a:any,b:any) => b.nb - a.nb)
         }
       }).sort((a,b) => b.pct - a.pct)
 
@@ -2324,17 +2333,27 @@ function ProgressionInventaire({dark, card, bdr, sub, C, isMobile, locsStats, lo
                   <div style={{height:8,background:dark?'#333':'#e2e8f0',borderRadius:4,marginBottom:10,overflow:'hidden'}}>
                     <div style={{height:'100%',width:ls.pct+'%',background:ls.pct===100?C.green:ls.pct>50?C.blue:C.yellow,borderRadius:4,transition:'width 0.5s'}}/>
                   </div>
-                  {/* Employés */}
+                  {/* Employés avec % individuel */}
                   {ls.employes.length > 0 && (
-                    <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                    <div style={{display:'flex',flexDirection:'column',gap:6,marginTop:4}}>
                       {ls.employes.map((e:any) => (
-                        <div key={e.employe} style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:8,padding:'6px 10px',fontSize:12}}>
-                          <span style={{fontWeight:700,color:C.blue}}>👤 {e.employe}</span>
-                          <span style={{color:sub,marginLeft:6}}>{e.nb} pièces</span>
-                          {e.derniere_date && (
-                            <span style={{color:sub,marginLeft:6,fontSize:11}}>
-                              — {new Date(e.derniere_date).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+                        <div key={e.employe} style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:8,padding:'8px 12px'}}>
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+                            <div style={{display:'flex',alignItems:'center',gap:8}}>
+                              <span style={{fontWeight:700,color:C.blue,fontSize:13}}>👤 {e.employe}</span>
+                              <span style={{color:sub,fontSize:12}}>{e.nb}/{ls.total_pieces} pièces</span>
+                            </div>
+                            <span style={{background:e.pct===100?C.green:e.pct>50?C.blue:C.yellow,color:'#fff',padding:'2px 8px',borderRadius:12,fontWeight:700,fontSize:11}}>
+                              {e.pct}%
                             </span>
+                          </div>
+                          <div style={{height:4,background:dark?'#333':'#e2e8f0',borderRadius:2,overflow:'hidden'}}>
+                            <div style={{height:'100%',width:e.pct+'%',background:e.pct===100?C.green:e.pct>50?C.blue:C.yellow,borderRadius:2,transition:'width 0.5s'}}/>
+                          </div>
+                          {e.derniere_date && (
+                            <div style={{color:sub,fontSize:10,marginTop:3}}>
+                              Dernière: {e.derniere_piece} — {new Date(e.derniere_date).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+                            </div>
                           )}
                         </div>
                       ))}
