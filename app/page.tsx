@@ -2095,7 +2095,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         )}
       </div>
 
-    </> }
+    </>}
     {sousOnglet==='rapport' && <>
       {/* Rapport */}
       <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'12px 16px',marginBottom:12,display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
@@ -2259,7 +2259,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               </table>
             </div>
           </div>
-    </> }
+    </>}
     {sousOnglet==='progression' && <>
       {/* Onglet Progression */}
       <div style={{marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
@@ -2311,7 +2311,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 </div>
               ))}
             </div>
-    </> }
+    </>}
 
 
   </>
