@@ -2182,6 +2182,42 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           )}
         </div>
 
+        {/* Panneau session mobile */}
+        {isMobile && locActive && comptesDuJour.length > 0 && etape !== 'photo' && (
+          <div style={{background:card,borderRadius:14,border:`1px solid ${bdr}`,overflow:'hidden',marginTop:10}}>
+            <div style={{padding:'12px 14px',borderBottom:`1px solid ${bdr}`,background:thBg,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <span style={{fontSize:14,fontWeight:700}}>📋 Comptages ({comptesDuJour.length})</span>
+              <span style={{fontSize:12,color:C.red,fontWeight:700}}>{comptesDuJour.filter((c:any)=>c.ecart!==0).length} écarts</span>
+            </div>
+            <div style={{maxHeight:350,overflowY:'auto'}}>
+              {comptesDuJour.map((c:any,i:number)=>(
+                <div key={i} style={{padding:'12px 14px',borderBottom:`1px solid ${bdr}`,background:i===0?(dark?'#0d2a18':'#f0fff4'):'transparent',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:14,fontWeight:700,fontFamily:'monospace'}}>{c.code_piece}</div>
+                    <div style={{fontSize:11,color:sub}}>{c.heure} {c.description?('— '+c.description):''}</div>
+                  </div>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginLeft:8}}>
+                    <div style={{textAlign:'right'}}>
+                      <div style={{fontSize:20,fontWeight:900,color:c.ecart===0?C.green:C.red}}>{c.qte_comptee}</div>
+                      {c.ecart!==0&&<div style={{fontSize:11,color:C.red,fontWeight:700}}>{c.ecart>0?'+':''}{c.ecart}</div>}
+                    </div>
+                    {c.photo_url&&<span style={{fontSize:16}}>📸</span>}
+                    <button onClick={()=>{
+                      const p = piecesLoc.find((x:any)=>x.code_piece===c.code_piece)
+                      if (!p) return
+                      const si2 = stockMap.get(c.code_piece)||{stock:0,reserve:0}
+                      setPieceActive({...p, stockSys: si2.stock+si2.reserve, stock: si2.stock, reserve: si2.reserve})
+                      setQteInput(String(c.qte_comptee)); setEtape('quantite'); setErreur('')
+                    }} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 12px',fontSize:13,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                      ✏️ Modifier
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Panneau session — desktop seulement */}
         {!isMobile && (
           <div style={{background:card,borderRadius:14,border:`1px solid ${bdr}`,overflow:'hidden',position:'sticky',top:80}}>
