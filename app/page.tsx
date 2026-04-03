@@ -2369,7 +2369,7 @@ function SuiviInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile,
                           <div style={{marginTop:8}}>
                             <div style={{fontSize:10,color:sub,marginBottom:3,fontWeight:700,textTransform:'uppercase'}}>📸 Photo</div>
                             <a href={c.photo_url} target="_blank" rel="noreferrer">
-                              <img src={c.photo_url} style={{width:'100%',maxWidth:120,height:80,objectFit:'cover',borderRadius:8,border:`2px solid ${C.green}`,display:'block'}} alt="Photo comptage"/>
+                              <img src={c.photo_url} onError={(e:any)=>{e.target.style.display='none';e.target.parentElement.innerHTML='📸 <span style="font-size:10px;color:#888">Photo indisponible</span>'}} style={{width:'100%',maxWidth:120,height:80,objectFit:'cover',borderRadius:8,border:`2px solid ${C.green}`,display:'block'}} alt="Photo comptage"/>
                             </a>
                           </div>
                         )}
@@ -2384,7 +2384,7 @@ function SuiviInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile,
                         {c.photo_url&&(
                           <div style={{marginTop:8}}>
                             <a href={c.photo_url} target="_blank" rel="noreferrer">
-                              <img src={c.photo_url} style={{width:'100%',maxWidth:140,height:90,objectFit:'cover',borderRadius:8,border:`2px solid ${C.green}`,display:'block'}} alt="Photo écart"/>
+                              <img src={c.photo_url} onError={(e:any)=>{e.target.style.display='none';e.target.parentElement.innerHTML='📸 <span style="font-size:10px;color:#888">Photo indisponible</span>'}} style={{width:'100%',maxWidth:140,height:90,objectFit:'cover',borderRadius:8,border:`2px solid ${C.green}`,display:'block'}} alt="Photo écart"/>
                             </a>
                             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:4}}>
                               <div style={{fontSize:10,color:C.green,fontWeight:700}}>📸 Photo de l'écart</div>
@@ -3698,7 +3698,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                             {v.photo_url&&(
                               <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
                                 <a href={v.photo_url} target="_blank" rel="noreferrer">
-                                  <img src={v.photo_url} style={{width:54,height:54,objectFit:'cover',borderRadius:6,border:`2px solid ${C.green}`}} alt="📸"/>
+                                  <img src={v.photo_url} onError={(e:any)=>{e.target.style.display='none';e.target.parentElement.innerHTML='📸 <span style="font-size:10px;color:#888">Indisponible</span>'}} style={{width:54,height:54,objectFit:'cover',borderRadius:6,border:`2px solid ${C.green}`}} alt="📸"/>
                                 </a>
                                 <a href={v.photo_url} download target="_blank" rel="noreferrer" style={{fontSize:10,color:C.blue,textDecoration:'none',fontWeight:700}}>⬇ DL</a>
                               </div>
@@ -3706,7 +3706,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                             {v.photo_url2&&(
                               <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2,marginLeft:4}}>
                                 <a href={v.photo_url2} target="_blank" rel="noreferrer">
-                                  <img src={v.photo_url2} style={{width:54,height:54,objectFit:'cover',borderRadius:6,border:`2px solid ${C.green}`}} alt="📸"/>
+                                  <img src={v.photo_url2} onError={(e:any)=>{e.target.style.display='none';e.target.parentElement.innerHTML='📸 <span style="font-size:10px;color:#888">Indisponible</span>'}} style={{width:54,height:54,objectFit:'cover',borderRadius:6,border:`2px solid ${C.green}`}} alt="📸"/>
                                 </a>
                                 <a href={v.photo_url2} download target="_blank" rel="noreferrer" style={{fontSize:10,color:C.blue,textDecoration:'none',fontWeight:700}}>⬇ DL</a>
                               </div>
@@ -3801,7 +3801,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                               {v.photo_url&&(
                                 <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:1}}>
                                   <a href={v.photo_url} target="_blank" rel="noreferrer">
-                                    <img src={v.photo_url} style={{width:36,height:36,objectFit:'cover',borderRadius:4,border:`1px solid ${C.green}`}} alt="📸"/>
+                                    <img src={v.photo_url} onError={(e:any)=>{e.target.style.display='none';e.target.parentElement.innerHTML='📸'}} style={{width:36,height:36,objectFit:'cover',borderRadius:4,border:`1px solid ${C.green}`}} alt="📸"/>
                                   </a>
                                   <a href={v.photo_url} download target="_blank" rel="noreferrer" style={{fontSize:9,color:C.blue,textDecoration:'none',fontWeight:700}}>⬇ DL</a>
                                 </div>
@@ -3809,7 +3809,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                               {v.photo_url2&&(
                                 <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:1}}>
                                   <a href={v.photo_url2} target="_blank" rel="noreferrer">
-                                    <img src={v.photo_url2} style={{width:36,height:36,objectFit:'cover',borderRadius:4,border:`1px solid ${C.green}`}} alt="📸"/>
+                                    <img src={v.photo_url2} onError={(e:any)=>{e.target.style.display='none';e.target.parentElement.innerHTML='📸'}} style={{width:36,height:36,objectFit:'cover',borderRadius:4,border:`1px solid ${C.green}`}} alt="📸"/>
                                   </a>
                                   <a href={v.photo_url2} download target="_blank" rel="noreferrer" style={{fontSize:9,color:C.blue,textDecoration:'none',fontWeight:700}}>⬇ DL</a>
                                 </div>

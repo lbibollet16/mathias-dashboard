@@ -23,11 +23,29 @@ export async function POST(req: NextRequest) {
 
     if (error) throw error
 
+    // Essayer l'URL publique d'abord
     const { data: urlData } = supabaseAdmin.storage
       .from('inventaire-photos')
       .getPublicUrl(fileName)
 
-    return NextResponse.json({ success: true, url: urlData.publicUrl })
+    // Vérifier si l'URL publique fonctionne, sinon utiliser une signed URL (1 an)
+    try {
+      const testRes = await fetch(urlData.publicUrl, { method: 'HEAD' })
+      if (testRes.ok) {
+        return NextResponse.json({ success: true, url: urlData.publicUrl })
+      }
+    } catch {}
+
+    // Bucket non-public : générer une signed URL longue durée
+    const { data: signedData, error: signedError } = await supabaseAdmin.storage
+      .from('inventaire-photos')
+      .createSignedUrl(fileName, 60 * 60 * 24 * 365) // 1 an
+
+    if (signedError || !signedData?.signedUrl) {
+      return NextResponse.json({ success: true, url: urlData.publicUrl })
+    }
+
+    return NextResponse.json({ success: true, url: signedData.signedUrl })
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message }, { status: 500 })
   }
