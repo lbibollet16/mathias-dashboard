@@ -337,9 +337,9 @@ export default function Dashboard() {
       </nav>
 
       {/* TABS */}
-      <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,overflowX:'auto',display:'flex',WebkitOverflowScrolling:'touch',scrollbarWidth:'none'}}>
-        {[{id:'calc',l:isMobile?'🧮 Calc':'Calculateur Achats'},{id:'import',l:isMobile?'📥 Import':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:'📋 Commandes'},{id:'fournitures',l:'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'utilisateurs',l:'👥 Utilisateurs'}].filter(t=>(profil?.onglets_custom && Array.isArray(profil.onglets_custom) && profil.onglets_custom.length>0 ? profil.onglets_custom : (ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis'])).includes(t.id)).map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:isMobile?'10px 12px':'12px 16px',border:'none',background:'transparent',cursor:'pointer',fontSize:isMobile?12:13,fontWeight:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',transition:'all .15s',whiteSpace:'nowrap',flexShrink:0}}>
+      <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,overflowX:'auto',display:'flex',WebkitOverflowScrolling:'touch',scrollbarWidth:'none',gap:isMobile?2:0}}>
+        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>(profil?.onglets_custom && Array.isArray(profil.onglets_custom) && profil.onglets_custom.length>0 ? profil.onglets_custom : (ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis'])).includes(t.id)).map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:isMobile?'12px 14px':'12px 16px',border:'none',background:tab===t.id?(dark?'#1a233a':'#dbeafe'):'transparent',cursor:'pointer',fontSize:isMobile?14:13,fontWeight:tab===t.id?800:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',borderRadius:isMobile?'8px 8px 0 0':0,transition:'all .15s',whiteSpace:'nowrap',flexShrink:0}}>
             {t.l}
           </button>
         ))}
@@ -1852,8 +1852,8 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     {/* Sous-onglets */}
     <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center',justifyContent:'space-between'}}>
       <div style={{display:'flex',gap:8}}>
-        <button onClick={()=>setSousOnglet('compter')} style={{padding:isMobile?'10px 18px':'8px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='compter'?C.blue:bdr}`,background:sousOnglet==='compter'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='compter'?C.blue:sub,fontSize:isMobile?14:13,fontWeight:700,cursor:'pointer'}}>📦 Compter</button>
-        <button onClick={()=>setSousOnglet('suivi')} style={{padding:isMobile?'10px 18px':'8px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='suivi'?C.green:bdr}`,background:sousOnglet==='suivi'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:sousOnglet==='suivi'?C.green:sub,fontSize:isMobile?14:13,fontWeight:700,cursor:'pointer'}}>📊 Suivi</button>
+        <button onClick={()=>setSousOnglet('compter')} style={{padding:isMobile?'14px 22px':'8px 16px',borderRadius:isMobile?14:20,border:`2px solid ${sousOnglet==='compter'?C.blue:bdr}`,background:sousOnglet==='compter'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousOnglet==='compter'?C.blue:sub,fontSize:isMobile?16:13,fontWeight:700,cursor:'pointer',flex:isMobile?1:undefined}}>📦 Compter</button>
+        <button onClick={()=>setSousOnglet('suivi')} style={{padding:isMobile?'14px 22px':'8px 16px',borderRadius:isMobile?14:20,border:`2px solid ${sousOnglet==='suivi'?C.green:bdr}`,background:sousOnglet==='suivi'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:sousOnglet==='suivi'?C.green:sub,fontSize:isMobile?16:13,fontWeight:700,cursor:'pointer',flex:isMobile?1:undefined}}>📊 Suivi</button>
       </div>
       {sousOnglet==='compter' && (
         <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer'}}>
@@ -2000,11 +2000,11 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'1fr auto',gap:10}}>
                   {isMobile && (
                     <button type="button" onClick={()=>startCamera('loc')}
-                      style={{...btnPrimary,background:dark?'#1a233a':'#e8f0fe',color:C.blue,border:`2px solid ${C.blue}`,fontSize:15}}>
+                      style={{...btnPrimary,background:dark?'#1a233a':'#e8f0fe',color:C.blue,border:`2px solid ${C.blue}`,fontSize:17,padding:'16px 0',minHeight:54}}>
                       📷 Scanner
                     </button>
                   )}
-                  <button type="submit" disabled={loading} style={{...btnPrimary,background:C.blue}}>
+                  <button type="submit" disabled={loading} style={{...btnPrimary,background:C.blue,fontSize:isMobile?17:14,padding:isMobile?'16px 0':undefined,minHeight:isMobile?54:undefined}}>
                     {loading?'...':isMobile?'🔍 Chercher':'OK'}
                   </button>
                 </div>
@@ -2036,11 +2036,11 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'1fr auto',gap:10}}>
                   {isMobile && (
                     <button type="button" onClick={()=>startCamera('piece')}
-                      style={{...btnPrimary,background:dark?'#2b2411':'#fff8e1',color:C.yellow,border:`2px solid ${C.yellow}`,fontSize:15}}>
+                      style={{...btnPrimary,background:dark?'#2b2411':'#fff8e1',color:C.yellow,border:`2px solid ${C.yellow}`,fontSize:17,padding:'16px 0',minHeight:54}}>
                       📷 Scanner
                     </button>
                   )}
-                  <button type="submit" disabled={loading} style={{...btnPrimary,background:C.yellow}}>
+                  <button type="submit" disabled={loading} style={{...btnPrimary,background:C.yellow,fontSize:isMobile?17:14,padding:isMobile?'16px 0':undefined,minHeight:isMobile?54:undefined}}>
                     {loading?'...':isMobile?'✅ Confirmer':'OK'}
                   </button>
                 </div>
@@ -2062,8 +2062,8 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   </div>
                 </div>
                 <button onClick={()=>{setEtape('piece');setPieceActive(null);setQteInput('');setTimeout(()=>pieceRef.current?.focus(),100)}}
-                  style={{background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:'6px 12px',color:sub,cursor:'pointer',fontSize:12,marginLeft:10}}>
-                  ↩ Mauvaise
+                  style={{background:'none',border:`1px solid ${bdr}`,borderRadius:8,padding:isMobile?'10px 14px':'6px 12px',color:sub,cursor:'pointer',fontSize:isMobile?14:12,marginLeft:10}}>
+                  ↩ Mauvaise pièce
                 </button>
               </div>
               <form onSubmit={soumettreQte} style={{display:'flex',flexDirection:'column',gap:10}}>
@@ -2071,8 +2071,8 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   onChange={e=>{setQteInput(e.target.value);setErreur('')}}
                   placeholder="Quantité sur tablette"
                   style={{...S,fontSize:isMobile?36:22,fontWeight:900,textAlign:'center',padding:isMobile?'20px 14px':'12px 14px',borderRadius:12}} autoFocus/>
-                <button type="submit" disabled={loading||!qteInput} style={{...btnPrimary,background:qteInput?C.green:'#94a3b8'}}>
-                  {loading?'Sauvegarde...':'✅ Confirmer'}
+                <button type="submit" disabled={loading||!qteInput} style={{...btnPrimary,background:qteInput?C.green:'#94a3b8',fontSize:isMobile?18:14,padding:isMobile?'18px 0':undefined,minHeight:isMobile?56:undefined}}>
+                  {loading?'Sauvegarde...':'✅ Confirmer la quantité'}
                 </button>
               </form>
             </div>
@@ -3381,7 +3381,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                 {f[c.key]===''?<span style={{color:sub,fontSize:18}}>0</span>:f[c.key]}
               </div>
               {/* Clavier numérique custom */}
-              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:6}}>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:isMobile?8:6}}>
                 {['1','2','3','4','5','6','7','8','9','±','0','⌫'].map(k => (
                   <button key={k} type="button"
                     onClick={()=>{
@@ -3399,10 +3399,11 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                       }
                     }}
                     style={{
-                      padding:'14px 0',borderRadius:10,fontWeight:700,fontSize:18,cursor:'pointer',
+                      padding:isMobile?'18px 0':'14px 0',borderRadius:12,fontWeight:700,fontSize:isMobile?22:18,cursor:'pointer',
                       border:`1px solid ${bdr}`,
                       background: k==='⌫'?(dark?'#2b1113':'#fce8e6'):k==='±'?(dark?'#1a233a':'#e8f0fe'):(dark?'#222':'#fff'),
-                      color: k==='⌫'?C.red:k==='±'?C.blue:'inherit'
+                      color: k==='⌫'?C.red:k==='±'?C.blue:'inherit',
+                      minHeight:isMobile?52:44
                     }}>
                     {k}
                   </button>
@@ -3589,9 +3590,9 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                 <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Cause principale *</div>
                 <div style={{display:'flex',flexDirection:'column',gap:8}}>
                   {CAUSES.map((cause, causeIdx) => (
-                    <label key={cause} style={{display:'flex',alignItems:'center',gap:10,background:form.cause===cause?(dark?'#1a233a':'#e8f0fe'):dark?'#1a1a1a':'#f8f9fa',borderRadius:10,padding:'12px 14px',border:`2px solid ${form.cause===cause?C.blue:bdr}`,cursor:'pointer'}}>
-                      <input type="radio" name="cause" value={cause} checked={form.cause===cause} onChange={()=>setForm((p:any)=>({...p,cause:cause,causeIdx:causeIdx}))} style={{accentColor:C.blue,width:18,height:18}}/>
-                      <span style={{fontSize:13,fontWeight:form.cause===cause?700:400,color:form.cause===cause?C.blue:'inherit'}}>{cause}</span>
+                    <label key={cause} style={{display:'flex',alignItems:'center',gap:12,background:form.cause===cause?(dark?'#1a233a':'#e8f0fe'):dark?'#1a1a1a':'#f8f9fa',borderRadius:12,padding:isMobile?'16px':'12px 14px',border:`2px solid ${form.cause===cause?C.blue:bdr}`,cursor:'pointer'}}>
+                      <input type="radio" name="cause" value={cause} checked={form.cause===cause} onChange={()=>setForm((p:any)=>({...p,cause:cause,causeIdx:causeIdx}))} style={{accentColor:C.blue,width:isMobile?22:18,height:isMobile?22:18,flexShrink:0}}/>
+                      <span style={{fontSize:isMobile?15:13,fontWeight:form.cause===cause?700:400,color:form.cause===cause?C.blue:'inherit'}}>{cause}</span>
                     </label>
                   ))}
                 </div>
@@ -3614,7 +3615,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
                   {photoPreviews.map((p,i) => (
                     <div key={i} style={{position:'relative'}}>
-                      <img src={p} style={{width:'100%',borderRadius:10,height:120,objectFit:'cover'}} alt={`Photo ${i+1}`}/>
+                      <img src={p} style={{width:'100%',borderRadius:10,height:isMobile?160:120,objectFit:'cover'}} alt={`Photo ${i+1}`}/>
                       <button onClick={()=>{setPhotoFiles(prev=>prev.filter((_,j)=>j!==i));setPhotoPreviews(prev=>prev.filter((_,j)=>j!==i))}}
                         style={{position:'absolute',top:4,right:4,background:C.red,border:'none',borderRadius:'50%',width:24,height:24,color:'#fff',cursor:'pointer',fontSize:12,fontWeight:700}}>✕</button>
                     </div>
