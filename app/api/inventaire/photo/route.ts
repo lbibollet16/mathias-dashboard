@@ -11,41 +11,24 @@ export async function POST(req: NextRequest) {
     if (!file) return NextResponse.json({ erreur: 'Fichier manquant' }, { status: 400 })
 
     const buffer = Buffer.from(await file.arrayBuffer())
-    const ext = file.name.split('.').pop() || 'jpg'
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
     const fileName = `${localisation}_${code_piece}_${Date.now()}.${ext}`.replace(/[^a-zA-Z0-9._-]/g, '_')
 
-    const { data, error } = await supabaseAdmin.storage
+    // Forcer le content type en image/jpeg si non reconnu (HEIC, etc.)
+    let contentType = file.type || 'image/jpeg'
+    if (!contentType.startsWith('image/')) contentType = 'image/jpeg'
+
+    const { error } = await supabaseAdmin.storage
       .from('inventaire-photos')
-      .upload(fileName, buffer, {
-        contentType: file.type || 'image/jpeg',
-        upsert: true
-      })
+      .upload(fileName, buffer, { contentType, upsert: true })
 
     if (error) throw error
 
-    // Essayer l'URL publique d'abord
     const { data: urlData } = supabaseAdmin.storage
       .from('inventaire-photos')
       .getPublicUrl(fileName)
 
-    // Vérifier si l'URL publique fonctionne, sinon utiliser une signed URL (1 an)
-    try {
-      const testRes = await fetch(urlData.publicUrl, { method: 'HEAD' })
-      if (testRes.ok) {
-        return NextResponse.json({ success: true, url: urlData.publicUrl })
-      }
-    } catch {}
-
-    // Bucket non-public : générer une signed URL longue durée
-    const { data: signedData, error: signedError } = await supabaseAdmin.storage
-      .from('inventaire-photos')
-      .createSignedUrl(fileName, 60 * 60 * 24 * 365) // 1 an
-
-    if (signedError || !signedData?.signedUrl) {
-      return NextResponse.json({ success: true, url: urlData.publicUrl })
-    }
-
-    return NextResponse.json({ success: true, url: signedData.signedUrl })
+    return NextResponse.json({ success: true, url: urlData.publicUrl })
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message }, { status: 500 })
   }
