@@ -21,12 +21,12 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { employe, sku, description, fournisseur, categorie, quantite, unite, note } = body
+    const { employe, sku, description, fournisseur, categorie, quantite, unite, note, url } = body
     if (!employe || !description) return NextResponse.json({ erreur: 'employe et description requis' }, { status: 400 })
     const { error } = await supabaseAdmin.from('demandes_fournitures').insert({
       employe, sku: sku || null, description, fournisseur: fournisseur || null,
       categorie: categorie || 'Autre', quantite: quantite || 1,
-      unite: unite || 'unité', note: note || null,
+      unite: unite || 'unité', note: note || null, url: url || null,
       statut: 'en_attente', date_demande: new Date().toISOString()
     })
     if (error) throw error

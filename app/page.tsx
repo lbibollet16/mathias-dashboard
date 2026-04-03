@@ -993,6 +993,7 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
               <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Description</th>
               <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Fournisseur</th>
               <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Qté</th>
+              <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Lien</th>
               <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Action</th>
             </tr></thead>
             <tbody>
@@ -1003,6 +1004,9 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={d.description}>{d.description}</td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{d.fournisseur||'—'}</td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{d.quantite}</td>
+                  <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                    {d.url ? <a href={d.url} target="_blank" rel="noreferrer" style={{background:C.blue,color:'#fff',padding:'5px 10px',borderRadius:6,fontSize:11,fontWeight:700,textDecoration:'none',display:'inline-block'}}>🔗 Ouvrir</a> : <span style={{color:sub,fontSize:11}}>—</span>}
+                  </td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                     <div style={{display:'flex',gap:6,justifyContent:'center'}}>
                       <button onClick={async()=>{await fetch('/api/fournitures',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:d.id,statut:'traitée'})});const r=await fetch('/api/fournitures');if(r.ok&&setFournituresData)setFournituresData(await r.json())}}
@@ -1030,6 +1034,7 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
   const [sku, setSku] = useState('')
   const [qte, setQte] = useState(1)
   const [note, setNote] = useState('')
+  const [urlPiece, setUrlPiece] = useState('')
   const [skuInfo, setSkuInfo] = useState<any>(null)
   const [skuErreur, setSkuErreur] = useState('')
   const [loading, setLoading] = useState(false)
@@ -1094,10 +1099,11 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
         categorie: 'Suggestion',
         quantite: qte,
         unite: 'unité',
-        note: note
+        note: note,
+        url: urlPiece.trim() || null
       })
     })
-    setSku(''); setQte(1); setNote(''); setSkuInfo(null)
+    setSku(''); setQte(1); setNote(''); setUrlPiece(''); setSkuInfo(null)
     await recharger()
     setMsgOk(`✅ Suggestion envoyée dans Commandes du Jour!`)
     setTimeout(() => setMsgOk(''), 4000)
@@ -1192,6 +1198,15 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
             </div>
           </div>
 
+          {/* URL */}
+          <div style={{marginBottom:16}}>
+            <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>🔗 Lien vers la pièce (optionnel)</label>
+            <input value={urlPiece} onChange={e=>setUrlPiece(e.target.value)} placeholder="https://www.fournisseur.com/piece-xyz..."
+              type="url" inputMode="url"
+              style={{...S,fontSize:14,color:urlPiece?C.blue:'inherit'}}/>
+            {urlPiece.trim() && <div style={{fontSize:11,color:C.blue,marginTop:4}}>Ce lien sera visible dans Commandes du Jour</div>}
+          </div>
+
           <button type="submit" disabled={loading||!sku.trim()}
             style={{width:'100%',background:(!sku.trim())?sub:C.blue,color:'#fff',border:'none',borderRadius:10,padding:'13px 0',fontSize:15,fontWeight:700,cursor:sku.trim()?'pointer':'not-allowed',opacity:sku.trim()?1:0.6}}>
             {loading ? 'Envoi...' : '💡 Envoyer la suggestion → Commandes du Jour'}
@@ -1225,6 +1240,7 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Description</th>
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Fournisseur</th>
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Qté</th>
+                  <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Lien</th>
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Statut</th>
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Date</th>
                   <th style={{padding:'9px',borderBottom:`2px solid ${bdr}`}}></th>
@@ -1237,6 +1253,9 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={d.description}>{d.description}</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{d.fournisseur||'—'}</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{d.quantite}</td>
+                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                        {d.url ? <a href={d.url} target="_blank" rel="noreferrer" style={{color:C.blue,fontSize:12,fontWeight:700,textDecoration:'none'}}>🔗 Voir</a> : <span style={{color:sub,fontSize:11}}>—</span>}
+                      </td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                         <span style={{background:d.statut==='en_attente'?C.yellow+'22':d.statut==='annulée'?C.red+'22':C.green+'22',color:d.statut==='en_attente'?C.yellow:d.statut==='annulée'?C.red:C.green,padding:'3px 8px',borderRadius:20,fontSize:11,fontWeight:700}}>
                           {d.statut==='en_attente'?'⏳ En attente':d.statut==='annulée'?'✕ Annulée':'✅ Traitée'}
