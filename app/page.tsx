@@ -534,6 +534,10 @@ export default function Dashboard() {
         {tab==='retours' && <>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:10}}>
             <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
+              <button onClick={lancerSync} disabled={syncing}
+                style={{background:syncing?sub:'#2563eb',color:'#fff',border:'none',borderRadius:8,padding:'9px 18px',fontSize:13,fontWeight:700,cursor:syncing?'default':'pointer'}}>
+                {syncing?'⏳ Sync en cours...':'⚡ Synchroniser ERP'}
+              </button>
               <button onClick={async()=>{
                   setSyncing(true); setSyncLog('')
                   try {
