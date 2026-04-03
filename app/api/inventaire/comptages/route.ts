@@ -27,12 +27,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ erreur: 'Champs requis manquants' }, { status: 400 })
     }
     const ecart = qte_comptee - (qte_systeme || 0)
-    const today = new Date().toISOString().split('T')[0]
+    const now = new Date()
+    const today = now.toISOString().split('T')[0]
+
+    // Supprimer les comptages existants du même jour pour cette pièce+localisation (éviter doublons)
+    await supabaseAdmin.from('inventaire_comptages').delete()
+      .eq('code_piece', code_piece).eq('localisation', localisation)
+      .gte('date_comptage', today + 'T00:00:00').lte('date_comptage', today + 'T23:59:59')
+
     const { data, error } = await supabaseAdmin.from('inventaire_comptages').insert({
       code_piece, localisation, qte_comptee, qte_systeme: qte_systeme || 0,
       qte_reservee: qte_reservee || 0, ecart, employe, note: note || null,
       photo_url: photo_url || null,
-      date_comptage: new Date().toISOString(), statut: 'en_attente'
+      date_comptage: now.toISOString(), statut: 'en_attente'
     }).select()
     if (error) throw error
     return NextResponse.json(data?.[0] || {})

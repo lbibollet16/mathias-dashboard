@@ -1608,7 +1608,11 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       return
     }
     const codes = data.map((p:any) => p.code_piece).join(',')
-    const rStock = await fetch('/api/inventaire/stock?codes=' + encodeURIComponent(codes))
+    const rStock = await fetch('/api/inventaire/stock', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ codes })
+    })
     const map = new Map<string,{stock:number,reserve:number}>()
     if (rStock.ok) {
       const stocks = await rStock.json()
@@ -1619,7 +1623,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     // Créer/reprendre une session pour cette localisation
     try {
       const pieces_attendues = data.map((p:any) => p.code_piece)
-      const sessR = await fetch('/api/inventaire/sessions', {
+      const sessR = await fetch('/api/inventaire/session', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ localisation: loc, employe, pieces_attendues, nb_attendues: pieces_attendues.length })
@@ -1734,15 +1738,23 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 
   async function _sauvegarder(piece: any, stockInfo: any, qte: number, photoUrl: string|null = null) {
     const qteSysteme = (stockInfo.stock||0) + (stockInfo.reserve||0)
-    await fetch('/api/inventaire/comptages', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        code_piece: piece.code_piece, localisation: locActive,
-        qte_comptee: qte, qte_systeme: qteSysteme, qte_reservee: stockInfo.reserve||0,
-        employe, photo_url: photoUrl
+    try {
+      const r = await fetch('/api/inventaire/comptages', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          code_piece: piece.code_piece, localisation: locActive,
+          qte_comptee: qte, qte_systeme: qteSysteme, qte_reservee: stockInfo.reserve||0,
+          employe, photo_url: photoUrl
+        })
       })
-    })
+      if (!r.ok) {
+        const j = await r.json().catch(()=>({}))
+        setErreur('❌ Erreur sauvegarde: ' + (j.erreur||r.statusText)); sonErr(); setLoading(false); return
+      }
+    } catch (e: any) {
+      setErreur('❌ Erreur réseau: ' + e.message); sonErr(); setLoading(false); return
+    }
     const c = { code_piece: piece.code_piece, description: piece.description, qte_comptee: qte, qte_systeme: qteSysteme, ecart: qte-qteSysteme, heure: new Date().toLocaleTimeString('fr-CA'), photo_url: photoUrl }
     setComptesDuJour(prev => [c, ...prev.filter((x:any)=>x.code_piece!==piece.code_piece)])
     setDernierComptage(c); setPieceActive(null); setQteInput(''); setEtape('piece'); sonOk(); setLoading(false)
@@ -2188,7 +2200,7 @@ function SuiviInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile,
           if(!confirm('⚠️ Effacer TOUS les comptages et sessions ? Cette action est irréversible.')) return
           await Promise.all([
             fetch('/api/inventaire/comptages?all=1', {method:'DELETE'}),
-            fetch('/api/inventaire/sessions?all=1', {method:'DELETE'}),
+            fetch('/api/inventaire/session?all=1', {method:'DELETE'}),
           ])
           chargerComptages(); chargerProgression()
         }} style={{background:'#e53e3e22',color:'#e53e3e',border:'1px solid #e53e3e',borderRadius:8,padding:'6px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>

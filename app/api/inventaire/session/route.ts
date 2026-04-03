@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     if (existing && existing.length > 0) {
       const { data, error } = await supabaseAdmin
         .from('inventaire_sessions')
-        .update({ pieces_attendues, nb_attendues, date_debut: new Date().toISOString() })
+        .update({ pieces_attendues, nb_attendues })
         .eq('id', existing[0].id)
         .select()
       if (error) throw error
