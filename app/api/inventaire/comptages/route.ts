@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { code_piece, localisation, qte_comptee, qte_systeme, qte_reservee, employe, note } = body
+    const { code_piece, localisation, qte_comptee, qte_systeme, qte_reservee, employe, note, photo_url } = body
     if (!code_piece || !localisation || qte_comptee === undefined || !employe) {
       return NextResponse.json({ erreur: 'Champs requis manquants' }, { status: 400 })
     }
@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
     const { data, error } = await supabaseAdmin.from('inventaire_comptages').insert({
       code_piece, localisation, qte_comptee, qte_systeme: qte_systeme || 0,
       qte_reservee: qte_reservee || 0, ecart, employe, note: note || null,
+      photo_url: photo_url || null,
       date_comptage: new Date().toISOString(), statut: 'en_attente'
     }).select()
     if (error) throw error
