@@ -599,7 +599,7 @@ export default function Dashboard() {
         {tab==='booking' && <BookingTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} alts={alts}/>}
 
         {/* ── NÉGATIFS ────────────────────────────────────────────── */}
-        {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts} negsVerifies={negsVerifies} setNegsVerifies={setNegsVerifies} profil={profil} data={data}/>}
+        {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts} negsVerifies={negsVerifies} setNegsVerifies={setNegsVerifies} profil={profil} data={data} lancerSync={lancerSync} syncing={syncing} syncLog={syncLog}/>}
         {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts} fournituresData={fournituresData} setFournituresData={setFournituresData} profil={profil}/>}
         {tab==='inventaire' && <InventaireTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
         {tab==='utilisateurs' && <UtilisateursTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
@@ -3018,7 +3018,7 @@ function BookingTab({data,dark,card,bdr,sub,thBg,S,alts}: any) {
   </div>
 }
 
-function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVerifies, setNegsVerifies, profil, data}: any) {
+function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVerifies, setNegsVerifies, profil, data, lancerSync, syncing, syncLog}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const employe = profil?.nom || profil?.email || 'Inconnu'
   const [filtFourn, setFiltFourn] = useState('ALL')
@@ -3538,14 +3538,19 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
       )
     })()}
 
-    {/* Sous-onglets */}
-    <div style={{display:'flex',gap:8,marginBottom:14}}>
+    {/* Bouton sync + Sous-onglets */}
+    <div style={{display:'flex',gap:8,marginBottom:14,flexWrap:'wrap',alignItems:'center'}}>
+      <button onClick={lancerSync} disabled={syncing}
+        style={{padding:isMobile?'10px 16px':'7px 16px',borderRadius:20,border:`2px solid ${syncing?bdr:'#2563eb'}`,background:syncing?'transparent':'#2563eb22',color:syncing?sub:'#2563eb',fontSize:isMobile?14:12,fontWeight:700,cursor:syncing?'default':'pointer'}}>
+        {syncing?'⏳ Sync...':'⚡ Sync ERP'}
+      </button>
       <button onClick={()=>setSousOnglet('actif')} style={{padding:isMobile?'10px 16px':'7px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='actif'?C.red:bdr}`,background:sousOnglet==='actif'?C.red+'22':'transparent',color:sousOnglet==='actif'?C.red:sub,fontSize:isMobile?14:12,fontWeight:700,cursor:'pointer'}}>
         🔴 À vérifier ({negsActifs.length})
       </button>
       <button onClick={()=>setSousOnglet('verifie')} style={{padding:isMobile?'10px 16px':'7px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='verifie'?C.green:bdr}`,background:sousOnglet==='verifie'?C.green+'22':'transparent',color:sousOnglet==='verifie'?C.green:sub,fontSize:isMobile?14:12,fontWeight:700,cursor:'pointer'}}>
         ✅ Vérifié ({negsVerifies.length})
       </button>
+      {syncLog && <span style={{fontSize:11,color:syncLog.startsWith('✅')?C.green:C.red,fontWeight:600}}>{syncLog}</span>}
     </div>
 
     {sousOnglet === 'actif' ? <>
