@@ -60,8 +60,13 @@ export default function Dashboard() {
   const [user, setUser]     = useState<any>(null)
   const [newVersion, setNewVersion] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
-  // Charger ZXing pour iOS Safari (BarcodeDetector non supporté)
+  // Charger html5-qrcode + ZXing pour compatibilité maximale
   useEffect(() => {
+    if (!(window as any).Html5Qrcode) {
+      const s = document.createElement('script')
+      s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js'
+      document.head.appendChild(s)
+    }
     if (!('BarcodeDetector' in window) && !(window as any).ZXingLibrary) {
       const s = document.createElement('script')
       s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js'
@@ -1507,55 +1512,52 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     setScanLog('')
   }
 
+  const scannerDivRef = useRef<HTMLDivElement>(null)
+  const html5ScannerRef = useRef<any>(null)
+
   function startCamera(mode: 'loc'|'piece') {
-    // Ouvrir le scanner universel dans une popup
-    const url = '/scanner.html?mode=' + mode
-    const w = Math.min(500, window.screen.width)
-    const h = Math.min(700, window.screen.height)
-    const left = Math.round((window.screen.width - w) / 2)
-    const top = Math.round((window.screen.height - h) / 2)
-    const popup = window.open(url, 'scanner', `width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=no`)
-
-    // Écouter le résultat via postMessage
-    const onMsg = (e: MessageEvent) => {
-      if (e.data?.type === 'SCAN_RESULT' && e.data.mode === mode) {
-        window.removeEventListener('message', onMsg)
-        clearInterval(lsInterval)
-        const val = e.data.value
-        if (mode === 'loc') { setLocInput(val); setTimeout(() => scanLocalisationVal(val, true), 100) }
-        else { setPieceInput(val); setTimeout(() => scanPieceVal(val, true), 100) }
-        try { popup?.close() } catch {}
-      }
-    }
-    window.addEventListener('message', onMsg)
-
-    // Fallback localStorage pour les cas où postMessage ne fonctionne pas (certains iOS)
-    const lsInterval = setInterval(() => {
+    setScanModal(mode)
+    // Attendre le render du div puis démarrer le scanner inline
+    setTimeout(() => {
+      if (!scannerDivRef.current) return
+      const Html5Qrcode = (window as any).Html5Qrcode
+      if (!Html5Qrcode) { setScanLog('Chargement scanner...'); return }
       try {
-        const raw = localStorage.getItem('scanner_result')
-        if (!raw) return
-        const data = JSON.parse(raw)
-        if (data.mode === mode && Date.now() - data.ts < 5000) {
-          localStorage.removeItem('scanner_result')
-          clearInterval(lsInterval)
-          window.removeEventListener('message', onMsg)
-          const val = data.value
+        const sc = new Html5Qrcode('inline-scanner', { verbose: false })
+        html5ScannerRef.current = sc
+        const config = {
+          fps: 10,
+          qrbox: (w: number, h: number) => {
+            const size = Math.min(w, h) * 0.75
+            return { width: Math.round(size), height: Math.round(size * 0.5) }
+          },
+          formatsToSupport: [0,2,3,4,5,6,7,8,11,12,13] // CODE_128, CODE_39, CODE_93, EAN_13, EAN_8, UPC_A, UPC_E, ITF, QR_CODE, DATA_MATRIX, PDF_417
+        }
+        const onSuccess = (decoded: string) => {
+          const val = (decoded||'').trim().toUpperCase()
+          if (!val) return
+          fermerScanner()
+          sonOk()
           if (mode === 'loc') { setLocInput(val); setTimeout(() => scanLocalisationVal(val, true), 100) }
           else { setPieceInput(val); setTimeout(() => scanPieceVal(val, true), 100) }
-          try { popup?.close() } catch {}
         }
-      } catch {}
-    }, 300)
+        sc.start({ facingMode: 'environment' }, config, onSuccess, () => {})
+          .then(() => setScanLog(''))
+          .catch(() => {
+            sc.start({ facingMode: 'user' }, config, onSuccess, () => {})
+              .then(() => setScanLog(''))
+              .catch(() => setScanLog('Caméra inaccessible — entrez manuellement'))
+          })
+      } catch { setScanLog('Erreur scanner') }
+    }, 200)
+  }
 
-    // Nettoyer si la popup est fermée sans résultat
-    const checkClosed = setInterval(() => {
-      if (popup?.closed) {
-        clearInterval(checkClosed)
-        clearInterval(lsInterval)
-        window.removeEventListener('message', onMsg)
-        localStorage.removeItem('scanner_result')
-      }
-    }, 500)
+  function fermerScanner() {
+    if (html5ScannerRef.current) {
+      try { html5ScannerRef.current.stop() } catch {}
+      html5ScannerRef.current = null
+    }
+    setScanModal(null); setScanLog('')
   }
 
   function onLocScan(e: any) {
@@ -1911,6 +1913,30 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
             )
           })()}
 
+          {/* SCANNER INLINE */}
+          {scanModal && (
+            <div style={{position:'fixed',inset:0,zIndex:9999,background:'#000',display:'flex',flexDirection:'column'}}>
+              <div style={{padding:'12px 16px',background:'#111',display:'flex',justifyContent:'space-between',alignItems:'center',flexShrink:0}}>
+                <span style={{fontSize:17,fontWeight:700,color:'#fff'}}>
+                  {scanModal==='loc'?'📍 Scanner Localisation':'📦 Scanner Pièce'}
+                </span>
+                <button onClick={fermerScanner} style={{background:'rgba(255,255,255,.15)',border:'none',color:'#fff',padding:'9px 16px',borderRadius:10,fontSize:15,fontWeight:700,cursor:'pointer'}}>✕</button>
+              </div>
+              <div ref={scannerDivRef} style={{flex:1,overflow:'hidden',background:'#000'}}>
+                <div id="inline-scanner" style={{width:'100%',height:'100%'}}/>
+              </div>
+              {scanLog && <div style={{padding:'10px 16px',background:'#111',color:'#ef4444',fontSize:13,textAlign:'center'}}>{scanLog}</div>}
+              <div style={{padding:'12px 16px',background:'#1a1a1a',display:'flex',gap:8,flexShrink:0,borderTop:'1px solid #333'}}>
+                <input id="scan-manual-input" type="text" placeholder="Entrer manuellement..."
+                  autoComplete="off" autoCapitalize="characters" spellCheck={false}
+                  onKeyDown={e=>{if(e.key==='Enter'){const v=(e.target as HTMLInputElement).value.trim().toUpperCase();if(v){fermerScanner();if(scanModal==='loc'){setLocInput(v);setTimeout(()=>scanLocalisationVal(v,true),100)}else{setPieceInput(v);setTimeout(()=>scanPieceVal(v,true),100)}}}}}
+                  style={{flex:1,background:'#2a2a2a',border:'1px solid #555',color:'#fff',padding:'12px 14px',borderRadius:10,fontSize:16,outline:'none'}}/>
+                <button onClick={()=>{const el=document.getElementById('scan-manual-input') as HTMLInputElement;const v=el?.value?.trim().toUpperCase();if(v){fermerScanner();if(scanModal==='loc'){setLocInput(v);setTimeout(()=>scanLocalisationVal(v,true),100)}else{setPieceInput(v);setTimeout(()=>scanPieceVal(v,true),100)}}}}
+                  style={{background:'#2563eb',color:'#fff',border:'none',padding:'12px 20px',borderRadius:10,fontWeight:700,cursor:'pointer',fontSize:15,whiteSpace:'nowrap'}}>OK</button>
+              </div>
+            </div>
+          )}
+
           {/* ÉTAPE LOCALISATION */}
           {etape==='localisation' && (
             <div style={{background:card,borderRadius:14,border:`2px solid ${C.blue}`,padding:isMobile?'20px':'16px',marginBottom:12}}>
@@ -2073,10 +2099,17 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                           </div>
                           <div style={{textAlign:'right',marginLeft:10,flexShrink:0}}>
                             {c
-                              ? <div>
+                              ? <div onClick={()=>{
+                                  const si2 = stockMap.get(p.code_piece)||{stock:0,reserve:0}
+                                  setPieceActive({...p, stockSys: si2.stock+si2.reserve, stock: si2.stock, reserve: si2.reserve})
+                                  setQteInput(String(c.qte_comptee)); setEtape('quantite'); setErreur('')
+                                }} style={{cursor:'pointer'}}>
                                   <div style={{fontSize:18,fontWeight:900,color:c.ecart===0?C.green:C.red}}>{c.qte_comptee}</div>
                                   {c.ecart!==0&&<div style={{fontSize:11,color:C.red,fontWeight:700}}>{c.ecart>0?'+':''}{c.ecart}</div>}
-                                  {c.photo_url&&<div style={{fontSize:14}}>📸</div>}
+                                  <div style={{display:'flex',gap:4,alignItems:'center',justifyContent:'flex-end'}}>
+                                    {c.photo_url&&<span style={{fontSize:14}}>📸</span>}
+                                    <span style={{fontSize:10,color:C.blue,fontWeight:600}}>✏️</span>
+                                  </div>
                                 </div>
                               : <div style={{width:36,height:36,borderRadius:'50%',border:`2px dashed ${bdr}`,display:'flex',alignItems:'center',justifyContent:'center',color:sub,fontSize:18}}>—</div>
                             }
@@ -2129,7 +2162,14 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               {comptesDuJour.length===0
                 ? <div style={{textAlign:'center',padding:24,color:sub,fontSize:12}}>Aucun comptage</div>
                 : comptesDuJour.map((c:any,i:number)=>(
-                    <div key={i} style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,background:i===0?(dark?'#0d2a18':'#f0fff4'):'transparent'}}>
+                    <div key={i} style={{padding:'9px 12px',borderBottom:`1px solid ${bdr}`,background:i===0?(dark?'#0d2a18':'#f0fff4'):'transparent',cursor:'pointer'}}
+                      onClick={()=>{
+                        const p = piecesLoc.find((x:any)=>x.code_piece===c.code_piece)
+                        if (!p) return
+                        const si2 = stockMap.get(c.code_piece)||{stock:0,reserve:0}
+                        setPieceActive({...p, stockSys: si2.stock+si2.reserve, stock: si2.stock, reserve: si2.reserve})
+                        setQteInput(String(c.qte_comptee)); setEtape('quantite'); setErreur('')
+                      }}>
                       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                         <div>
                           <div style={{fontSize:11,fontWeight:700}}>{c.code_piece}</div>
@@ -2141,6 +2181,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                             {c.ecart!==0&&<div style={{fontSize:10,fontWeight:700,color:C.red}}>{c.ecart>0?'+':''}{c.ecart}</div>}
                           </div>
                           {c.photo_url&&<span style={{fontSize:16}}>📸</span>}
+                          <span style={{fontSize:10,color:C.blue}}>✏️</span>
                         </div>
                       </div>
                     </div>
