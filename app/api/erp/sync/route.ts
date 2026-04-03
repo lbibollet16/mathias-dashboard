@@ -182,6 +182,18 @@ export async function POST() {
     for (let i = 0; i < negAvecDates.length; i += 500)
       await supabaseAdmin.from('memoire_negatifs').insert(negAvecDates.slice(i, i + 500))
 
+    // 8b. Nettoyage négatifs vérifiés — supprimer ceux qui ne sont plus en négatif
+    const codesEncoreNegatifs = new Set(nouveauxNegatifs.map((n: any) => n.code_piece))
+    const { data: verifiesExistants } = await supabaseAdmin.from('negatifs_verifies').select('id, code_piece')
+    const verifiesASupprimer = (verifiesExistants || []).filter((v: any) => !codesEncoreNegatifs.has(v.code_piece))
+    if (verifiesASupprimer.length > 0) {
+      const ids = verifiesASupprimer.map((v: any) => v.id)
+      for (let i = 0; i < ids.length; i += 100) {
+        await supabaseAdmin.from('negatifs_verifies').delete().in('id', ids.slice(i, i + 100))
+      }
+      log.push(`${verifiesASupprimer.length} négatifs vérifiés supprimés (stock corrigé)`)
+    }
+
     // 9. Réconciliation inventaire cyclique
     const hier = new Date(now)
     hier.setDate(hier.getDate() - 1)
