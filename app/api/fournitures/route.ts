@@ -23,12 +23,21 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const { employe, sku, description, fournisseur, categorie, quantite, unite, note, url } = body
     if (!employe || !description) return NextResponse.json({ erreur: 'employe et description requis' }, { status: 400 })
-    const { error } = await supabaseAdmin.from('demandes_fournitures').insert({
+    const payload: any = {
       employe, sku: sku || null, description, fournisseur: fournisseur || null,
       categorie: categorie || 'Autre', quantite: quantite || 1,
-      unite: unite || 'unité', note: note || null, url: url || null,
+      unite: unite || 'unité', note: note || null,
       statut: 'en_attente', date_demande: new Date().toISOString()
-    })
+    }
+    // Essayer avec url d'abord, fallback sans si la colonne n'existe pas
+    if (url) payload.url = url
+    let { error } = await supabaseAdmin.from('demandes_fournitures').insert(payload)
+    if (error && url) {
+      // La colonne url n'existe peut-être pas encore — réessayer sans
+      delete payload.url
+      const retry = await supabaseAdmin.from('demandes_fournitures').insert(payload)
+      error = retry.error
+    }
     if (error) throw error
     return NextResponse.json({ success: true })
   } catch (e: any) {
