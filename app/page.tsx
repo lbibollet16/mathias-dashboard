@@ -1005,7 +1005,7 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{d.fournisseur||'—'}</td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{d.quantite}</td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                    {d.url ? <a href={d.url} target="_blank" rel="noreferrer" style={{background:C.blue,color:'#fff',padding:'5px 10px',borderRadius:6,fontSize:11,fontWeight:700,textDecoration:'none',display:'inline-block'}}>🔗 Ouvrir</a> : <span style={{color:sub,fontSize:11}}>—</span>}
+                    {(()=>{const u=(d.note||'').split('|||')[1];return u?<a href={u} target="_blank" rel="noreferrer" style={{background:C.blue,color:'#fff',padding:'5px 10px',borderRadius:6,fontSize:11,fontWeight:700,textDecoration:'none',display:'inline-block'}}>🔗 Ouvrir</a>:<span style={{color:sub,fontSize:11}}>—</span>})()}
                   </td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                     <div style={{display:'flex',gap:6,justifyContent:'center'}}>
@@ -1254,7 +1254,7 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{d.fournisseur||'—'}</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{d.quantite}</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                        {d.url ? <a href={d.url} target="_blank" rel="noreferrer" style={{color:C.blue,fontSize:12,fontWeight:700,textDecoration:'none'}}>🔗 Voir</a> : <span style={{color:sub,fontSize:11}}>—</span>}
+                        {(()=>{const u=(d.note||'').split('|||')[1];return u?<a href={u} target="_blank" rel="noreferrer" style={{color:C.blue,fontSize:12,fontWeight:700,textDecoration:'none'}}>🔗 Voir</a>:<span style={{color:sub,fontSize:11}}>—</span>})()}
                       </td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                         <span style={{background:d.statut==='en_attente'?C.yellow+'22':d.statut==='annulée'?C.red+'22':C.green+'22',color:d.statut==='en_attente'?C.yellow:d.statut==='annulée'?C.red:C.green,padding:'3px 8px',borderRadius:20,fontSize:11,fontWeight:700}}>
