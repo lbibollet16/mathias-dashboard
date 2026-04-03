@@ -2,6 +2,14 @@ import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
   title: 'Mathias Marine Sports - Dashboard',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'Mathias',
+  },
+  other: {
+    'mobile-web-app-capable': 'yes',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -10,6 +18,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;900&display=swap" rel="stylesheet" />
+        <link rel="apple-touch-icon" href="/icon-192.svg" />
+        <meta name="theme-color" content="#2563eb" />
       </head>
       <body style={{ margin: 0, padding: 0 }}>{children}</body>
     </html>
