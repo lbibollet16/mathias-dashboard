@@ -610,7 +610,7 @@ export default function Dashboard() {
         {tab==='utilisateurs' && <UtilisateursTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
         {tab==='fournitures' && <FournituresTab fournituresData={fournituresData} setFournituresData={setFournituresData} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} data={data} profil={profil}/>}
       </div>
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-thumb{background:${dark?'#444':'#ccc'};border-radius:3px}`}</style>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-thumb{background:${dark?'#444':'#ccc'};border-radius:3px}#inline-scanner video{object-fit:cover!important;width:100%!important;height:100%!important}#inline-scanner img{display:none!important}`}</style>
     </div>
   )
 }
@@ -1512,29 +1512,39 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     setScanLog('')
   }
 
-  const scannerDivRef = useRef<HTMLDivElement>(null)
   const html5ScannerRef = useRef<any>(null)
   const scanDoneRef = useRef(false)
+  const scanModeRef = useRef<'loc'|'piece'>('loc')
 
   function startCamera(mode: 'loc'|'piece') {
+    // Nettoyage complet avant de démarrer
+    fermerScannerSync()
     scanDoneRef.current = false
+    scanModeRef.current = mode
     setScanModal(mode)
     setScanLog('Démarrage caméra...')
-    // Attendre le render du div puis démarrer
+  }
+
+  // Démarrer le scanner quand le modal s'affiche (via useEffect)
+  useEffect(() => {
+    if (!scanModal) return
+    const mode = scanModeRef.current
+    let cancelled = false
     const tryStart = (attempt: number) => {
-      if (scanDoneRef.current) return
+      if (cancelled || scanDoneRef.current) return
       const H5 = (window as any).Html5Qrcode
       const H5F = (window as any).Html5QrcodeSupportedFormats
       if (!H5 || !H5F) {
-        if (attempt < 15) { setTimeout(() => tryStart(attempt+1), 300); return }
-        setScanLog('Scanner non chargé — utilisez la saisie manuelle ci-dessous')
-        return
+        if (attempt < 20) { setTimeout(() => tryStart(attempt+1), 300); return }
+        setScanLog('Scanner non chargé — tapez le code ci-dessous'); return
       }
       const el = document.getElementById('inline-scanner')
       if (!el) {
-        if (attempt < 10) { setTimeout(() => tryStart(attempt+1), 200); return }
+        if (attempt < 15) { setTimeout(() => tryStart(attempt+1), 200); return }
         return
       }
+      // Vider le div au cas où il resterait du contenu
+      el.innerHTML = ''
       try {
         const sc = new H5('inline-scanner', { verbose: false })
         html5ScannerRef.current = sc
@@ -1551,7 +1561,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           ]
         }
         const onSuccess = (decoded: string) => {
-          if (scanDoneRef.current) return
+          if (scanDoneRef.current || cancelled) return
           scanDoneRef.current = true
           const val = (decoded||'').trim().toUpperCase()
           if (!val) return
@@ -1561,24 +1571,35 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           else { setPieceInput(val); setTimeout(() => scanPieceVal(val, true), 150) }
         }
         sc.start({ facingMode: 'environment' }, config, onSuccess, () => {})
-          .then(() => setScanLog('Pointez vers le code-barres'))
+          .then(() => { if (!cancelled) setScanLog('Pointez vers le code-barres') })
           .catch(() => {
+            if (cancelled) return
             sc.start({ facingMode: 'user' }, config, onSuccess, () => {})
-              .then(() => setScanLog('Pointez vers le code-barres (caméra avant)'))
-              .catch(() => setScanLog('Caméra inaccessible — utilisez la saisie manuelle'))
+              .then(() => { if (!cancelled) setScanLog('Pointez vers le code-barres') })
+              .catch(() => { if (!cancelled) setScanLog('Caméra inaccessible — tapez le code ci-dessous') })
           })
-      } catch { setScanLog('Erreur — utilisez la saisie manuelle') }
+      } catch { if (!cancelled) setScanLog('Erreur — tapez le code ci-dessous') }
     }
-    setTimeout(() => tryStart(0), 300)
+    setTimeout(() => tryStart(0), 400)
+    return () => { cancelled = true; fermerScannerSync() }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanModal])
+
+  function fermerScannerSync() {
+    scanDoneRef.current = true
+    if (html5ScannerRef.current) {
+      const sc = html5ScannerRef.current
+      html5ScannerRef.current = null
+      try { sc.stop().catch(() => {}) } catch {}
+      try { sc.clear() } catch {}
+    }
+    // Nettoyer le DOM manuellement au cas où
+    const el = document.getElementById('inline-scanner')
+    if (el) el.innerHTML = ''
   }
 
   function fermerScanner() {
-    scanDoneRef.current = true
-    if (html5ScannerRef.current) {
-      try { html5ScannerRef.current.stop() } catch {}
-      try { html5ScannerRef.current.clear() } catch {}
-      html5ScannerRef.current = null
-    }
+    fermerScannerSync()
     setScanModal(null); setScanLog('')
   }
 
@@ -1953,7 +1974,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 </span>
                 <button onClick={fermerScanner} style={{background:'#ef4444',border:'none',color:'#fff',padding:'10px 20px',borderRadius:10,fontSize:16,fontWeight:700,cursor:'pointer'}}>✕ Fermer</button>
               </div>
-              <div ref={scannerDivRef} style={{flex:1,overflow:'hidden',background:'#000',position:'relative'}}>
+              <div style={{flex:1,overflow:'hidden',background:'#000',position:'relative'}}>
                 <div id="inline-scanner" style={{width:'100%',height:'100%'}}/>
               </div>
               <div style={{padding:'10px 16px',background:'#111',textAlign:'center',fontSize:14,color:'#4ade80',fontWeight:600,flexShrink:0}}>{scanLog||'Chargement...'}</div>
