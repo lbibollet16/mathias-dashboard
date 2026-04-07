@@ -1,7 +1,8 @@
 {
   "crons": [
-    { "path": "/api/erp/sync", "schedule": "0 2 * * *" },
-    { "path": "/api/calculateur/recalculer", "schedule": "30 2 * * *" },
-    { "path": "/api/suivi-commandes/verifier", "schedule": "0 8 * * *" }
+    { "path": "/api/erp/sync", "schedule": "0 11 * * *" },
+    { "path": "/api/erp/sync", "schedule": "0 22 * * *" },
+    { "path": "/api/calculateur/recalculer", "schedule": "30 11 * * *" },
+    { "path": "/api/suivi-commandes/verifier", "schedule": "0 13 * * *" }
   ]
 }
