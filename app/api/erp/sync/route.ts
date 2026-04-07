@@ -66,10 +66,10 @@ export async function POST() {
     const mapHier = new Map<string, number>()
     let hierFrom = 0
     while (true) {
-      const { data: rows } = await supabaseAdmin.from('stock_hier').select('code_piece, qty_total, quantite').range(hierFrom, hierFrom + 4999)
+      const { data: rows } = await supabaseAdmin.from('stock_hier').select('code_piece, qty_total, quantite').range(hierFrom, hierFrom + 999)
       for (const r of rows || []) mapHier.set(r.code_piece, Number(r.qty_total || r.quantite))
-      if (!rows || rows.length < 5000) break
-      hierFrom += 5000
+      if (!rows || rows.length < 1000) break
+      hierFrom += 1000
     }
     const modeInit = mapHier.size === 0
     log.push(modeInit ? 'Mode initialisation (stock_hier vide)' : `${mapHier.size} pièces dans stock_hier`)
@@ -78,10 +78,10 @@ export async function POST() {
     let lotsActifs: any[] = []
     let lotsFrom = 0
     while (true) {
-      const { data: rows } = await supabaseAdmin.from('lots_retournables').select('*').gt('qte_restante', 0).gte('date_limite', todayStr).range(lotsFrom, lotsFrom + 4999)
+      const { data: rows } = await supabaseAdmin.from('lots_retournables').select('*').gt('qte_restante', 0).gte('date_limite', todayStr).range(lotsFrom, lotsFrom + 999)
       lotsActifs = lotsActifs.concat((rows || []).map((l: any) => ({ ...l, qte_restante: Number(l.qte_restante) })))
-      if (!rows || rows.length < 5000) break
-      lotsFrom += 5000
+      if (!rows || rows.length < 1000) break
+      lotsFrom += 1000
     }
 
     const addDays = (d: Date, n: number) => { const r = new Date(d); r.setDate(r.getDate() + n); return r.toISOString().split('T')[0] }
@@ -141,10 +141,10 @@ export async function POST() {
     const ancienAuj: any[] = []
     let aujFrom = 0
     while (true) {
-      const { data: rows } = await supabaseAdmin.from('stock_aujourdhui').select('code_piece, quantite, qty_total').range(aujFrom, aujFrom + 4999)
+      const { data: rows } = await supabaseAdmin.from('stock_aujourdhui').select('code_piece, quantite, qty_total').range(aujFrom, aujFrom + 999)
       ancienAuj.push(...(rows || []))
-      if (!rows || rows.length < 5000) break
-      aujFrom += 5000
+      if (!rows || rows.length < 1000) break
+      aujFrom += 1000
     }
 
     if (ancienAuj.length > 0) {
