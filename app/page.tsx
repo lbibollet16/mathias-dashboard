@@ -1229,7 +1229,7 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
                   border:`2px solid ${pieceExiste===true?C.green:bdr}`}}>
                 ✅ Oui
               </button>
-              <button type="button" onClick={()=>{setPieceExiste(false);setSku('');setSkuInfo(null);setUrlPiece('');setNumReference('');setDescNouvelle('')}}
+              <button type="button" onClick={()=>{setPieceExiste(false);setSku('');setSkuInfo(null);setUrlPiece('');setNumReference('');setDescNouvelle('');setStatutSugg('Restock')}}
                 style={{flex:1,padding:'12px 0',borderRadius:10,fontSize:15,fontWeight:700,cursor:'pointer',
                   background:pieceExiste===false?C.red:dark?'#222':'#f8f9fa',
                   color:pieceExiste===false?'#fff':dark?'#ccc':'#555',
@@ -1306,7 +1306,8 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
 
           {/* === CHAMPS COMMUNS (visibles dans les 2 cas) === */}
           {pieceExiste !== null && <>
-            {/* Statut */}
+            {/* Statut (seulement si pièce existante) */}
+            {pieceExiste && (
             <div style={{marginBottom:16}}>
               <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Statut *</label>
               <select value={statutSugg} onChange={e=>setStatutSugg(e.target.value)}
@@ -1317,6 +1318,7 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
                 <option value="Urgente">🚨 Urgente</option>
               </select>
             </div>
+            )}
 
             {/* Quantité + Note */}
             <div style={{display:'grid',gridTemplateColumns:'160px 1fr',gap:12,marginBottom:16}}>
