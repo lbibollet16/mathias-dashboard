@@ -562,7 +562,76 @@ export default function Dashboard() {
               <div style={{fontSize:24,fontWeight:900,color:C.green}}>{lots.reduce((s,l)=>s+l.qte_restante*l.cout_unitaire,0).toLocaleString('fr-CA',{minimumFractionDigits:2})} $</div>
             </div>
           </div>
+          {/* Section urgente: ≤10 jours restants, groupé par fournisseur */}
+          {(()=>{
+            const urgents = lots.filter(lot => Math.ceil((new Date(lot.date_limite).getTime()-Date.now())/86400000) <= 10)
+            const parFourn = new Map<string, typeof lots>()
+            for (const lot of urgents) {
+              if (!parFourn.has(lot.fournisseur)) parFourn.set(lot.fournisseur, [])
+              parFourn.get(lot.fournisseur)!.push(lot)
+            }
+            const groupes = Array.from(parFourn.entries()).sort((a,b) => {
+              const minA = Math.min(...a[1].map(l => Math.ceil((new Date(l.date_limite).getTime()-Date.now())/86400000)))
+              const minB = Math.min(...b[1].map(l => Math.ceil((new Date(l.date_limite).getTime()-Date.now())/86400000)))
+              return minA - minB
+            })
+            return groupes.length > 0 ? (
+              <div style={{marginBottom:20}}>
+                <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
+                  <span style={{fontSize:16,fontWeight:800,color:C.red}}>🚨 Retours urgents (≤ 10 jours)</span>
+                  <span style={{background:C.red,color:'#fff',padding:'3px 10px',borderRadius:20,fontSize:12,fontWeight:700}}>{urgents.length} pièces • {groupes.length} fournisseurs</span>
+                </div>
+                <div style={{display:'flex',flexDirection:'column',gap:12}}>
+                  {groupes.map(([fourn, lotsF]) => {
+                    const totalVal = lotsF.reduce((s,l) => s + l.qte_restante * l.cout_unitaire, 0)
+                    const totalQte = lotsF.reduce((s,l) => s + l.qte_restante, 0)
+                    const minDiff = Math.min(...lotsF.map(l => Math.ceil((new Date(l.date_limite).getTime()-Date.now())/86400000)))
+                    return (
+                      <div key={fourn} style={{background:dark?'#2b1113':'#fff8f8',borderRadius:12,border:`2px solid ${C.red}`,overflow:'hidden'}}>
+                        <div style={{padding:'12px 16px',background:dark?'#3a1518':C.red+'11',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
+                          <div>
+                            <div style={{fontWeight:800,fontSize:16}}>{fourn}</div>
+                            <div style={{fontSize:12,color:sub,marginTop:2}}>{lotsF.length} pièces • {totalQte} unités • Min: <strong style={{color:C.red}}>{minDiff} jours</strong></div>
+                          </div>
+                          <div style={{textAlign:'right'}}>
+                            <div style={{fontSize:18,fontWeight:900,color:C.red}}>{totalVal.toLocaleString('fr-CA',{minimumFractionDigits:2})} $</div>
+                          </div>
+                        </div>
+                        <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                          <thead><tr style={{background:thBg}}>
+                            {['Ligne','Code Pièce','Qté Restante','Date Limite','Temps Restant','Valeur'].map((h,i)=>(
+                              <th key={i} style={{padding:'8px 9px',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`,textAlign:i>=2?'center':'left'}}>{h}</th>
+                            ))}
+                          </tr></thead>
+                          <tbody>
+                            {lotsF.sort((a,b) => new Date(a.date_limite).getTime() - new Date(b.date_limite).getTime()).map(lot => {
+                              const diff = Math.ceil((new Date(lot.date_limite).getTime()-Date.now())/86400000)
+                              return (
+                                <tr key={lot.id}>
+                                  <td style={{padding:'7px 9px',borderBottom:`1px solid ${bdr}`}}><span style={{background:dark?'#333':'#e2e8f0',color:dark?'#ccc':'#475569',padding:'2px 8px',borderRadius:4,fontSize:12,fontWeight:600}}>{lot.code_ligne}</span></td>
+                                  <td style={{padding:'7px 9px',borderBottom:`1px solid ${bdr}`,fontWeight:600}}>{lot.code_piece}</td>
+                                  <td style={{padding:'7px 9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{lot.qte_restante} <span style={{fontSize:11,color:sub}}>(reçu:{lot.qte_recue})</span></td>
+                                  <td style={{padding:'7px 9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{lot.date_limite}</td>
+                                  <td style={{padding:'7px 9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}><span style={{background:C.red+'22',color:C.red,padding:'2px 8px',borderRadius:20,fontWeight:700,fontSize:12}}>{diff}j</span></td>
+                                  <td style={{padding:'7px 9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700}}>{(lot.qte_restante*lot.cout_unitaire).toFixed(2)} $</td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : null
+          })()}
+
+          {/* Tableau complet tous les lots */}
           <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+            <div style={{padding:'12px 16px',borderBottom:`1px solid ${bdr}`,background:thBg}}>
+              <span style={{fontSize:14,fontWeight:700}}>📦 Tous les retours ({lots.length})</span>
+            </div>
             {lots.length===0
               ? <div style={{textAlign:'center',padding:50,color:sub}}>
                   <div style={{fontSize:30,marginBottom:10}}>📦</div>
