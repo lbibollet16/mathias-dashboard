@@ -1335,6 +1335,8 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [showCreerLoc, setShowCreerLoc] = useState(false)
   const [locInconnue, setLocInconnue] = useState('')
   const [pieceAjoutable, setPieceAjoutable] = useState<any>(null)
+  const [multiLocInfo, setMultiLocInfo] = useState<{locs: string[], dejaComptee?: {loc: string, employe: string, qte: number}} | null>(null)
+  const [pieceDejaComptee, setPieceDejaComptee] = useState<any>(null)
   const [photoFile, setPhotoFile] = useState<File|null>(null)
   const [photoPreview, setPhotoPreview] = useState<string|null>(null)
   const [pendingComptage, setPendingComptage] = useState<any>(null)
@@ -1733,7 +1735,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       }
     } catch {}
 
-    setLocInput(''); setEtape('piece'); setComptesDuJour([]); sonOk(); setLoading(false)
+    setLocInput(''); setEtape('piece'); setComptesDuJour([]); setMultiLocInfo(null); setPieceDejaComptee(null); sonOk(); setLoading(false)
     if (!fromCamera) setTimeout(() => pieceRef.current?.focus(), 100)
   }
 
@@ -1804,7 +1806,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 
   async function scanPieceVal(code: string, fromCamera = false) {
     if (!code) return
-    setLoading(true); setErreur(''); setPieceAjoutable(null)
+    setLoading(true); setErreur(''); setPieceAjoutable(null); setPieceDejaComptee(null); setMultiLocInfo(null)
     const pieceDansLoc = piecesLoc.find((p:any) => p.code_piece.trim().toUpperCase() === code)
     if (!pieceDansLoc) {
       const r = await fetch('/api/sku-lookup?sku=' + encodeURIComponent(code))
@@ -1824,6 +1826,31 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       sonErr(); setPieceInput(''); setLoading(false)
       if (!fromCamera) setTimeout(() => pieceRef.current?.focus(), 100); return
     }
+    // Vérifier les autres localisations de cette pièce
+    const autresLocs = [pieceDansLoc.localisation1, pieceDansLoc.localisation2, pieceDansLoc.localisation3, pieceDansLoc.localisation4]
+      .filter(Boolean).filter((l:string) => l.toUpperCase() !== locActive?.toUpperCase())
+
+    // Si multi-loc, vérifier si déjà comptée aujourd'hui à une autre localisation
+    if (autresLocs.length > 0) {
+      try {
+        const rCheck = await fetch('/api/inventaire/comptages?code_today=' + encodeURIComponent(code))
+        const comptagesAuj = await rCheck.json()
+        const comptageAutreLoc = Array.isArray(comptagesAuj) ? comptagesAuj.find((c:any) => c.localisation?.toUpperCase() !== locActive?.toUpperCase()) : null
+        if (comptageAutreLoc) {
+          // Déjà comptée ailleurs aujourd'hui — demander confirmation
+          setPieceDejaComptee({
+            piece: pieceDansLoc, code, autresLocs,
+            comptage: comptageAutreLoc,
+            stockInfo: stockMap.get(code) || { stock: 0, reserve: 0 }
+          })
+          setErreur('')
+          setPieceInput(''); setLoading(false)
+          return
+        }
+      } catch {}
+    }
+
+    setMultiLocInfo(autresLocs.length > 0 ? { locs: autresLocs } : null)
     const stockInfo = stockMap.get(code) || { stock: 0, reserve: 0 }
     setPieceActive({ ...pieceDansLoc, stockSys: stockInfo.stock + stockInfo.reserve, stock: stockInfo.stock, reserve: stockInfo.reserve })
     setPieceInput('')
@@ -1833,6 +1860,28 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       setEtape('quantite'); setLoading(false)
       if (!fromCamera) setTimeout(() => qteRef.current?.focus(), 100)
     }
+  }
+
+  // Continuer le comptage d'une pièce déjà comptée ailleurs
+  async function continuerComptageDejaComptee() {
+    if (!pieceDejaComptee) return
+    const { piece, autresLocs, stockInfo } = pieceDejaComptee
+    setMultiLocInfo({ locs: autresLocs })
+    setPieceActive({ ...piece, stockSys: stockInfo.stock + stockInfo.reserve, stock: stockInfo.stock, reserve: stockInfo.reserve })
+    setPieceDejaComptee(null)
+    if (modeRapide) {
+      await _sauvegarder(piece, stockInfo, 1)
+    } else {
+      setEtape('quantite'); setLoading(false)
+      setTimeout(() => qteRef.current?.focus(), 100)
+    }
+  }
+
+  function skipPieceDejaComptee() {
+    setPieceDejaComptee(null)
+    setPieceInput('')
+    setEtape('piece')
+    setTimeout(() => pieceRef.current?.focus(), 100)
   }
 
   async function scanPiece(e?: any) {
@@ -2199,6 +2248,55 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 style={{...btnPrimary,background:'transparent',color:sub,border:`1px solid ${bdr}`,marginTop:10,fontSize:14}}>
                 ← Modifier la quantité
               </button>
+            </div>
+          )}
+
+          {/* Pièce déjà comptée à une autre localisation */}
+          {pieceDejaComptee && (
+            <div style={{background:dark?'#1a233a':'#dbeafe',border:`2px solid ${C.blue}`,borderRadius:12,padding:'16px',marginBottom:12}}>
+              <div style={{fontWeight:800,fontSize:isMobile?16:14,color:C.blue,marginBottom:8}}>
+                ✅ Pièce "{pieceDejaComptee.code}" déjà comptée aujourd'hui
+              </div>
+              <div style={{background:dark?'#111':'#fff',borderRadius:8,padding:'10px 14px',marginBottom:10,border:`1px solid ${bdr}`}}>
+                <div style={{fontSize:13,color:sub}}>
+                  Comptée à <strong style={{color:C.blue}}>{pieceDejaComptee.comptage.localisation}</strong> par <strong>{pieceDejaComptee.comptage.employe}</strong>
+                </div>
+                <div style={{fontSize:13,marginTop:4}}>
+                  Qté comptée: <strong style={{fontSize:16}}>{pieceDejaComptee.comptage.qte_comptee}</strong>
+                  <span style={{color:sub,marginLeft:8}}>({new Date(pieceDejaComptee.comptage.date_comptage).toLocaleTimeString('fr-CA',{hour:'2-digit',minute:'2-digit'})})</span>
+                </div>
+              </div>
+              {pieceDejaComptee.autresLocs.length > 0 && (
+                <div style={{fontSize:12,color:sub,marginBottom:10}}>
+                  📍 Autres localisations: <strong>{pieceDejaComptee.autresLocs.join(', ')}</strong>
+                </div>
+              )}
+              <div style={{display:'flex',gap:10}}>
+                <button onClick={continuerComptageDejaComptee}
+                  style={{flex:1,background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'12px 0',fontSize:isMobile?15:13,fontWeight:700,cursor:'pointer'}}>
+                  🔄 Recompter ici quand même
+                </button>
+                <button onClick={skipPieceDejaComptee}
+                  style={{flex:1,background:dark?'#333':'#e2e8f0',color:dark?'#ccc':'#475569',border:'none',borderRadius:8,padding:'12px 0',fontSize:isMobile?15:13,fontWeight:700,cursor:'pointer'}}>
+                  ⏭️ Passer
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Rappel autres localisations après comptage */}
+          {multiLocInfo && !pieceDejaComptee && etape === 'piece' && (
+            <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`2px solid ${C.green}`,borderRadius:12,padding:'14px 16px',marginBottom:12}}>
+              <div style={{fontWeight:700,fontSize:isMobile?14:13,color:C.green,marginBottom:6}}>
+                📍 N'oublie pas d'aller compter cette pièce aux autres localisations :
+              </div>
+              <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                {multiLocInfo.locs.map((l,i) => (
+                  <span key={i} style={{background:C.blue,color:'#fff',padding:'6px 14px',borderRadius:8,fontSize:isMobile?15:13,fontWeight:700}}>
+                    📍 {l}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
 

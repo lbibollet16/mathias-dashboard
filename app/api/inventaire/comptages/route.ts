@@ -3,6 +3,17 @@ import { supabaseAdmin } from '@/lib/supabase'
 
 export async function GET(req: NextRequest) {
   try {
+    // Vérifier les comptages d'aujourd'hui pour une pièce spécifique
+    const codeCheck = req.nextUrl.searchParams.get('code_today')
+    if (codeCheck) {
+      const today = new Date().toISOString().split('T')[0]
+      const { data, error } = await supabaseAdmin.from('inventaire_comptages').select('*')
+        .eq('code_piece', codeCheck)
+        .gte('date_comptage', today + 'T00:00:00').lte('date_comptage', today + 'T23:59:59')
+      if (error) throw error
+      return NextResponse.json(data || [])
+    }
+
     let query = supabaseAdmin.from('inventaire_comptages').select('*').order('date_comptage', { ascending: false })
     let all: any[] = []
     let from = 0
