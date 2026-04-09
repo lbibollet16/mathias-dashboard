@@ -998,16 +998,24 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
               <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Action</th>
             </tr></thead>
             <tbody>
-              {(fournituresData?.demandes||[]).filter((d:any)=>d.statut==='en_attente').map((d:any) => (
-                <tr key={d.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+              {(fournituresData?.demandes||[]).filter((d:any)=>d.statut==='en_attente').sort((a:any,b:any) => {
+                const order = (c:string) => c==='Commande Fournisseur'?0:c==='Urgente'?1:2
+                return order(a.categorie) - order(b.categorie)
+              }).map((d:any) => {
+                const isCmd = d.categorie==='Commande Fournisseur'
+                return (
+                <tr key={d.id} style={{background:isCmd?(dark?'#2b1113':'#fff0f0'):undefined,borderLeft:isCmd?`4px solid ${C.red}`:'none'}}
+                  onMouseEnter={e=>e.currentTarget.style.background=isCmd?(dark?'#3a1518':'#ffe5e5'):hvr} onMouseLeave={e=>e.currentTarget.style.background=isCmd?(dark?'#2b1113':'#fff0f0'):'transparent'}>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:600}}>{d.employe}</td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:12}}>{d.sku||'—'}</td>
-                  <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={d.description}>{d.description}</td>
-                  <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{d.fournisseur||'—'}</td>
-                  <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{d.quantite}</td>
+                  <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:isCmd?800:400,color:isCmd?C.red:undefined}} title={d.description}>
+                    {isCmd ? `🚩 ${d.fournisseur}` : d.description}
+                  </td>
+                  <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:isCmd?C.red:sub,fontSize:12,fontWeight:isCmd?700:400}}>{d.fournisseur||'—'}</td>
+                  <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{isCmd?'—':d.quantite}</td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                    <span style={{background:d.categorie==='Urgente'?C.red+'22':d.categorie==='Commande Fournisseur'?C.yellow+'22':C.blue+'22',color:d.categorie==='Urgente'?C.red:d.categorie==='Commande Fournisseur'?'#92400e':C.blue,padding:'3px 8px',borderRadius:20,fontSize:11,fontWeight:700}}>
-                      {d.categorie==='Urgente'?'🚨 Urgente':d.categorie==='Commande Fournisseur'?'🚚 Commande':'📦 Restock'}
+                    <span style={{background:d.categorie==='Urgente'?C.red+'22':isCmd?C.red:C.blue+'22',color:d.categorie==='Urgente'?C.red:isCmd?'#fff':C.blue,padding:'3px 8px',borderRadius:20,fontSize:11,fontWeight:700}}>
+                      {d.categorie==='Urgente'?'🚨 Urgente':isCmd?'🚩 PASSER COMMANDE':'📦 Restock'}
                     </span>
                   </td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
@@ -1016,13 +1024,14 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                     <div style={{display:'flex',gap:6,justifyContent:'center'}}>
                       <button onClick={async()=>{await fetch('/api/fournitures',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:d.id,statut:'traitée'})});const r=await fetch('/api/fournitures');if(r.ok&&setFournituresData)setFournituresData(await r.json())}}
-                        style={{background:C.green,color:'#fff',border:'none',borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}}>✅ Commandé</button>
+                        style={{background:C.green,color:'#fff',border:'none',borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}}>{isCmd?'✅ Fait':'✅ Commandé'}</button>
                       <button onClick={async()=>{await fetch('/api/fournitures',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:d.id,statut:'annulée'})});const r=await fetch('/api/fournitures');if(r.ok&&setFournituresData)setFournituresData(await r.json())}}
                         style={{background:C.red+'22',color:C.red,border:'none',borderRadius:6,padding:'5px 8px',fontSize:11,fontWeight:700,cursor:'pointer'}}>✕</button>
                     </div>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>
