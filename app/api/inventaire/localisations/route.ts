@@ -60,6 +60,55 @@ export async function GET(req: NextRequest) {
   }
 }
 
+// PUT — ajouter une pièce à une localisation (ou créer l'entrée)
+export async function PUT(req: NextRequest) {
+  try {
+    const { code_piece, localisation, description, fournisseur } = await req.json()
+    if (!code_piece || !localisation) return NextResponse.json({ erreur: 'code_piece et localisation requis' }, { status: 400 })
+
+    // Vérifier si la pièce existe déjà dans la table
+    const { data: existing } = await supabaseAdmin
+      .from('inventaire_localisations')
+      .select('*')
+      .ilike('code_piece', code_piece)
+      .limit(1)
+
+    if (existing && existing.length > 0) {
+      // La pièce existe — ajouter la localisation dans le premier slot vide
+      const row = existing[0]
+      const update: any = {}
+      if (!row.localisation1) update.localisation1 = localisation
+      else if (!row.localisation2) update.localisation2 = localisation
+      else if (!row.localisation3) update.localisation3 = localisation
+      else if (!row.localisation4) update.localisation4 = localisation
+      else {
+        // Les 4 slots sont pleins — remplacer le dernier
+        update.localisation4 = localisation
+      }
+      const { error } = await supabaseAdmin.from('inventaire_localisations').update(update).eq('id', row.id)
+      if (error) throw error
+      // Retourner la ligne mise à jour
+      const { data: updated } = await supabaseAdmin.from('inventaire_localisations').select('*').eq('id', row.id).single()
+      return NextResponse.json(updated)
+    } else {
+      // La pièce n'existe pas — créer une nouvelle entrée
+      const { data: inserted, error } = await supabaseAdmin.from('inventaire_localisations').insert({
+        code_piece,
+        description: description || null,
+        fournisseur: fournisseur || null,
+        localisation1: localisation,
+        localisation2: null,
+        localisation3: null,
+        localisation4: null,
+      }).select().single()
+      if (error) throw error
+      return NextResponse.json(inserted)
+    }
+  } catch (e: any) {
+    return NextResponse.json({ erreur: e.message }, { status: 500 })
+  }
+}
+
 // POST — créer une nouvelle localisation vide
 export async function POST(req: NextRequest) {
   try {

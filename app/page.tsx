@@ -1334,6 +1334,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [dernierComptage, setDernierComptage] = useState<any>(null)
   const [showCreerLoc, setShowCreerLoc] = useState(false)
   const [locInconnue, setLocInconnue] = useState('')
+  const [pieceAjoutable, setPieceAjoutable] = useState<any>(null)
   const [photoFile, setPhotoFile] = useState<File|null>(null)
   const [photoPreview, setPhotoPreview] = useState<string|null>(null)
   const [pendingComptage, setPendingComptage] = useState<any>(null)
@@ -1755,9 +1756,55 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     setTimeout(() => pieceRef.current?.focus(), 100)
   }
 
+  async function ajouterPieceDansLoc() {
+    if (!pieceAjoutable || !locActive) return
+    setLoading(true); setErreur('')
+    const r = await fetch('/api/inventaire/localisations', {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        code_piece: pieceAjoutable.pk,
+        localisation: locActive,
+        description: pieceAjoutable.desc || null,
+        fournisseur: pieceAjoutable.fournisseur || null
+      })
+    })
+    const inserted = await r.json()
+    if (inserted && inserted.id) {
+      // Ajouter dans la liste locale et continuer le scan normalement
+      const newPieces = [...piecesLoc, inserted]
+      setPiecesLoc(newPieces)
+      // Charger le stock
+      const rStock = await fetch('/api/inventaire/stock', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ codes: pieceAjoutable.pk })
+      })
+      if (rStock.ok) {
+        const stocks = await rStock.json()
+        const newMap = new Map(stockMap)
+        for (const s of stocks) newMap.set(s.code_piece, { stock: s.stock, reserve: s.reserve })
+        setStockMap(newMap)
+      }
+      const stockInfo = stockMap.get(pieceAjoutable.pk.toUpperCase()) || { stock: 0, reserve: 0 }
+      setPieceActive({ ...inserted, stockSys: stockInfo.stock + stockInfo.reserve, stock: stockInfo.stock, reserve: stockInfo.reserve })
+      setPieceAjoutable(null)
+      setErreur('')
+      if (modeRapide) {
+        await _sauvegarder(inserted, stockInfo, 1)
+      } else {
+        setEtape('quantite'); setLoading(false)
+        setTimeout(() => qteRef.current?.focus(), 100)
+      }
+    } else {
+      setErreur('❌ Erreur lors de l\'ajout: ' + (inserted.erreur || 'inconnue'))
+      setLoading(false)
+    }
+  }
+
   async function scanPieceVal(code: string, fromCamera = false) {
     if (!code) return
-    setLoading(true); setErreur('')
+    setLoading(true); setErreur(''); setPieceAjoutable(null)
     const pieceDansLoc = piecesLoc.find((p:any) => p.code_piece.trim().toUpperCase() === code)
     if (!pieceDansLoc) {
       const r = await fetch('/api/sku-lookup?sku=' + encodeURIComponent(code))
@@ -1770,9 +1817,10 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       const rLoc = await fetch('/api/inventaire/localisations?code=' + encodeURIComponent(code))
       const locData = await rLoc.json()
       const autresLocs = Array.isArray(locData) ? locData.flatMap((p:any) => [p.localisation1,p.localisation2,p.localisation3,p.localisation4].filter(Boolean)) : []
+      setPieceAjoutable({ pk: code, desc: j.desc, fournisseur: j.fournisseur, stock: j.stock })
       setErreur(autresLocs.length > 0
-        ? `🚫 Piece "${code}" pas dans ${locActive}. Bonne place: ${autresLocs.join(', ')}`
-        : `⚠️ Piece "${code}" sans localisation assignee.`)
+        ? `⚠️ Piece "${code}" pas dans ${locActive}. Localisations actuelles: ${autresLocs.join(', ')}`
+        : `⚠️ Piece "${code}" sans localisation assignée.`)
       sonErr(); setPieceInput(''); setLoading(false)
       if (!fromCamera) setTimeout(() => pieceRef.current?.focus(), 100); return
     }
@@ -2154,10 +2202,23 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
             </div>
           )}
 
-          {/* Erreur */}
+          {/* Erreur + bouton ajouter pièce */}
           {erreur && (
-            <div style={{background:C.red+'22',border:`2px solid ${C.red}`,borderRadius:12,padding:'14px 16px',marginBottom:12,color:C.red,fontWeight:700,fontSize:isMobile?15:13}}>
+            <div style={{background:pieceAjoutable?'#fff3cd':C.red+'22',border:`2px solid ${pieceAjoutable?'#ffc107':C.red}`,borderRadius:12,padding:'14px 16px',marginBottom:12,color:pieceAjoutable?'#856404':C.red,fontWeight:700,fontSize:isMobile?15:13}}>
               {erreur}
+              {pieceAjoutable && locActive && (
+                <div style={{marginTop:10}}>
+                  <div style={{fontSize:12,fontWeight:400,marginBottom:8,color:dark?'#ccc':'#555'}}>
+                    {pieceAjoutable.desc && <span>{pieceAjoutable.desc}</span>}
+                    {pieceAjoutable.fournisseur && <span> — {pieceAjoutable.fournisseur}</span>}
+                    {pieceAjoutable.stock != null && <span> — Stock: {pieceAjoutable.stock}</span>}
+                  </div>
+                  <button onClick={ajouterPieceDansLoc}
+                    style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'10px 20px',fontSize:isMobile?15:13,fontWeight:700,cursor:'pointer',width:'100%'}}>
+                    ➕ Ajouter "{pieceAjoutable.pk}" dans {locActive}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
