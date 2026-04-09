@@ -1006,8 +1006,8 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{d.fournisseur||'—'}</td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{d.quantite}</td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                    <span style={{background:d.categorie==='Urgente'?C.red+'22':C.blue+'22',color:d.categorie==='Urgente'?C.red:C.blue,padding:'3px 8px',borderRadius:20,fontSize:11,fontWeight:700}}>
-                      {d.categorie==='Urgente'?'🚨 Urgente':'📦 Restock'}
+                    <span style={{background:d.categorie==='Urgente'?C.red+'22':d.categorie==='Commande Fournisseur'?C.yellow+'22':C.blue+'22',color:d.categorie==='Urgente'?C.red:d.categorie==='Commande Fournisseur'?'#92400e':C.blue,padding:'3px 8px',borderRadius:20,fontSize:11,fontWeight:700}}>
+                      {d.categorie==='Urgente'?'🚨 Urgente':d.categorie==='Commande Fournisseur'?'🚚 Commande':'📦 Restock'}
                     </span>
                   </td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
@@ -1047,6 +1047,8 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
   const [loading, setLoading] = useState(false)
   const [msgOk, setMsgOk] = useState('')
   const [rapportEmploye, setRapportEmploye] = useState('ALL')
+  const [fournCmd, setFournCmd] = useState('')
+  const [fournLoading, setFournLoading] = useState(false)
 
   const demandes: any[] = fournituresData?.demandes || []
   const allItems: any[] = data?.liste_complete || []
@@ -1127,6 +1129,35 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
     await recharger()
   }
 
+  // Fournisseurs disponibles depuis les données Traction
+  const fournisseursList = Array.from(new Set((data?.liste_complete||[]).map((it:any) => it.fournisseur).filter(Boolean))).sort() as string[]
+
+  async function soumettreCommFourn(e: any) {
+    e.preventDefault()
+    if (!fournCmd.trim()) return
+    setFournLoading(true)
+    await fetch('/api/fournitures', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        employe,
+        sku: null,
+        description: `Commande fournisseur: ${fournCmd.trim()}`,
+        fournisseur: fournCmd.trim(),
+        categorie: 'Commande Fournisseur',
+        quantite: 1,
+        unite: 'commande',
+        note: null,
+        url: null
+      })
+    })
+    setFournCmd('')
+    await recharger()
+    setMsgOk(`✅ Commande fournisseur "${fournCmd.trim()}" envoyée!`)
+    setTimeout(() => setMsgOk(''), 4000)
+    setFournLoading(false)
+  }
+
   const employes = Array.from(new Set(demandes.map((d:any) => d.employe))).sort() as string[]
   const demandesFiltrees = demandes.filter((d:any) => rapportEmploye === 'ALL' || d.employe === rapportEmploye)
   const besoin2mois = skuInfo ? calculerBesoin2Mois(skuInfo) : 0
@@ -1150,7 +1181,27 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
       {/* Message succès */}
       {msgOk && <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}`,borderRadius:10,padding:'12px 16px',marginBottom:16,color:C.green,fontWeight:700}}>{msgOk}</div>}
 
-      {/* Formulaire */}
+      {/* Commande rapide fournisseur */}
+      <div style={{background:dark?'#1a1a2e':'#fff8f0',borderRadius:14,border:`2px solid ${C.yellow}`,padding:'20px 24px',marginBottom:20}}>
+        <div style={{fontSize:15,fontWeight:800,marginBottom:12}}>🚚 Passer une commande fournisseur</div>
+        <form onSubmit={soumettreCommFourn} style={{display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap'}}>
+          <div style={{flex:1,minWidth:200}}>
+            <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Fournisseur *</label>
+            <input list="fournisseurs-list" value={fournCmd} onChange={e=>setFournCmd(e.target.value)} placeholder="Nom du fournisseur..."
+              required style={{width:'100%',padding:'10px 12px',border:`1px solid ${bdr}`,borderRadius:8,fontSize:14,fontWeight:600,
+              background:dark?'#222':'#fff',color:dark?'#e8e8e8':'#1a1a1a',outline:'none',boxSizing:'border-box' as const}}/>
+            <datalist id="fournisseurs-list">
+              {fournisseursList.map((f:string) => <option key={f} value={f}/>)}
+            </datalist>
+          </div>
+          <button type="submit" disabled={fournLoading||!fournCmd.trim()}
+            style={{background:C.yellow,color:'#000',border:'none',borderRadius:10,padding:'10px 20px',fontSize:14,fontWeight:800,cursor:fournCmd.trim()?'pointer':'not-allowed',opacity:fournCmd.trim()?1:0.6,whiteSpace:'nowrap'}}>
+            {fournLoading ? 'Envoi...' : '🚚 Envoyer'}
+          </button>
+        </form>
+      </div>
+
+      {/* Formulaire suggestion SKU */}
       <div style={{background:card,borderRadius:14,border:`1px solid ${bdr}`,padding:'24px 28px',marginBottom:20}}>
         <form onSubmit={soumettre}>
           {/* SKU */}
