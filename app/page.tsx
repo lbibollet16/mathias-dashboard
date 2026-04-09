@@ -3264,6 +3264,33 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
   const [photoFiles, setPhotoFiles] = useState<File[]>([])
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([])
   const photoRef = useRef<HTMLInputElement>(null)
+  const [locsMap, setLocsMap] = useState<Map<string,string[]>>(new Map())
+
+  // Charger les localisations de toutes les pièces négatives
+  useEffect(() => {
+    if (!negs || negs.length === 0) return
+    const codes = Array.from(new Set(negs.map((n:any) => n.code_piece))) as string[]
+    async function fetchLocs() {
+      const map = new Map<string,string[]>()
+      // Batch par 10 pour éviter de surcharger
+      for (let i = 0; i < codes.length; i += 10) {
+        const batch = codes.slice(i, i + 10)
+        const results = await Promise.all(batch.map(code =>
+          fetch('/api/inventaire/localisations?code=' + encodeURIComponent(code)).then(r => r.json()).catch(() => [])
+        ))
+        batch.forEach((code, idx) => {
+          const data = results[idx]
+          if (Array.isArray(data) && data.length > 0) {
+            const locs = data.flatMap((p:any) => [p.localisation1, p.localisation2, p.localisation3, p.localisation4].filter(Boolean))
+            const unique = Array.from(new Set(locs))
+            if (unique.length > 0) map.set(code, unique)
+          }
+        })
+      }
+      setLocsMap(map)
+    }
+    fetchLocs()
+  }, [negs])
 
   // Formulaire principal
   const champsDef = [
@@ -3843,6 +3870,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                           <div style={{fontWeight:800,fontSize:16,color:C.red}}>{n.code_piece}</div>
                           <div style={{fontSize:12,color:sub,marginTop:2}}>{n.description}</div>
                           <div style={{fontSize:12,color:sub,marginTop:2}}>{n.fournisseur} • Ligne {n.ligne}</div>
+                          {locsMap.get(n.code_piece) && <div style={{fontSize:11,color:C.blue,marginTop:4}}>📍 {locsMap.get(n.code_piece)!.join(', ')}</div>}
                           {altCodes.length>0&&<div style={{fontSize:11,color:C.green,marginTop:4}}>🔄 Alt: {altCodes.join(', ')}</div>}
                         </div>
                         <div style={{textAlign:'right',marginLeft:12}}>
@@ -3867,6 +3895,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                   <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Ligne</th>
                   <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code Pièce</th>
                   <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Description</th>
+                  <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Localisation</th>
                   <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Stock</th>
                   <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'right'}}>Coût Un.</th>
                   <th style={{padding:'10px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`2px solid ${bdr}`,textAlign:'right'}}>Valeur</th>
@@ -3875,11 +3904,12 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                 </tr></thead>
                 <tbody>
                   {filtered.length===0
-                    ? <tr><td colSpan={9} style={{textAlign:'center',padding:60,color:sub}}>✅ Aucune pièce négative</td></tr>
+                    ? <tr><td colSpan={10} style={{textAlign:'center',padding:60,color:sub}}>✅ Aucune pièce négative</td></tr>
                     : filtered.map((n:any)=>{
                         const val=Math.abs(n.stock_negatif*n.cout_unitaire)
                         const bgR=val>500?(dark?'#2b1113':'#fff8f8'):val>100?(dark?'#2b2411':'#fffcf5'):'transparent'
                         const dateStr=n.date_apparition?new Date(n.date_apparition).toLocaleDateString('fr-CA',{month:'short',day:'numeric'}):'—'
+                        const locs = locsMap.get(n.code_piece)
                         return (
                           <tr key={n.code_piece} style={{background:bgR,borderLeft:val>500?`4px solid ${C.red}`:val>100?`4px solid ${C.yellow}`:'none'}}
                             onMouseEnter={e=>e.currentTarget.style.background=hvr}
@@ -3894,6 +3924,12 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                                 <div style={{fontSize:10,color:C.green,marginTop:2}}>✅ Alt: {(alts.get(n.code_piece)||[]).join(', ')}</div>}
                             </td>
                             <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:sub}} title={n.description}>{n.description}</td>
+                            <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                              {locs && locs.length > 0
+                                ? <div style={{display:'flex',gap:3,flexWrap:'wrap',justifyContent:'center'}}>{locs.map((l,i) => <span key={i} style={{background:dark?'#1a233a':'#dbeafe',color:C.blue,padding:'2px 6px',borderRadius:4,fontSize:11,fontWeight:700}}>{l}</span>)}</div>
+                                : <span style={{color:sub,fontSize:11}}>—</span>
+                              }
+                            </td>
                             <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.red,fontWeight:900,fontSize:17}}>{n.stock_negatif}</td>
                             <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{n.cout_unitaire.toFixed(2)} $</td>
                             <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:C.red,fontWeight:700}}>− {val.toFixed(2)} $</td>
