@@ -1058,6 +1058,9 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
   const [rapportEmploye, setRapportEmploye] = useState('ALL')
   const [fournCmd, setFournCmd] = useState('')
   const [fournLoading, setFournLoading] = useState(false)
+  const [pieceExiste, setPieceExiste] = useState<boolean|null>(null)
+  const [numReference, setNumReference] = useState('')
+  const [descNouvelle, setDescNouvelle] = useState('')
 
   const demandes: any[] = fournituresData?.demandes || []
   const allItems: any[] = data?.liste_complete || []
@@ -1103,25 +1106,27 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
 
   async function soumettre(e: any) {
     e.preventDefault()
-    if (!sku.trim()) return
+    if (pieceExiste === null) return
+    if (pieceExiste && !sku.trim()) return
+    if (!pieceExiste && (!urlPiece.trim() || !numReference.trim() || !descNouvelle.trim())) return
     setLoading(true)
-    const item = chercherSku(sku.trim())
     await fetch('/api/fournitures', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
         employe,
-        sku: sku.trim(),
-        description: skuInfo?.desc || sku.trim(),
+        sku: pieceExiste ? sku.trim() : (numReference.trim() || null),
+        description: pieceExiste ? (skuInfo?.desc || sku.trim()) : descNouvelle.trim(),
         fournisseur: skuInfo?.fournisseur || '',
         categorie: statutSugg,
         quantite: qte,
         unite: 'unité',
-        note: note,
+        note: pieceExiste ? note : `Réf: ${numReference.trim()}${note ? ' — ' + note : ''}`,
         url: urlPiece.trim() || null
       })
     })
     setSku(''); setQte(1); setNote(''); setUrlPiece(''); setSkuInfo(null); setStatutSugg('Restock')
+    setPieceExiste(null); setNumReference(''); setDescNouvelle('')
     await recharger()
     setMsgOk(`✅ Suggestion envoyée dans Commandes du Jour!`)
     setTimeout(() => setMsgOk(''), 4000)
@@ -1210,86 +1215,143 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
         </form>
       </div>
 
-      {/* Formulaire suggestion SKU */}
+      {/* Formulaire suggestion pièce */}
       <div style={{background:card,borderRadius:14,border:`1px solid ${bdr}`,padding:'24px 28px',marginBottom:20}}>
         <form onSubmit={soumettre}>
-          {/* SKU */}
+          {/* Étape 1 : La pièce existe-t-elle ? */}
           <div style={{marginBottom:16}}>
-            <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Numéro de pièce (SKU) *</label>
-            <input value={sku} onChange={e=>onSkuChange(e.target.value)} placeholder="Ex: 83-6016, VR6320, 782-1131..." required
-              style={{...S,fontSize:15,fontWeight:sku?700:400,border:`2px solid ${skuInfo?C.green:skuErreur?C.red:bdr}`}}/>
+            <label style={{fontSize:13,fontWeight:800,display:'block',marginBottom:10}}>La pièce existe-t-elle dans le système ?</label>
+            <div style={{display:'flex',gap:10}}>
+              <button type="button" onClick={()=>{setPieceExiste(true);setSku('');setSkuInfo(null);setUrlPiece('');setNumReference('');setDescNouvelle('')}}
+                style={{flex:1,padding:'12px 0',borderRadius:10,fontSize:15,fontWeight:700,cursor:'pointer',
+                  background:pieceExiste===true?C.green:dark?'#222':'#f8f9fa',
+                  color:pieceExiste===true?'#fff':dark?'#ccc':'#555',
+                  border:`2px solid ${pieceExiste===true?C.green:bdr}`}}>
+                ✅ Oui
+              </button>
+              <button type="button" onClick={()=>{setPieceExiste(false);setSku('');setSkuInfo(null);setUrlPiece('');setNumReference('');setDescNouvelle('')}}
+                style={{flex:1,padding:'12px 0',borderRadius:10,fontSize:15,fontWeight:700,cursor:'pointer',
+                  background:pieceExiste===false?C.red:dark?'#222':'#f8f9fa',
+                  color:pieceExiste===false?'#fff':dark?'#ccc':'#555',
+                  border:`2px solid ${pieceExiste===false?C.red:bdr}`}}>
+                ❌ Non (nouvelle pièce)
+              </button>
+            </div>
           </div>
 
-          {/* Info pièce trouvée */}
-          {skuInfo && (
-            <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}33`,borderRadius:10,padding:'12px 16px',marginBottom:16}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:8}}>
-                <div>
-                  <div style={{fontWeight:700,fontSize:14,color:C.green,marginBottom:3}}>✅ Pièce trouvée</div>
-                  <div style={{fontWeight:600,fontSize:15}}>{skuInfo.desc}</div>
-                  <div style={{fontSize:12,color:sub,marginTop:3}}>
-                    <span style={{marginRight:12}}>🏢 {skuInfo.fournisseur}</span>
-                    <span style={{marginRight:12}}>📦 Stock actuel: <strong>{skuInfo.stock}</strong></span>
-                    <span style={{background:skuInfo.classeABC==='A'?C.green:skuInfo.classeABC==='B'?C.yellow:sub,color:'#fff',padding:'1px 6px',borderRadius:4,fontSize:11}}>{skuInfo.classeABC}</span>
+          {/* === PIÈCE EXISTANTE === */}
+          {pieceExiste === true && <>
+            {/* SKU */}
+            <div style={{marginBottom:16}}>
+              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Numéro de pièce (SKU) *</label>
+              <input value={sku} onChange={e=>onSkuChange(e.target.value)} placeholder="Ex: 83-6016, VR6320, 782-1131..." required
+                style={{...S,fontSize:15,fontWeight:sku?700:400,border:`2px solid ${skuInfo?C.green:skuErreur?C.red:bdr}`}}/>
+            </div>
+
+            {/* Info pièce trouvée */}
+            {skuInfo && (
+              <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}33`,borderRadius:10,padding:'12px 16px',marginBottom:16}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:8}}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:14,color:C.green,marginBottom:3}}>✅ Pièce trouvée</div>
+                    <div style={{fontWeight:600,fontSize:15}}>{skuInfo.desc}</div>
+                    <div style={{fontSize:12,color:sub,marginTop:3}}>
+                      <span style={{marginRight:12}}>🏢 {skuInfo.fournisseur}</span>
+                      <span style={{marginRight:12}}>📦 Stock actuel: <strong>{skuInfo.stock}</strong></span>
+                      <span style={{background:skuInfo.classeABC==='A'?C.green:skuInfo.classeABC==='B'?C.yellow:sub,color:'#fff',padding:'1px 6px',borderRadius:4,fontSize:11}}>{skuInfo.classeABC}</span>
+                    </div>
                   </div>
+                  {besoin2mois > 0 && (
+                    <div style={{background:dark?'#1a233a':'#dbeafe',border:`1px solid ${C.blue}33`,borderRadius:8,padding:'8px 14px',textAlign:'center'}}>
+                      <div style={{fontSize:11,color:C.blue,fontWeight:700,textTransform:'uppercase'}}>Besoin 2 mois</div>
+                      <div style={{fontSize:22,fontWeight:900,color:C.blue}}>{besoin2mois.toFixed(1)}</div>
+                      <div style={{fontSize:10,color:sub}}>basé sur historique</div>
+                    </div>
+                  )}
                 </div>
-                {besoin2mois > 0 && (
-                  <div style={{background:dark?'#1a233a':'#dbeafe',border:`1px solid ${C.blue}33`,borderRadius:8,padding:'8px 14px',textAlign:'center'}}>
-                    <div style={{fontSize:11,color:C.blue,fontWeight:700,textTransform:'uppercase'}}>Besoin 2 mois</div>
-                    <div style={{fontSize:22,fontWeight:900,color:C.blue}}>{besoin2mois.toFixed(1)}</div>
-                    <div style={{fontSize:10,color:sub}}>basé sur historique</div>
-                  </div>
-                )}
+              </div>
+            )}
+
+            {skuErreur && <div style={{color:C.red,fontSize:12,marginBottom:12}}>⚠️ {skuErreur}</div>}
+          </>}
+
+          {/* === NOUVELLE PIÈCE === */}
+          {pieceExiste === false && <>
+            <div style={{background:dark?'#2b2411':'#fef7e0',border:`1px solid ${C.yellow}`,borderRadius:10,padding:'12px 16px',marginBottom:16,fontSize:12,color:dark?'#e8c547':'#92400e'}}>
+              ⚠️ <strong>Seule la réception/expédition peut créer un nouveau fournisseur.</strong> Remplissez les informations ci-dessous et la réception s'en chargera.
+            </div>
+
+            {/* Description */}
+            <div style={{marginBottom:16}}>
+              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Description de la pièce *</label>
+              <input value={descNouvelle} onChange={e=>setDescNouvelle(e.target.value)} placeholder="Ex: Courroie alternateur Honda Civic 2020..."
+                required style={{...S,fontSize:14,fontWeight:600}}/>
+            </div>
+
+            {/* Numéro facture / BT */}
+            <div style={{marginBottom:16}}>
+              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>N° facture ou bon de travail *</label>
+              <input value={numReference} onChange={e=>setNumReference(e.target.value)} placeholder="Ex: FAC-12345, BT-6789..."
+                required style={{...S,fontSize:14,fontWeight:600,border:`2px solid ${numReference.trim()?C.green:bdr}`}}/>
+            </div>
+
+            {/* URL obligatoire */}
+            <div style={{marginBottom:16}}>
+              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red,display:'block',marginBottom:6}}>🔗 Lien vers la pièce (obligatoire) *</label>
+              <input value={urlPiece} onChange={e=>setUrlPiece(e.target.value)} placeholder="https://www.fournisseur.com/piece-xyz..."
+                type="url" inputMode="url" required
+                style={{...S,fontSize:14,color:urlPiece?C.blue:'inherit',border:`2px solid ${urlPiece.trim()?C.green:C.red}`}}/>
+            </div>
+          </>}
+
+          {/* === CHAMPS COMMUNS (visibles dans les 2 cas) === */}
+          {pieceExiste !== null && <>
+            {/* Statut */}
+            <div style={{marginBottom:16}}>
+              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Statut *</label>
+              <select value={statutSugg} onChange={e=>setStatutSugg(e.target.value)}
+                style={{width:'100%',padding:'10px 12px',border:`2px solid ${statutSugg==='Urgente'?C.red:C.blue}`,borderRadius:8,fontSize:15,fontWeight:700,
+                  background:statutSugg==='Urgente'?(dark?'#2a0d0d':'#fef2f2'):(dark?'#0d1a2a':'#eff6ff'),
+                  color:statutSugg==='Urgente'?C.red:C.blue,cursor:'pointer',outline:'none',boxSizing:'border-box' as const}}>
+                <option value="Restock">📦 Restock</option>
+                <option value="Urgente">🚨 Urgente</option>
+              </select>
+            </div>
+
+            {/* Quantité + Note */}
+            <div style={{display:'grid',gridTemplateColumns:'160px 1fr',gap:12,marginBottom:16}}>
+              <div>
+                <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>
+                  Quantité demandée
+                  {pieceExiste && besoin2mois > 0 && <span style={{color:C.blue,fontWeight:400,marginLeft:6,textTransform:'none'}}>({besoin2mois.toFixed(0)} suggérée)</span>}
+                </label>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <button type="button" onClick={()=>setQte(q=>Math.max(1,q-1))} style={{width:34,height:34,borderRadius:8,border:`1px solid ${bdr}`,background:'none',cursor:'pointer',fontSize:18,fontWeight:700,color:sub}}>−</button>
+                  <input type="number" value={qte} onChange={e=>setQte(Math.max(1,Number(e.target.value)))} min={1} style={{...S,textAlign:'center',width:60,fontWeight:700,fontSize:16}}/>
+                  <button type="button" onClick={()=>setQte(q=>q+1)} style={{width:34,height:34,borderRadius:8,border:`1px solid ${bdr}`,background:C.blue,cursor:'pointer',fontSize:18,fontWeight:700,color:'#fff'}}>+</button>
+                </div>
+              </div>
+              <div>
+                <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Note (optionnel)</label>
+                <input value={note} onChange={e=>setNote(e.target.value)} placeholder="Ex: Pour le client X..." style={S}/>
               </div>
             </div>
-          )}
 
-          {skuErreur && <div style={{color:C.red,fontSize:12,marginBottom:12}}>⚠️ {skuErreur}</div>}
-
-          {/* Statut */}
-          <div style={{marginBottom:16}}>
-            <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Statut *</label>
-            <select value={statutSugg} onChange={e=>setStatutSugg(e.target.value)}
-              style={{width:'100%',padding:'10px 12px',border:`2px solid ${statutSugg==='Urgente'?C.red:C.blue}`,borderRadius:8,fontSize:15,fontWeight:700,
-                background:statutSugg==='Urgente'?(dark?'#2a0d0d':'#fef2f2'):(dark?'#0d1a2a':'#eff6ff'),
-                color:statutSugg==='Urgente'?C.red:C.blue,cursor:'pointer',outline:'none',boxSizing:'border-box' as const}}>
-              <option value="Restock">📦 Restock</option>
-              <option value="Urgente">🚨 Urgente</option>
-            </select>
-          </div>
-
-          {/* Quantité + Note */}
-          <div style={{display:'grid',gridTemplateColumns:'160px 1fr',gap:12,marginBottom:16}}>
-            <div>
-              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>
-                Quantité demandée
-                {besoin2mois > 0 && <span style={{color:C.blue,fontWeight:400,marginLeft:6,textTransform:'none'}}>({besoin2mois.toFixed(0)} suggérée)</span>}
-              </label>
-              <div style={{display:'flex',alignItems:'center',gap:8}}>
-                <button type="button" onClick={()=>setQte(q=>Math.max(1,q-1))} style={{width:34,height:34,borderRadius:8,border:`1px solid ${bdr}`,background:'none',cursor:'pointer',fontSize:18,fontWeight:700,color:sub}}>−</button>
-                <input type="number" value={qte} onChange={e=>setQte(Math.max(1,Number(e.target.value)))} min={1} style={{...S,textAlign:'center',width:60,fontWeight:700,fontSize:16}}/>
-                <button type="button" onClick={()=>setQte(q=>q+1)} style={{width:34,height:34,borderRadius:8,border:`1px solid ${bdr}`,background:C.blue,cursor:'pointer',fontSize:18,fontWeight:700,color:'#fff'}}>+</button>
+            {/* URL (optionnel si pièce existante) */}
+            {pieceExiste && (
+              <div style={{marginBottom:16}}>
+                <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>🔗 Lien vers la pièce (optionnel)</label>
+                <input value={urlPiece} onChange={e=>setUrlPiece(e.target.value)} placeholder="https://www.fournisseur.com/piece-xyz..."
+                  type="url" inputMode="url"
+                  style={{...S,fontSize:14,color:urlPiece?C.blue:'inherit'}}/>
               </div>
-            </div>
-            <div>
-              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Note (optionnel)</label>
-              <input value={note} onChange={e=>setNote(e.target.value)} placeholder="Ex: Pour le client X..." style={S}/>
-            </div>
-          </div>
+            )}
 
-          {/* URL */}
-          <div style={{marginBottom:16}}>
-            <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>🔗 Lien vers la pièce (optionnel)</label>
-            <input value={urlPiece} onChange={e=>setUrlPiece(e.target.value)} placeholder="https://www.fournisseur.com/piece-xyz..."
-              type="url" inputMode="url"
-              style={{...S,fontSize:14,color:urlPiece?C.blue:'inherit'}}/>
-            {urlPiece.trim() && <div style={{fontSize:11,color:C.blue,marginTop:4}}>Ce lien sera visible dans Commandes du Jour</div>}
-          </div>
-
-          <button type="submit" disabled={loading||!sku.trim()}
-            style={{width:'100%',background:(!sku.trim())?sub:C.blue,color:'#fff',border:'none',borderRadius:10,padding:'13px 0',fontSize:15,fontWeight:700,cursor:sku.trim()?'pointer':'not-allowed',opacity:sku.trim()?1:0.6}}>
-            {loading ? 'Envoi...' : '💡 Envoyer la suggestion → Commandes du Jour'}
-          </button>
+            <button type="submit" disabled={loading || (pieceExiste && !sku.trim()) || (!pieceExiste && (!urlPiece.trim() || !numReference.trim() || !descNouvelle.trim()))}
+              style={{width:'100%',background:C.blue,color:'#fff',border:'none',borderRadius:10,padding:'13px 0',fontSize:15,fontWeight:700,cursor:'pointer',opacity: (pieceExiste && !sku.trim()) || (!pieceExiste && (!urlPiece.trim() || !numReference.trim() || !descNouvelle.trim())) ? 0.5 : 1}}>
+              {loading ? 'Envoi...' : '💡 Envoyer la suggestion → Commandes du Jour'}
+            </button>
+          </>}
         </form>
       </div>
 
