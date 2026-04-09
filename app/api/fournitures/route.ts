@@ -6,7 +6,7 @@ export async function GET() {
   try {
     const [catRes, demRes] = await Promise.all([
       supabaseAdmin.from('fournitures_catalogue').select('*').eq('actif', true).order('categorie').order('description'),
-      supabaseAdmin.from('demandes_fournitures').select('*').eq('statut', 'en_attente').order('date_demande', { ascending: false })
+      supabaseAdmin.from('demandes_fournitures').select('*').order('date_demande', { ascending: false }).limit(500)
     ])
     return NextResponse.json({
       catalogue: catRes.data || [],

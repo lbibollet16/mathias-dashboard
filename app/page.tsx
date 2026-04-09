@@ -993,13 +993,12 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
               <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Description</th>
               <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Fournisseur</th>
               <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Qté</th>
-              <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Type</th>
               <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Lien</th>
               <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Action</th>
             </tr></thead>
             <tbody>
               {(fournituresData?.demandes||[]).filter((d:any)=>d.statut==='en_attente').sort((a:any,b:any) => {
-                const order = (c:string) => c==='Commande Fournisseur'?0:c==='Urgente'?1:2
+                const order = (c:string) => c==='Commande Fournisseur'?0:1
                 return order(a.categorie) - order(b.categorie)
               }).map((d:any) => {
                 const isCmd = d.categorie==='Commande Fournisseur'
@@ -1013,11 +1012,6 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
                   </td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:isCmd?C.red:sub,fontSize:12,fontWeight:isCmd?700:400}}>{d.fournisseur||'—'}</td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{isCmd?'—':d.quantite}</td>
-                  <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                    <span style={{background:d.categorie==='Urgente'?C.red+'22':isCmd?C.red:C.blue+'22',color:d.categorie==='Urgente'?C.red:isCmd?'#fff':C.blue,padding:'3px 8px',borderRadius:20,fontSize:11,fontWeight:700}}>
-                      {d.categorie==='Urgente'?'🚨 Urgente':isCmd?'🚩 PASSER COMMANDE':'📦 Restock'}
-                    </span>
-                  </td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                     {(()=>{const u=(d.note||'').split('|||')[1];return u?<a href={u} target="_blank" rel="noreferrer" style={{background:C.blue,color:'#fff',padding:'5px 10px',borderRadius:6,fontSize:11,fontWeight:700,textDecoration:'none',display:'inline-block'}}>🔗 Ouvrir</a>:<span style={{color:sub,fontSize:11}}>—</span>})()}
                   </td>
@@ -1197,7 +1191,7 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
 
       {/* Commande rapide fournisseur */}
       <div style={{background:dark?'#1a1a2e':'#fff8f0',borderRadius:14,border:`2px solid ${C.yellow}`,padding:'20px 24px',marginBottom:20}}>
-        <div style={{fontSize:15,fontWeight:800,marginBottom:12}}>🚚 Passer une commande fournisseur</div>
+        <div style={{fontSize:15,fontWeight:800,marginBottom:12}}>🚨 Demande urgente — passer commande de ce fournisseur</div>
         <form onSubmit={soumettreCommFourn} style={{display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap'}}>
           <div style={{flex:1,minWidth:200}}>
             <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Fournisseur *</label>
@@ -1306,20 +1300,6 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
 
           {/* === CHAMPS COMMUNS (visibles dans les 2 cas) === */}
           {pieceExiste !== null && <>
-            {/* Statut (seulement si pièce existante) */}
-            {pieceExiste && (
-            <div style={{marginBottom:16}}>
-              <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Statut *</label>
-              <select value={statutSugg} onChange={e=>setStatutSugg(e.target.value)}
-                style={{width:'100%',padding:'10px 12px',border:`2px solid ${statutSugg==='Urgente'?C.red:C.blue}`,borderRadius:8,fontSize:15,fontWeight:700,
-                  background:statutSugg==='Urgente'?(dark?'#2a0d0d':'#fef2f2'):(dark?'#0d1a2a':'#eff6ff'),
-                  color:statutSugg==='Urgente'?C.red:C.blue,cursor:'pointer',outline:'none',boxSizing:'border-box' as const}}>
-                <option value="Restock">📦 Restock</option>
-                <option value="Urgente">🚨 Urgente</option>
-              </select>
-            </div>
-            )}
-
             {/* Quantité + Note */}
             <div style={{display:'grid',gridTemplateColumns:'160px 1fr',gap:12,marginBottom:16}}>
               <div>
@@ -1383,7 +1363,6 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Description</th>
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Fournisseur</th>
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Qté</th>
-                  <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Type</th>
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Lien</th>
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Statut</th>
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Date</th>
@@ -1391,23 +1370,18 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
                 </tr></thead>
                 <tbody>
                   {demandesFiltrees.map((d:any) => (
-                    <tr key={d.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                    <tr key={d.id} style={{opacity:d.statut==='annulée'?0.5:1}} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:600}}>{d.employe}</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:12}}>{d.sku||'—'}</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={d.description}>{d.description}</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{d.fournisseur||'—'}</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{d.quantite}</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                        <span style={{background:d.categorie==='Urgente'?C.red+'22':C.blue+'22',color:d.categorie==='Urgente'?C.red:C.blue,padding:'3px 8px',borderRadius:20,fontSize:11,fontWeight:700}}>
-                          {d.categorie==='Urgente'?'🚨 Urgente':'📦 Restock'}
-                        </span>
-                      </td>
-                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                         {(()=>{const u=(d.note||'').split('|||')[1];return u?<a href={u} target="_blank" rel="noreferrer" style={{color:C.blue,fontSize:12,fontWeight:700,textDecoration:'none'}}>🔗 Voir</a>:<span style={{color:sub,fontSize:11}}>—</span>})()}
                       </td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                         <span style={{background:d.statut==='en_attente'?C.yellow+'22':d.statut==='annulée'?C.red+'22':C.green+'22',color:d.statut==='en_attente'?C.yellow:d.statut==='annulée'?C.red:C.green,padding:'3px 8px',borderRadius:20,fontSize:11,fontWeight:700}}>
-                          {d.statut==='en_attente'?'⏳ En attente':d.statut==='annulée'?'✕ Annulée':'✅ Traitée'}
+                          {d.statut==='en_attente'?'⏳ En attente':d.statut==='annulée'?'✕ Annulée':'✅ Commandé'}
                         </span>
                       </td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{new Date(d.date_demande).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
