@@ -1886,7 +1886,14 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       const stocks = await rStock.json()
       for (const s of stocks) map.set(s.code_piece, { stock: s.stock, reserve: s.reserve })
     }
-    setStockMap(map); setPiecesLoc(data); setLocActive(loc)
+    // Filtrer les pièces à stock 0 (garder seulement celles avec du stock)
+    const dataFiltered = data.filter((p:any) => {
+      if (p.code_piece.startsWith('LOC_')) return false
+      const si = map.get(p.code_piece)
+      if (!si) return true // pas de données stock = garder par défaut
+      return (si.stock + si.reserve) !== 0
+    })
+    setStockMap(map); setPiecesLoc(dataFiltered); setLocActive(loc)
 
     // Créer/reprendre une session pour cette localisation
     try {
