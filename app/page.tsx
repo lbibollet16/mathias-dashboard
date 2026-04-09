@@ -993,6 +993,7 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
               <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Description</th>
               <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Fournisseur</th>
               <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Qté</th>
+              <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Type</th>
               <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Lien</th>
               <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Action</th>
             </tr></thead>
@@ -1004,6 +1005,11 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={d.description}>{d.description}</td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{d.fournisseur||'—'}</td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{d.quantite}</td>
+                  <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                    <span style={{background:d.categorie==='Urgente'?C.red+'22':C.blue+'22',color:d.categorie==='Urgente'?C.red:C.blue,padding:'3px 8px',borderRadius:20,fontSize:11,fontWeight:700}}>
+                      {d.categorie==='Urgente'?'🚨 Urgente':'📦 Restock'}
+                    </span>
+                  </td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                     {(()=>{const u=(d.note||'').split('|||')[1];return u?<a href={u} target="_blank" rel="noreferrer" style={{background:C.blue,color:'#fff',padding:'5px 10px',borderRadius:6,fontSize:11,fontWeight:700,textDecoration:'none',display:'inline-block'}}>🔗 Ouvrir</a>:<span style={{color:sub,fontSize:11}}>—</span>})()}
                   </td>
@@ -1035,6 +1041,7 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
   const [qte, setQte] = useState(1)
   const [note, setNote] = useState('')
   const [urlPiece, setUrlPiece] = useState('')
+  const [statutSugg, setStatutSugg] = useState('Restock')
   const [skuInfo, setSkuInfo] = useState<any>(null)
   const [skuErreur, setSkuErreur] = useState('')
   const [loading, setLoading] = useState(false)
@@ -1096,14 +1103,14 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
         sku: sku.trim(),
         description: skuInfo?.desc || sku.trim(),
         fournisseur: skuInfo?.fournisseur || '',
-        categorie: 'Suggestion',
+        categorie: statutSugg,
         quantite: qte,
         unite: 'unité',
         note: note,
         url: urlPiece.trim() || null
       })
     })
-    setSku(''); setQte(1); setNote(''); setUrlPiece(''); setSkuInfo(null)
+    setSku(''); setQte(1); setNote(''); setUrlPiece(''); setSkuInfo(null); setStatutSugg('Restock')
     await recharger()
     setMsgOk(`✅ Suggestion envoyée dans Commandes du Jour!`)
     setTimeout(() => setMsgOk(''), 4000)
@@ -1179,6 +1186,18 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
 
           {skuErreur && <div style={{color:C.red,fontSize:12,marginBottom:12}}>⚠️ {skuErreur}</div>}
 
+          {/* Statut */}
+          <div style={{marginBottom:16}}>
+            <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Statut *</label>
+            <select value={statutSugg} onChange={e=>setStatutSugg(e.target.value)}
+              style={{width:'100%',padding:'10px 12px',border:`2px solid ${statutSugg==='Urgente'?C.red:C.blue}`,borderRadius:8,fontSize:15,fontWeight:700,
+                background:statutSugg==='Urgente'?(dark?'#2a0d0d':'#fef2f2'):(dark?'#0d1a2a':'#eff6ff'),
+                color:statutSugg==='Urgente'?C.red:C.blue,cursor:'pointer',outline:'none',boxSizing:'border-box' as const}}>
+              <option value="Restock">📦 Restock</option>
+              <option value="Urgente">🚨 Urgente</option>
+            </select>
+          </div>
+
           {/* Quantité + Note */}
           <div style={{display:'grid',gridTemplateColumns:'160px 1fr',gap:12,marginBottom:16}}>
             <div>
@@ -1194,7 +1213,7 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
             </div>
             <div>
               <label style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,display:'block',marginBottom:6}}>Note (optionnel)</label>
-              <input value={note} onChange={e=>setNote(e.target.value)} placeholder="Ex: Urgent, pour le client X..." style={S}/>
+              <input value={note} onChange={e=>setNote(e.target.value)} placeholder="Ex: Pour le client X..." style={S}/>
             </div>
           </div>
 
@@ -1240,6 +1259,7 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Description</th>
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Fournisseur</th>
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Qté</th>
+                  <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Type</th>
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Lien</th>
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'center'}}>Statut</th>
                   <th style={{padding:'9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:'left'}}>Date</th>
@@ -1253,6 +1273,11 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={d.description}>{d.description}</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:12}}>{d.fournisseur||'—'}</td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{d.quantite}</td>
+                      <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                        <span style={{background:d.categorie==='Urgente'?C.red+'22':C.blue+'22',color:d.categorie==='Urgente'?C.red:C.blue,padding:'3px 8px',borderRadius:20,fontSize:11,fontWeight:700}}>
+                          {d.categorie==='Urgente'?'🚨 Urgente':'📦 Restock'}
+                        </span>
+                      </td>
                       <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                         {(()=>{const u=(d.note||'').split('|||')[1];return u?<a href={u} target="_blank" rel="noreferrer" style={{color:C.blue,fontSize:12,fontWeight:700,textDecoration:'none'}}>🔗 Voir</a>:<span style={{color:sub,fontSize:11}}>—</span>})()}
                       </td>

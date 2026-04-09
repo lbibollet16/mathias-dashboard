@@ -40,10 +40,10 @@ export async function GET(req: NextRequest) {
     if (!loc) return NextResponse.json([])
 
     const [r1, r2, r3, r4] = await Promise.all([
-      supabaseAdmin.from('inventaire_localisations').select('*').ilike('localisation1', loc).limit(500),
-      supabaseAdmin.from('inventaire_localisations').select('*').ilike('localisation2', loc).limit(500),
-      supabaseAdmin.from('inventaire_localisations').select('*').ilike('localisation3', loc).limit(500),
-      supabaseAdmin.from('inventaire_localisations').select('*').ilike('localisation4', loc).limit(500),
+      supabaseAdmin.from('inventaire_localisations').select('*').ilike('localisation1', loc).limit(5000),
+      supabaseAdmin.from('inventaire_localisations').select('*').ilike('localisation2', loc).limit(5000),
+      supabaseAdmin.from('inventaire_localisations').select('*').ilike('localisation3', loc).limit(5000),
+      supabaseAdmin.from('inventaire_localisations').select('*').ilike('localisation4', loc).limit(5000),
     ])
 
     const seen = new Set<number>()
