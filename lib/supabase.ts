@@ -49,6 +49,73 @@ export interface ItemInventaire {
   alerteReappro: boolean
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// Holt-Winters (triple lissage exponentiel additif)
+// Gère niveau + tendance + saisonnalité
+// Conçu pour séries mensuelles avec saisonnalité annuelle (m=12)
+// ═══════════════════════════════════════════════════════════════════
+function holtWinters(
+  series: number[],
+  seasonLength: number = 12,
+  horizon: number = 12,
+  alpha: number = 0.3,
+  beta:  number = 0.1,
+  gamma: number = 0.3
+): { forecast: number[]; level: number; trend: number; seasonal: number[] } | null {
+  const n = series.length
+  // Besoin d'au moins 2 saisons complètes pour initialiser
+  if (n < 2 * seasonLength) return null
+
+  // Initialisation du niveau: moyenne de la 1ère saison
+  let L = series.slice(0, seasonLength).reduce((s, v) => s + v, 0) / seasonLength
+  // Initialisation de la tendance: différence moyenne entre saison 2 et 1
+  let T = 0
+  for (let i = 0; i < seasonLength; i++) {
+    T += (series[i + seasonLength] - series[i]) / seasonLength
+  }
+  T /= seasonLength
+  // Initialisation saisonnière: série - niveau sur la 1ère saison
+  const S: number[] = new Array(seasonLength)
+  for (let i = 0; i < seasonLength; i++) S[i] = series[i] - L
+
+  // Mise à jour itérative sur toute la série historique
+  for (let t = 0; t < n; t++) {
+    const sIdx  = t % seasonLength
+    const prevL = L
+    const prevS = S[sIdx]
+    L = alpha * (series[t] - prevS) + (1 - alpha) * (prevL + T)
+    T = beta  * (L - prevL) + (1 - beta) * T
+    S[sIdx] = gamma * (series[t] - L) + (1 - gamma) * prevS
+  }
+
+  // Prévision h pas en avant
+  const forecast: number[] = []
+  for (let h = 1; h <= horizon; h++) {
+    const sIdx = (n + h - 1) % seasonLength
+    const f = L + h * T + S[sIdx]
+    forecast.push(Math.max(0, f))
+  }
+  return { forecast, level: L, trend: T, seasonal: S }
+}
+
+// Convertit un historique {YYYY-MM: qte} en série mensuelle continue
+// (remplit les mois manquants avec 0)
+function historiqueEnSerie(historique: Record<string, number>): { serie: number[]; premierMois: string } | null {
+  const mois = Object.keys(historique).sort()
+  if (mois.length === 0) return null
+  const [aDeb, mDeb] = mois[0].split('-').map(Number)
+  const [aFin, mFin] = mois[mois.length - 1].split('-').map(Number)
+  const serie: number[] = []
+  let a = aDeb, m = mDeb
+  while (a < aFin || (a === aFin && m <= mFin)) {
+    const key = `${a}-${String(m).padStart(2, '0')}`
+    serie.push(historique[key] || 0)
+    m++
+    if (m > 12) { m = 1; a++ }
+  }
+  return { serie, premierMois: mois[0] }
+}
+
 export function calculerInventaire(
   ventesData: any[],
   tractionCSV: string,
@@ -226,12 +293,39 @@ export function calculerInventaire(
         anneesVentesParMoisPiece[mNum].add(annee)
       }
     }
-    const ventesMoyParMois = ventesTotalesParMois.map((total, i) => {
+    let ventesMoyParMois = ventesTotalesParMois.map((total, i) => {
       const nbAnneesAvecVentes = anneesVentesParMoisPiece[i].size
       if (nbAnneesAvecVentes === 0) return 0
-      // Diviser par le nb d'années où ce mois a des ventes (vraie moyenne)
       return total / nbAnneesAvecVentes
     })
+
+    // ── Prévision Holt-Winters (si assez de données) ────────────────
+    // Nécessite 24+ mois continus pour capturer 2 cycles saisonniers
+    let methodePrevision: 'holt-winters' | 'saisonnier' | 'ema' = 'saisonnier'
+    const serieInfo = historiqueEnSerie(historique)
+    if (serieInfo && serieInfo.serie.length >= 24) {
+      const hw = holtWinters(serieInfo.serie, 12, 12)
+      if (hw && hw.forecast.every(v => isFinite(v))) {
+        // Le dernier point de la série correspond au dernier mois de données
+        // La prévision h=1 est pour le mois SUIVANT le dernier mois
+        const [aFin, mFin] = serieInfo.serie.length > 0
+          ? (() => {
+              const mois = Object.keys(historique).sort()
+              return mois[mois.length - 1].split('-').map(Number)
+            })()
+          : [2026, 1]
+        // Mois de la 1ère prévision (calendrier 0-11)
+        const moisPrevDeb = mFin % 12
+        // Construire le tableau ventesMoyParMois aligné sur les mois calendaires
+        const hwParMoisCal = new Array(12).fill(0)
+        for (let i = 0; i < 12; i++) {
+          const moisCal = (moisPrevDeb + i) % 12
+          hwParMoisCal[moisCal] = hw.forecast[i]
+        }
+        ventesMoyParMois = hwParMoisCal
+        methodePrevision = 'holt-winters'
+      }
+    }
 
     // ── XYZ : coefficient de variation sur MOIS ACTIFS uniquement ────
     // On ignore les mois à 0 (hors-saison) pour ne pas gonfler σ
