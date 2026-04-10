@@ -222,19 +222,26 @@ export default function Dashboard() {
   function getBesoin(it: Item) {
     if (cov===0) return it.moyMois
     // Somme des vraies ventes moyennes historiques pour chaque mois futur
+    // Si un mois est à 0 dans l'historique, c'est une vraie absence de demande (hors-saison)
+    // On NE fallback PAS sur l'EMA qui gonflerait artificiellement
     let b=0, m=mNow
     for (let i=0;i<cov;i++) {
-      const vMois = it.ventesMoyParMois?.[m] ?? 0
-      // Si pas de données pour ce mois, utilise EMA comme fallback
-      b += vMois > 0 ? vMois : it.moyMois
+      b += it.ventesMoyParMois?.[m] ?? 0
       m=(m+1)%12
     }
+    // Si aucune donnée saisonnière (tableau vide ou tout à 0), utiliser EMA × cov
+    if (b === 0 && it.moyMois > 0) b = it.moyMois * cov
     return b
   }
   function getQte(it: Item) {
     if (cov===0) return 0
-    const q = Math.ceil(getBesoin(it)+(it.stockSecurite||0)-Math.max(0,it.stock))
-    return it.saison==='Sur Commande'?0:Math.max(0,q)
+    if (it.saison==='Sur Commande') return 0
+    const besoin = getBesoin(it)
+    const stockDispo = Math.max(0,it.stock)
+    // Protection surstockage : si on a déjà ≥ 2× le besoin prévu, ne pas commander
+    if (besoin > 0 && stockDispo >= besoin * 2) return 0
+    const q = Math.ceil(besoin + (it.stockSecurite||0) - stockDispo)
+    return Math.max(0,q)
   }
 
   const filtered = items.filter(it => {

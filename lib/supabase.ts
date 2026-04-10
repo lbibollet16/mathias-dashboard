@@ -227,18 +227,19 @@ export function calculerInventaire(
       }
     }
     const ventesMoyParMois = ventesTotalesParMois.map((total, i) => {
-      // Si vendu dans 1 seule année pour ce mois = commande ponctuelle → 0
-      if (anneesVentesParMoisPiece[i].size < 2) return 0
-      return total / nbAnneesParMois[i + 1]
+      const nbAnneesAvecVentes = anneesVentesParMoisPiece[i].size
+      if (nbAnneesAvecVentes === 0) return 0
+      // Diviser par le nb d'années où ce mois a des ventes (vraie moyenne)
+      return total / nbAnneesAvecVentes
     })
 
-    // ── XYZ : coefficient de variation sur ventes mensuelles ────────
-    // CV = écart-type / moyenne sur tous les mois de données
-    const ventesListe = moisTries.map(m => historique[m] || 0)
-    const n    = ventesListe.length
-    const mean = ventesListe.reduce((s, v) => s + v, 0) / Math.max(1, n)
+    // ── XYZ : coefficient de variation sur MOIS ACTIFS uniquement ────
+    // On ignore les mois à 0 (hors-saison) pour ne pas gonfler σ
+    const ventesActives = moisAvecVentes.map(m => historique[m] || 0)
+    const n    = ventesActives.length
+    const mean = ventesActives.reduce((s, v) => s + v, 0) / Math.max(1, n)
     const variance = n > 1
-      ? ventesListe.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / (n - 1)  // variance corrigée
+      ? ventesActives.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / (n - 1)
       : 0
     const ecartType = Math.sqrt(variance)
     const cv = mean > 0 ? ecartType / mean : 0
