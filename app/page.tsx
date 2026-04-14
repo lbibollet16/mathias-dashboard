@@ -4872,7 +4872,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
 // ── Amazon Tab (Phase 1) ─────────────────────────────────────────────────────
 function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
-  const [vue, setVue] = useState<'import'|'mapping'>('import')
+  const [vue, setVue] = useState<'import'|'settlements'|'mapping'>('import')
   const [data, setData] = useState<any>({ counts: {}, settlements: [] })
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -4881,21 +4881,111 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [unresolved, setUnresolved] = useState<any[]>([])
   const [mappings, setMappings] = useState<any[]>([])
   const [mappingInput, setMappingInput] = useState<Record<string,string>>({})
+  // ─ State Phase 2 : settlements ─
+  const [settlementsList, setSettlementsList] = useState<any[]>([])
+  const [filtLautopak, setFiltLautopak] = useState<'tous'|'pending'|'facture'>('tous')
+  const [searchSettlement, setSearchSettlement] = useState('')
+  const [expandedSettlement, setExpandedSettlement] = useState<string|null>(null)
+  const [detailCache, setDetailCache] = useState<Record<string, any>>({})
+  const [loadingDetail, setLoadingDetail] = useState<string|null>(null)
+  const [lautopakInput, setLautopakInput] = useState<Record<string, { ref: string; date: string; notes: string }>>({})
   const fileRef = useRef<HTMLInputElement>(null)
 
   async function charger() {
     setLoading(true)
     try {
-      const [d, u, m] = await Promise.all([
+      const [d, u, m, s] = await Promise.all([
         fetch('/api/amazon/data').then(r=>r.json()),
         fetch('/api/amazon/sku-mapping?mode=unresolved').then(r=>r.json()),
         fetch('/api/amazon/sku-mapping?mode=mappings').then(r=>r.json()),
+        fetch('/api/amazon/settlements').then(r=>r.json()),
       ])
       if (d && !d.erreur) setData(d)
       if (Array.isArray(u)) setUnresolved(u)
       if (Array.isArray(m)) setMappings(m)
+      if (Array.isArray(s)) setSettlementsList(s)
     } catch {}
     setLoading(false)
+  }
+
+  async function chargerDetail(settlement_id: string) {
+    if (detailCache[settlement_id]) return detailCache[settlement_id]
+    setLoadingDetail(settlement_id)
+    try {
+      const r = await fetch(`/api/amazon/settlements?id=${encodeURIComponent(settlement_id)}`)
+      const j = await r.json()
+      if (!j.erreur) {
+        setDetailCache(prev => ({...prev, [settlement_id]: j}))
+        // Pré-remplir le formulaire LAUTOPAK si existant
+        const s = j.settlement
+        if (s) {
+          setLautopakInput(prev => ({...prev, [settlement_id]: {
+            ref: s.lautopak_invoice_ref || '',
+            date: s.lautopak_invoice_date ? String(s.lautopak_invoice_date).split('T')[0] : '',
+            notes: s.lautopak_notes || '',
+          }}))
+        }
+        return j
+      }
+    } catch {}
+    setLoadingDetail(null)
+    return null
+  }
+
+  async function toggleSettlement(settlement_id: string) {
+    if (expandedSettlement === settlement_id) {
+      setExpandedSettlement(null)
+    } else {
+      setExpandedSettlement(settlement_id)
+      await chargerDetail(settlement_id)
+      setLoadingDetail(null)
+    }
+  }
+
+  async function marquerFacture(settlement_id: string) {
+    const input = lautopakInput[settlement_id] || { ref: '', date: '', notes: '' }
+    if (!input.ref.trim()) { alert('N° de facture LAUTOPAK requis'); return }
+    try {
+      const r = await fetch('/api/amazon/settlements', {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          settlement_id,
+          lautopak_status: 'facture',
+          lautopak_invoice_ref: input.ref.trim(),
+          lautopak_invoice_date: input.date || null,
+          lautopak_notes: input.notes || null,
+        })
+      })
+      const j = await r.json()
+      if (j.success) {
+        setDetailCache(prev => ({...prev, [settlement_id]: undefined as any}))
+        await charger()
+        await chargerDetail(settlement_id)
+      } else {
+        alert(j.erreur || 'Erreur')
+      }
+    } catch (e:any) { alert(e.message) }
+  }
+
+  async function annulerFacture(settlement_id: string) {
+    if (!confirm('Annuler la facturation LAUTOPAK de ce settlement ?')) return
+    try {
+      await fetch('/api/amazon/settlements', {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          settlement_id,
+          lautopak_status: 'pending',
+          lautopak_invoice_ref: null,
+          lautopak_invoice_date: null,
+          lautopak_notes: null,
+        })
+      })
+      setDetailCache(prev => ({...prev, [settlement_id]: undefined as any}))
+      await charger()
+      await chargerDetail(settlement_id)
+    } catch (e:any) { alert(e.message) }
   }
 
   async function autoResolve(silencieux: boolean = false) {
@@ -5048,6 +5138,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='import'?C.blue:bdr}`,background:vue==='import'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='import'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
           📥 Import
         </button>
+        <button onClick={()=>setVue('settlements')}
+          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='settlements'?C.green:bdr}`,background:vue==='settlements'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:vue==='settlements'?C.green:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+          💰 Settlements ({settlementsList.length})
+        </button>
         <button onClick={()=>setVue('mapping')}
           style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='mapping'?C.red:bdr}`,background:vue==='mapping'?(dark?'#2b1113':'#fce8e6'):'transparent',color:vue==='mapping'?C.red:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
           🗺 SKU non mappés ({unresolved.length})
@@ -5140,6 +5234,241 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           </div>
         </div>
       )}
+
+      {vue === 'settlements' && (() => {
+        const fmt$ = (n: number) => `${n>=0?'':'−'}${Math.abs(n).toFixed(2)}$`
+        const filtered = settlementsList.filter((s:any) => {
+          if (filtLautopak === 'pending' && s.lautopak_status !== 'pending') return false
+          if (filtLautopak === 'facture' && s.lautopak_status !== 'facture') return false
+          if (searchSettlement) {
+            const q = searchSettlement.toLowerCase()
+            if (!String(s.settlement_id||'').toLowerCase().includes(q) &&
+                !String(s.lautopak_invoice_ref||'').toLowerCase().includes(q)) return false
+          }
+          return true
+        })
+        const nbPending = settlementsList.filter((s:any)=>s.lautopak_status==='pending').length
+        const nbFacture = settlementsList.filter((s:any)=>s.lautopak_status==='facture').length
+        const sommePending = settlementsList.filter((s:any)=>s.lautopak_status==='pending').reduce((a:number,s:any)=>a+Number(s.computed_net||s.total_amount||0),0)
+
+        return (
+        <div>
+          {/* Stats en haut */}
+          <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:10,display:'flex',gap:18,flexWrap:'wrap',alignItems:'center',fontSize:12}}>
+            <div><span style={{color:sub}}>Total settlements : </span><strong style={{fontSize:15}}>{settlementsList.length}</strong></div>
+            <div style={{color:sub}}>•</div>
+            <div><span style={{color:C.yellow}}>⏳ En attente : <strong>{nbPending}</strong></span></div>
+            <div><span style={{color:C.green}}>✓ Facturés : <strong>{nbFacture}</strong></span></div>
+            <div style={{color:sub}}>•</div>
+            <div><span style={{color:sub}}>Net en attente : </span><strong style={{color:C.red}}>{fmt$(sommePending)}</strong></div>
+          </div>
+
+          {/* Filtres */}
+          <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:10,display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+            <input value={searchSettlement} onChange={e=>setSearchSettlement(e.target.value)} placeholder="🔍 N° settlement ou facture LAUTOPAK..."
+              style={{...S,maxWidth:260,fontSize:12,padding:'7px 10px'}}/>
+            <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+              {[
+                {id:'tous', label:`Tous (${settlementsList.length})`, color:sub},
+                {id:'pending', label:`⏳ En attente (${nbPending})`, color:C.yellow},
+                {id:'facture', label:`✓ Facturés (${nbFacture})`, color:C.green},
+              ].map(f => (
+                <button key={f.id} onClick={()=>setFiltLautopak(f.id as any)}
+                  style={{padding:'6px 11px',borderRadius:14,border:`1px solid ${filtLautopak===f.id?f.color:bdr}`,background:filtLautopak===f.id?f.color+'22':'transparent',color:filtLautopak===f.id?f.color:sub,fontWeight:700,cursor:'pointer',fontSize:11}}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Liste compacte */}
+          <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+            {filtered.length === 0
+              ? <div style={{textAlign:'center',padding:40,color:sub,fontSize:13}}>Aucun settlement</div>
+              : <>
+                  {filtered.map((s:any) => {
+                    const isExp = expandedSettlement === s.settlement_id
+                    const net = Number(s.computed_net || s.total_amount || 0)
+                    const fbaN = Number(s.computed_fba_net || 0)
+                    const fbmN = Number(s.computed_fbm_net || 0)
+                    const detail = detailCache[s.settlement_id]
+                    const input = lautopakInput[s.settlement_id] || { ref:'', date:'', notes:'' }
+                    return (
+                      <div key={s.settlement_id} style={{borderBottom:`1px solid ${bdr}`}}>
+                        {/* Ligne compacte */}
+                        <div onClick={()=>toggleSettlement(s.settlement_id)}
+                          onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr}
+                          onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}
+                          style={{display:'flex',gap:12,padding:'12px 14px',alignItems:'center',cursor:'pointer',flexWrap:'wrap'}}>
+                          <span style={{color:sub,fontFamily:'sans-serif',width:12}}>{isExp?'▼':'▶'}</span>
+                          <div style={{flex:'2 1 200px',minWidth:180}}>
+                            <div style={{fontWeight:800,fontSize:13,fontFamily:'monospace'}}>{s.settlement_id}</div>
+                            <div style={{fontSize:11,color:sub,marginTop:2}}>
+                              {s.settlement_start ? new Date(s.settlement_start).toLocaleDateString('fr-CA',{month:'short',day:'numeric'}) : '—'}
+                              {' → '}
+                              {s.settlement_end ? new Date(s.settlement_end).toLocaleDateString('fr-CA',{month:'short',day:'numeric'}) : '—'}
+                              {s.deposit_date && <span> • déposé {new Date(s.deposit_date).toLocaleDateString('fr-CA',{month:'short',day:'numeric'})}</span>}
+                            </div>
+                          </div>
+                          <div style={{textAlign:'right',minWidth:130}}>
+                            <div style={{fontSize:20,fontWeight:900,color:net>=0?C.green:C.red}}>{fmt$(net)} <span style={{fontSize:11,color:sub}}>{s.currency||''}</span></div>
+                            <div style={{fontSize:10,color:sub,marginTop:2}}>
+                              FBA : <strong style={{color:dark?'#bbb':'#555'}}>{fmt$(fbaN)}</strong>
+                              {' • FBM : '}<strong style={{color:dark?'#bbb':'#555'}}>{fmt$(fbmN)}</strong>
+                            </div>
+                          </div>
+                          <div style={{minWidth:120,textAlign:'right'}}>
+                            <div style={{fontSize:11,color:sub}}>{s.nb_orders||0} commandes</div>
+                            <div style={{fontSize:10,color:sub}}>{s.nb_transactions||0} lignes</div>
+                          </div>
+                          <div style={{minWidth:120,textAlign:'right'}}>
+                            {s.lautopak_status === 'facture'
+                              ? <div>
+                                  <span style={{background:C.green+'22',color:C.green,padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:700}}>✓ Facturé</span>
+                                  {s.lautopak_invoice_ref && <div style={{fontSize:10,color:sub,marginTop:3,fontFamily:'monospace'}}>#{s.lautopak_invoice_ref}</div>}
+                                </div>
+                              : <span style={{background:C.yellow+'22',color:C.yellow,padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:700}}>⏳ En attente</span>
+                            }
+                          </div>
+                        </div>
+
+                        {/* Détail déplié */}
+                        {isExp && (
+                          <div style={{background:dark?'#0f0f0f':'#fafbfc',padding:'16px 18px',borderTop:`1px solid ${bdr}`}}>
+                            {loadingDetail === s.settlement_id && !detail
+                              ? <div style={{textAlign:'center',padding:20,color:sub}}>⏳ Chargement du détail...</div>
+                              : !detail
+                                ? <div style={{textAlign:'center',padding:20,color:sub}}>Aucune donnée</div>
+                                : <div>
+                                    {/* Totaux */}
+                                    <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:10,marginBottom:14}}>
+                                      <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.green}`}}>
+                                        <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Total net calculé</div>
+                                        <div style={{fontSize:20,fontWeight:900,color:C.green}}>{fmt$(detail.totals.brut)}</div>
+                                      </div>
+                                      <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
+                                        <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>FBA net</div>
+                                        <div style={{fontSize:20,fontWeight:900,color:C.blue}}>{fmt$(detail.totals.fba)}</div>
+                                      </div>
+                                      <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.yellow}`}}>
+                                        <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>FBM net</div>
+                                        <div style={{fontSize:20,fontWeight:900,color:C.yellow}}>{fmt$(detail.totals.fbm)}</div>
+                                      </div>
+                                      <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px'}}>
+                                        <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Commandes</div>
+                                        <div style={{fontSize:20,fontWeight:900}}>{detail.totals.nb_orders}</div>
+                                      </div>
+                                    </div>
+
+                                    {/* Breakdown par catégorie */}
+                                    <div style={{fontSize:12,fontWeight:800,marginBottom:6,color:sub,textTransform:'uppercase'}}>📊 Breakdown financier</div>
+                                    <div style={{background:card,borderRadius:8,border:`1px solid ${bdr}`,overflow:'hidden',marginBottom:14}}>
+                                      <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                                        <thead><tr style={{background:thBg}}>
+                                          <th style={{padding:'7px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Catégorie</th>
+                                          <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>#</th>
+                                          <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>FBA</th>
+                                          <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>FBM</th>
+                                          <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Total</th>
+                                        </tr></thead>
+                                        <tbody>
+                                          {detail.breakdown.map((b:any) => (
+                                            <tr key={b.category}>
+                                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:600}}>{b.category}</td>
+                                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{b.count}</td>
+                                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:b.fba>=0?C.green:C.red,fontWeight:700}}>{fmt$(b.fba)}</td>
+                                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:b.fbm>=0?C.green:C.red,fontWeight:700}}>{fmt$(b.fbm)}</td>
+                                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:b.brut>=0?C.green:C.red,fontWeight:800}}>{fmt$(b.brut)}</td>
+                                            </tr>
+                                          ))}
+                                          <tr style={{background:thBg}}>
+                                            <td style={{padding:'9px 10px',fontWeight:900}}>TOTAL NET</td>
+                                            <td style={{padding:'9px 10px',textAlign:'right',color:sub,fontSize:11}}>{detail.totals.nb_transactions}</td>
+                                            <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:detail.totals.fba>=0?C.green:C.red}}>{fmt$(detail.totals.fba)}</td>
+                                            <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:detail.totals.fbm>=0?C.green:C.red}}>{fmt$(detail.totals.fbm)}</td>
+                                            <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,fontSize:14,color:detail.totals.brut>=0?C.green:C.red}}>{fmt$(detail.totals.brut)}</td>
+                                          </tr>
+                                        </tbody>
+                                      </table>
+                                    </div>
+
+                                    {/* Top SKU */}
+                                    {detail.top_skus && detail.top_skus.length > 0 && (
+                                      <>
+                                        <div style={{fontSize:12,fontWeight:800,marginBottom:6,color:sub,textTransform:'uppercase'}}>🏆 Top SKU vendus ({detail.top_skus.length})</div>
+                                        <div style={{background:card,borderRadius:8,border:`1px solid ${bdr}`,overflow:'hidden',marginBottom:14,maxHeight:260,overflowY:'auto'}}>
+                                          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                                            <thead><tr style={{background:thBg,position:'sticky',top:0}}>
+                                              <th style={{padding:'7px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
+                                              <th style={{padding:'7px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Traction</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Qté</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Revenu</th>
+                                            </tr></thead>
+                                            <tbody>
+                                              {detail.top_skus.map((t:any) => (
+                                                <tr key={t.sku}>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{t.sku}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',color:t.traction_code?C.blue:C.red,fontSize:11}}>{t.traction_code||'— non mappé'}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700}}>{t.qty}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:C.green}}>{fmt$(t.revenue)}</td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </>
+                                    )}
+
+                                    {/* Formulaire LAUTOPAK */}
+                                    <div style={{background:card,borderRadius:10,border:`2px solid ${s.lautopak_status==='facture'?C.green:C.yellow}`,padding:'14px 16px'}}>
+                                      <div style={{fontSize:13,fontWeight:800,marginBottom:10,color:s.lautopak_status==='facture'?C.green:C.yellow}}>
+                                        {s.lautopak_status==='facture'?'✓ FACTURE LAUTOPAK':'⏳ FACTURER DANS LAUTOPAK'}
+                                      </div>
+                                      <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'2fr 1fr',gap:10,marginBottom:10}}>
+                                        <div>
+                                          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:4}}>N° de facture LAUTOPAK *</div>
+                                          <input value={input.ref} onChange={e=>setLautopakInput(prev=>({...prev,[s.settlement_id]:{...input,ref:e.target.value}}))}
+                                            placeholder="Ex: F-2026-04-001"
+                                            style={{...S,fontSize:13,padding:'8px 12px',fontFamily:'monospace'}}/>
+                                        </div>
+                                        <div>
+                                          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:4}}>Date facture</div>
+                                          <input type="date" value={input.date} onChange={e=>setLautopakInput(prev=>({...prev,[s.settlement_id]:{...input,date:e.target.value}}))}
+                                            style={{...S,fontSize:13,padding:'8px 12px'}}/>
+                                        </div>
+                                      </div>
+                                      <div style={{marginBottom:10}}>
+                                        <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:4}}>Notes</div>
+                                        <textarea value={input.notes} onChange={e=>setLautopakInput(prev=>({...prev,[s.settlement_id]:{...input,notes:e.target.value}}))}
+                                          placeholder="Notes optionnelles..."
+                                          rows={2} style={{...S,fontSize:12,padding:'8px 12px',resize:'vertical',width:'100%'}}/>
+                                      </div>
+                                      <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+                                        {s.lautopak_status === 'facture' && (
+                                          <button onClick={()=>annulerFacture(s.settlement_id)}
+                                            style={{background:'transparent',color:C.yellow,border:`1px solid ${C.yellow}`,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                                            ↩ Annuler facturation
+                                          </button>
+                                        )}
+                                        <button onClick={()=>marquerFacture(s.settlement_id)}
+                                          style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'10px 16px',fontWeight:800,cursor:'pointer',fontSize:13}}>
+                                          {s.lautopak_status === 'facture' ? '💾 Mettre à jour' : '✓ Marquer facturé LAUTOPAK'}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                            }
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </>
+            }
+          </div>
+        </div>
+        )
+      })()}
 
       {vue === 'mapping' && (
         <div>
