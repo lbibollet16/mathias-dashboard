@@ -5399,8 +5399,24 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                           📦 Mouvements d'inventaire — qté nette à déduire dans LAUTOPAK ({detail.mouvements.length} SKU)
                                         </div>
                                         <div style={{fontSize:10,color:sub,marginBottom:8}}>
-                                          Net = Vendu − Retourné + Perdu (cash). Utilise ces quantités pour ajuster tes stocks Traction.
+                                          Net = Vendu − Retourné + Perdu. Source = fichier payments du settlement (garanti complet).
+                                          Qté perdue estimée via prix unitaire (CSV historique ou coûtant Traction).
                                         </div>
+                                        {detail.lost_qualite && detail.lost_qualite.sku_count > 0 && (
+                                          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 12px',marginBottom:8,fontSize:11,display:'flex',gap:14,flexWrap:'wrap',alignItems:'center'}}>
+                                            <span style={{color:sub,fontWeight:700}}>Qualité pertes :</span>
+                                            <span>💰 <strong>{fmt$(detail.lost_qualite.total_amount)}</strong> reçus</span>
+                                            {detail.lost_qualite.sku_csv_exact > 0 && (
+                                              <span>✅ <strong style={{color:C.green}}>{detail.lost_qualite.sku_csv_exact}</strong>/{detail.lost_qualite.sku_count} SKU exacts (CSV)</span>
+                                            )}
+                                            {detail.lost_qualite.sku_avec_prix > 0 && (
+                                              <span>🎯 <strong style={{color:C.blue}}>{detail.lost_qualite.sku_avec_prix}</strong> SKU estimés (prix unitaire)</span>
+                                            )}
+                                            {detail.lost_qualite.sku_sans_prix > 0 && (
+                                              <span style={{color:C.yellow}}>⚠️ <strong>{detail.lost_qualite.sku_sans_prix}</strong> SKU sans prix — importe un CSV couvrant la période pour avoir les qty exactes</span>
+                                            )}
+                                          </div>
+                                        )}
                                         <div style={{background:card,borderRadius:8,border:`2px solid ${C.green}33`,overflow:'hidden',marginBottom:14,maxHeight:360,overflowY:'auto'}}>
                                           <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
                                             <thead><tr style={{background:thBg,position:'sticky',top:0,zIndex:1}}>
@@ -5408,29 +5424,38 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                               <th style={{padding:'7px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Traction</th>
                                               <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Vendu</th>
                                               <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Retourné</th>
-                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Perdu (cash)</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Perdu</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>$ reçu</th>
                                               <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>Net</th>
                                               <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Coût unit.</th>
                                               <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Valeur nette</th>
                                             </tr></thead>
                                             <tbody>
-                                              {detail.mouvements.map((m:any) => (
+                                              {detail.mouvements.map((m:any) => {
+                                                const methodBadge = m.lost_method === 'csv_exact' ? '✅' : m.lost_method === 'csv_historique' ? '🎯' : m.lost_method === 'coutant_traction' ? '📊' : m.lost_method === 'assume_1_par_ligne' ? '⚠️' : ''
+                                                return (
                                                 <tr key={m.sku}>
                                                   <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{m.sku}</td>
                                                   <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',color:m.traction_code?C.blue:C.red,fontSize:11}}>{m.traction_code||'— non mappé'}</td>
                                                   <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.sold>0?C.green:sub}}>{m.sold||''}</td>
                                                   <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.returned>0?C.yellow:sub}}>{m.returned>0?`−${m.returned}`:''}</td>
-                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.lost>0?C.red:sub}}>{m.lost>0?`+${m.lost}`:''}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.lost>0?C.red:sub}} title={m.lost_method||''}>
+                                                    {m.lost>0?`+${m.lost} ${methodBadge}`:''}
+                                                  </td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:m.lost_amount>0?C.green:sub,fontSize:11}}>
+                                                    {m.lost_amount>0?fmt$(m.lost_amount):''}
+                                                  </td>
                                                   <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontSize:14,fontWeight:900,color:m.net>0?C.green:m.net<0?C.red:sub}}>{m.net}</td>
                                                   <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{m.coutant>0?`${m.coutant.toFixed(2)}$`:'—'}</td>
                                                   <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.valeur_net>=0?C.green:C.red}}>{m.valeur_net!==0?fmt$(m.valeur_net):'—'}</td>
                                                 </tr>
-                                              ))}
+                                              )})}
                                               <tr style={{background:thBg}}>
                                                 <td colSpan={2} style={{padding:'9px 10px',fontWeight:900}}>TOTAUX</td>
                                                 <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.green}}>{detail.mouv_totals.sold}</td>
                                                 <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.yellow}}>−{detail.mouv_totals.returned}</td>
                                                 <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.red}}>+{detail.mouv_totals.lost}</td>
+                                                <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.green}}>{fmt$(detail.mouv_totals.lost_amount||0)}</td>
                                                 <td style={{padding:'9px 10px',textAlign:'right',fontSize:14,fontWeight:900,color:C.green}}>{detail.mouv_totals.net}</td>
                                                 <td></td>
                                                 <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.green}}>{fmt$(detail.mouv_totals.valeur_net)}</td>
@@ -5452,16 +5477,20 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                           Écart = montant remboursé − prix coûtant Traction (rouge = Amazon sous-remboursé).
                                         </div>
 
-                                        {/* Vérification de balance $ payments vs $ CSV */}
-                                        {detail.reimb_balance && (
-                                          <div style={{background:detail.reimb_balance.balanced?(dark?'#0d2a18':'#e6f4ea'):(dark?'#2b1113':'#fce8e6'),border:`2px solid ${detail.reimb_balance.balanced?C.green:C.red}`,borderRadius:10,padding:'10px 14px',marginBottom:10,display:'flex',gap:18,flexWrap:'wrap',alignItems:'center',fontSize:12}}>
-                                            <div style={{fontWeight:900,color:detail.reimb_balance.balanced?C.green:C.red,fontSize:14}}>
-                                              {detail.reimb_balance.balanced?'✅ BALANCE OK':'⚠️ ÉCART DE BALANCE'}
+                                        {/* Couverture CSV (info seulement - les mouvements sont calculés depuis payments) */}
+                                        {detail.reimb_balance && detail.reimb_balance.money_in_payments !== 0 && (
+                                          <div style={{background:detail.reimb_balance.balanced?(dark?'#0d2a18':'#e6f4ea'):(dark?'#1a1a2e':'#fffbea'),border:`1px solid ${detail.reimb_balance.balanced?C.green:C.yellow}`,borderRadius:10,padding:'10px 14px',marginBottom:10,display:'flex',gap:14,flexWrap:'wrap',alignItems:'center',fontSize:11}}>
+                                            <div style={{fontWeight:800,color:detail.reimb_balance.balanced?C.green:C.yellow}}>
+                                              {detail.reimb_balance.balanced?'✅ CSV couvre 100% des remboursements du settlement':'ℹ️ CSV partiel ou daté hors fenêtre'}
                                             </div>
                                             <div style={{color:sub}}>•</div>
-                                            <div><span style={{color:sub}}>$ reçus (payments) : </span><strong>{fmt$(detail.reimb_balance.money_in_payments)}</strong></div>
-                                            <div><span style={{color:sub}}>$ attribués (CSV) : </span><strong>{fmt$(detail.reimb_balance.money_in_csv)}</strong></div>
-                                            <div><span style={{color:sub}}>Delta : </span><strong style={{color:detail.reimb_balance.balanced?C.green:C.red}}>{fmt$(detail.reimb_balance.delta)}</strong></div>
+                                            <div><span style={{color:sub}}>Payments reçus : </span><strong>{fmt$(detail.reimb_balance.money_in_payments)}</strong></div>
+                                            <div><span style={{color:sub}}>CSV attribués : </span><strong>{fmt$(detail.reimb_balance.money_in_csv)}</strong></div>
+                                            {!detail.reimb_balance.balanced && (
+                                              <div style={{color:sub,flexBasis:'100%',fontSize:10,marginTop:4}}>
+                                                💡 Les mouvements d'inventaire ci-dessus sont calculés depuis le fichier payments (source garantie) — pas d'incidence sur les quantités LAUTOPAK.
+                                              </div>
+                                            )}
                                           </div>
                                         )}
 

@@ -273,13 +273,18 @@ export async function GET(req: NextRequest) {
     }, { count: 0, amount_total: 0, coutant_total: 0, ecart_total: 0, qty_cash: 0, qty_inventory: 0 })
 
     // ─── Mouvements d'inventaire (SKU → qty net à déduire LAUTOPAK) ──────
-    // net_to_deduct = qty_sold - qty_returned + qty_reimbursed_cash
-    //   qty_sold         = sum quantity_purchased pour Order / ItemPrice / Principal
-    //   qty_returned     = 1 par ligne Refund / ItemPrice / Principal (qty non-fournie par Amazon)
-    //   qty_reimb_cash   = quantity_reimbursed_cash des remboursements (période settlement)
+    // Source PRIMAIRE = le fichier payments (garanti d'être complet pour le settlement)
+    //
+    // net_to_deduct = qty_sold - qty_returned + qty_lost_estimated
+    //   qty_sold            = sum quantity_purchased pour Order / ItemPrice / Principal
+    //   qty_returned        = 1 par ligne Refund / ItemPrice / Principal
+    //   qty_lost_estimated  = ($ FBA Inventory Reimbursement / prix unitaire) arrondi
+    //                         prix unitaire = amount_per_unit d'un CSV historique (même SKU)
+    //                         fallback = prix coûtant Traction
+    //                         fallback = 1 par ligne payment
     type Mouvement = {
       sku: string; traction_code: string | null; description: string | null;
-      sold: number; returned: number; lost: number;
+      sold: number; returned: number; lost: number; lost_amount: number; lost_method: string;
       net: number; coutant: number; valeur_net: number;
     }
     const mouvements = new Map<string, Mouvement>()
@@ -288,7 +293,7 @@ export async function GET(req: NextRequest) {
         mouvements.set(sku, {
           sku, traction_code: tractionCode,
           description: null,
-          sold: 0, returned: 0, lost: 0,
+          sold: 0, returned: 0, lost: 0, lost_amount: 0, lost_method: '',
           net: 0, coutant: 0, valeur_net: 0,
         })
       }
@@ -297,6 +302,7 @@ export async function GET(req: NextRequest) {
       return m
     }
 
+    // 1) Ventes + retours depuis payments
     for (const t of allTx) {
       if (!t.sku) continue
       if (t.amount_type !== 'ItemPrice' || t.amount_description !== 'Principal') continue
@@ -304,19 +310,94 @@ export async function GET(req: NextRequest) {
       if (t.transaction_type === 'Order') {
         m.sold += Number(t.quantity_purchased || 1)
       } else if (t.transaction_type === 'Refund') {
-        // qty non fournie par Amazon pour les refunds → 1 par ligne
         const q = Number(t.quantity_purchased || 0)
         m.returned += (q > 0 ? q : 1)
       }
     }
 
-    for (const r of reimbursementsEnriched) {
-      if (!r.sku) continue
-      const m = ensure(r.sku, r.traction_code)
-      m.lost += Number(r.qty_cash || 0)
+    // 2) Remboursements FBA depuis payments (groupés par SKU)
+    type FbaReimb = { sku: string; amount_net: number; lines: number; reasons: Set<string>; traction_code: string | null }
+    const fbaReimbBySku = new Map<string, FbaReimb>()
+    for (const t of allTx) {
+      if (t.amount_type !== 'FBA Inventory Reimbursement') continue
+      if (!t.sku) continue
+      if (!fbaReimbBySku.has(t.sku)) {
+        fbaReimbBySku.set(t.sku, { sku: t.sku, amount_net: 0, lines: 0, reasons: new Set(), traction_code: t.traction_code })
+      }
+      const e = fbaReimbBySku.get(t.sku)!
+      e.amount_net += Number(t.amount || 0)
+      e.lines++
+      if (t.amount_description) e.reasons.add(t.amount_description)
+      if (!e.traction_code && t.traction_code) e.traction_code = t.traction_code
     }
 
-    // Finaliser net + valeur (en utilisant coutant Traction)
+    // 3) CSV du settlement (fenêtre attribuée exclusivement) → qty_cash par SKU
+    const csvLostBySku = new Map<string, { qty: number; amount: number; lines: number }>()
+    for (const r of reimbursementsEnriched) {
+      if (!r.sku) continue
+      const q = Number(r.qty_cash || 0)
+      if (q <= 0) continue
+      if (!csvLostBySku.has(r.sku)) csvLostBySku.set(r.sku, { qty: 0, amount: 0, lines: 0 })
+      const e = csvLostBySku.get(r.sku)!
+      e.qty += q
+      e.amount += Number(r.amount_total || 0)
+      e.lines++
+    }
+
+    // 4) Fallback: prix unitaire historique (si CSV window ne couvre pas ce SKU)
+    const unitPriceBySku = new Map<string, number>()
+    const skusFallback = Array.from(fbaReimbBySku.keys()).filter(s => !csvLostBySku.has(s))
+    if (skusFallback.length > 0) {
+      const { data: anyReimbs } = await supabaseAdmin
+        .from('amazon_reimbursements')
+        .select('sku, amount_per_unit')
+        .in('sku', skusFallback)
+        .gt('amount_per_unit', 0)
+        .order('approval_date', { ascending: false })
+      for (const r of anyReimbs || []) {
+        if (r.sku && !unitPriceBySku.has(r.sku)) {
+          unitPriceBySku.set(r.sku, Number(r.amount_per_unit))
+        }
+      }
+    }
+
+    // 5) Construire la colonne "lost" par SKU, en PRIORISANT le CSV
+    //    Boucle sur l'union des SKU apparaissant dans payments FBA ou dans CSV window
+    const skuUniverse = new Set<string>([...fbaReimbBySku.keys(), ...csvLostBySku.keys()])
+    for (const sku of skuUniverse) {
+      const paymentsData = fbaReimbBySku.get(sku)
+      const csvData = csvLostBySku.get(sku)
+      const tractionCode = paymentsData?.traction_code || reimbursementsEnriched.find((r:any)=>r.sku===sku)?.traction_code || null
+      const m = ensure(sku, tractionCode)
+
+      // PRIORITÉ 1: CSV du settlement (source exacte fournie par Amazon)
+      if (csvData && csvData.qty > 0) {
+        m.lost = csvData.qty
+        m.lost_amount = paymentsData ? paymentsData.amount_net : csvData.amount
+        m.lost_method = 'csv_exact'
+        continue
+      }
+
+      // PRIORITÉ 2: estimation depuis le payments (CSV ne couvre pas)
+      if (paymentsData && paymentsData.amount_net > 0) {
+        m.lost_amount = paymentsData.amount_net
+        let unitPrice = unitPriceBySku.get(sku) || 0
+        let method = 'csv_historique'
+        if (unitPrice === 0 && paymentsData.traction_code) {
+          const coutant = coutantMap.get(paymentsData.traction_code) || 0
+          if (coutant > 0) { unitPrice = coutant; method = 'coutant_traction' }
+        }
+        if (unitPrice > 0) {
+          m.lost = Math.max(1, Math.round(paymentsData.amount_net / unitPrice))
+          m.lost_method = method
+        } else {
+          m.lost = paymentsData.lines
+          m.lost_method = 'assume_1_par_ligne'
+        }
+      }
+    }
+
+    // 5) Finaliser net + valeur (en utilisant coutant Traction)
     const mouvementsArr = Array.from(mouvements.values()).map(m => {
       const coutant = m.traction_code ? (coutantMap.get(m.traction_code) || 0) : 0
       const net = m.sold - m.returned + m.lost
@@ -333,10 +414,21 @@ export async function GET(req: NextRequest) {
       acc.sold += m.sold
       acc.returned += m.returned
       acc.lost += m.lost
+      acc.lost_amount += m.lost_amount
       acc.net += m.net
       acc.valeur_net += m.valeur_net
       return acc
-    }, { sold: 0, returned: 0, lost: 0, net: 0, valeur_net: 0 })
+    }, { sold: 0, returned: 0, lost: 0, lost_amount: 0, net: 0, valeur_net: 0 })
+
+    // Qualité de la dérivation qty pour les pertes
+    const allLostMouvs = Array.from(mouvements.values()).filter(m => m.lost > 0)
+    const lostQualite = {
+      total_amount: moneyInPayments,
+      sku_count: allLostMouvs.length,
+      sku_csv_exact: allLostMouvs.filter(m => m.lost_method === 'csv_exact').length,
+      sku_avec_prix: allLostMouvs.filter(m => m.lost_method === 'csv_historique' || m.lost_method === 'coutant_traction').length,
+      sku_sans_prix: allLostMouvs.filter(m => m.lost_method === 'assume_1_par_ligne').length,
+    }
 
     return NextResponse.json({
       settlement,
@@ -352,6 +444,7 @@ export async function GET(req: NextRequest) {
         delta: balanceDelta,
         balanced: balanceOk,
       },
+      lost_qualite: lostQualite,
       mouvements: mouvementsArr,
       mouv_totals: mouvTotals,
     })
