@@ -267,7 +267,9 @@ export async function GET(req: NextRequest) {
     //                         fallback = 1 par ligne payment
     type Mouvement = {
       sku: string; traction_code: string | null; description: string | null;
-      sold: number; returned: number; lost: number; lost_amount: number; lost_method: string;
+      sold: number; returned: number;
+      lost: number; lost_amount: number; lost_method: string;
+      found: number; found_amount: number; found_method: string;
       net: number; coutant: number; valeur_net: number;
     }
     const mouvements = new Map<string, Mouvement>()
@@ -276,7 +278,9 @@ export async function GET(req: NextRequest) {
         mouvements.set(sku, {
           sku, traction_code: tractionCode,
           description: null,
-          sold: 0, returned: 0, lost: 0, lost_amount: 0, lost_method: '',
+          sold: 0, returned: 0,
+          lost: 0, lost_amount: 0, lost_method: '',
+          found: 0, found_amount: 0, found_method: '',
           net: 0, coutant: 0, valeur_net: 0,
         })
       }
@@ -298,19 +302,36 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 2) Remboursements FBA depuis payments (groupés par SKU)
-    type FbaReimb = { sku: string; amount_net: number; lines: number; reasons: Set<string>; traction_code: string | null }
+    // 2) Remboursements FBA depuis payments (groupés par SKU, séparés pos/neg)
+    //    positif = LOST/DAMAGE/REVERSAL → unité perdue (lost)
+    //    négatif = COMPENSATED_CLAWBACK → unité retrouvée (found)
+    type FbaReimb = {
+      sku: string; traction_code: string | null;
+      lost_amount: number; lost_lines: number; lost_reasons: Set<string>;
+      found_amount: number; found_lines: number; found_reasons: Set<string>;
+    }
     const fbaReimbBySku = new Map<string, FbaReimb>()
     for (const t of allTx) {
       if (t.amount_type !== 'FBA Inventory Reimbursement') continue
       if (!t.sku) continue
       if (!fbaReimbBySku.has(t.sku)) {
-        fbaReimbBySku.set(t.sku, { sku: t.sku, amount_net: 0, lines: 0, reasons: new Set(), traction_code: t.traction_code })
+        fbaReimbBySku.set(t.sku, {
+          sku: t.sku, traction_code: t.traction_code,
+          lost_amount: 0, lost_lines: 0, lost_reasons: new Set(),
+          found_amount: 0, found_lines: 0, found_reasons: new Set(),
+        })
       }
       const e = fbaReimbBySku.get(t.sku)!
-      e.amount_net += Number(t.amount || 0)
-      e.lines++
-      if (t.amount_description) e.reasons.add(t.amount_description)
+      const amt = Number(t.amount || 0)
+      if (amt > 0) {
+        e.lost_amount += amt
+        e.lost_lines++
+        if (t.amount_description) e.lost_reasons.add(t.amount_description)
+      } else if (amt < 0) {
+        e.found_amount += Math.abs(amt)
+        e.found_lines++
+        if (t.amount_description) e.found_reasons.add(t.amount_description)
+      }
       if (!e.traction_code && t.traction_code) e.traction_code = t.traction_code
     }
 
@@ -344,64 +365,78 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 5) Construire la colonne "lost" par SKU, en PRIORISANT le CSV
-    //    Boucle sur l'union des SKU apparaissant dans payments FBA ou dans CSV window
+    // 5) Construire les colonnes "lost" (pertes) et "found" (retrouvés) par SKU
+    //    en PRIORISANT le CSV pour lost (qty exact), estimation payments pour found
     const skuUniverse = new Set<string>([...fbaReimbBySku.keys(), ...csvLostBySku.keys()])
+
+    // Helper: dérivation qty depuis $ via prix unitaire
+    const deriveQty = (amount: number, sku: string, tractionCode: string | null): { qty: number; method: string } => {
+      let unitPrice = unitPriceBySku.get(sku) || 0
+      let method = 'csv_historique'
+      if (unitPrice === 0 && tractionCode) {
+        const coutant = coutantMap.get(tractionCode) || 0
+        if (coutant > 0) { unitPrice = coutant; method = 'coutant_traction' }
+      }
+      if (unitPrice > 0) {
+        return { qty: Math.max(1, Math.round(amount / unitPrice)), method }
+      }
+      return { qty: 0, method: 'aucun_prix' }
+    }
+
     for (const sku of skuUniverse) {
       const paymentsData = fbaReimbBySku.get(sku)
       const csvData = csvLostBySku.get(sku)
       const tractionCode = paymentsData?.traction_code || reimbursementsEnriched.find((r:any)=>r.sku===sku)?.traction_code || null
       const m = ensure(sku, tractionCode)
 
-      // PRIORITÉ 1: CSV du settlement (source exacte fournie par Amazon)
+      // ── LOST (perdu) ──
       if (csvData && csvData.qty > 0) {
+        // PRIORITÉ 1: CSV exact pour le settlement
         m.lost = csvData.qty
-        m.lost_amount = paymentsData ? paymentsData.amount_net : csvData.amount
+        m.lost_amount = paymentsData ? paymentsData.lost_amount : csvData.amount
         m.lost_method = 'csv_exact'
-        continue
+      } else if (paymentsData && paymentsData.lost_amount > 0) {
+        // PRIORITÉ 2: estimation depuis $ payments
+        m.lost_amount = paymentsData.lost_amount
+        const d = deriveQty(paymentsData.lost_amount, sku, paymentsData.traction_code)
+        m.lost = d.qty > 0 ? d.qty : paymentsData.lost_lines
+        m.lost_method = d.qty > 0 ? d.method : 'assume_1_par_ligne'
       }
 
-      // PRIORITÉ 2: estimation depuis le payments (CSV ne couvre pas)
-      if (paymentsData && paymentsData.amount_net > 0) {
-        m.lost_amount = paymentsData.amount_net
-        let unitPrice = unitPriceBySku.get(sku) || 0
-        let method = 'csv_historique'
-        if (unitPrice === 0 && paymentsData.traction_code) {
-          const coutant = coutantMap.get(paymentsData.traction_code) || 0
-          if (coutant > 0) { unitPrice = coutant; method = 'coutant_traction' }
-        }
-        if (unitPrice > 0) {
-          m.lost = Math.max(1, Math.round(paymentsData.amount_net / unitPrice))
-          m.lost_method = method
-        } else {
-          m.lost = paymentsData.lines
-          m.lost_method = 'assume_1_par_ligne'
-        }
+      // ── FOUND (retrouvé via COMPENSATED_CLAWBACK) ──
+      if (paymentsData && paymentsData.found_amount > 0) {
+        m.found_amount = paymentsData.found_amount
+        const d = deriveQty(paymentsData.found_amount, sku, paymentsData.traction_code)
+        m.found = d.qty > 0 ? d.qty : paymentsData.found_lines
+        m.found_method = d.qty > 0 ? d.method : 'assume_1_par_ligne'
       }
     }
 
-    // 5) Finaliser net + valeur (en utilisant coutant Traction)
+    // 6) Finaliser net + valeur (en utilisant coutant Traction)
+    //    Convention LAUTOPAK: positif = sortie inventaire, négatif = ajout
     const mouvementsArr = Array.from(mouvements.values()).map(m => {
       const coutant = m.traction_code ? (coutantMap.get(m.traction_code) || 0) : 0
-      const net = m.sold - m.returned + m.lost
+      const net = m.sold - m.returned + m.lost - m.found
       return {
         ...m,
         coutant,
         net,
         valeur_net: coutant * net,
       }
-    }).filter(m => m.sold !== 0 || m.returned !== 0 || m.lost !== 0)
-      .sort((a, b) => b.net - a.net || b.sold - a.sold)
+    }).filter(m => m.sold !== 0 || m.returned !== 0 || m.lost !== 0 || m.found !== 0)
+      .sort((a, b) => Math.abs(b.net) - Math.abs(a.net) || b.sold - a.sold)
 
     const mouvTotals = mouvementsArr.reduce((acc: any, m: any) => {
       acc.sold += m.sold
       acc.returned += m.returned
       acc.lost += m.lost
       acc.lost_amount += m.lost_amount
+      acc.found += m.found
+      acc.found_amount += m.found_amount
       acc.net += m.net
       acc.valeur_net += m.valeur_net
       return acc
-    }, { sold: 0, returned: 0, lost: 0, lost_amount: 0, net: 0, valeur_net: 0 })
+    }, { sold: 0, returned: 0, lost: 0, lost_amount: 0, found: 0, found_amount: 0, net: 0, valeur_net: 0 })
 
     // Qualité de la dérivation qty pour les pertes
     const allLostMouvs = Array.from(mouvements.values()).filter(m => m.lost > 0)

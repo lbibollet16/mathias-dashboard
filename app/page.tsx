@@ -5434,8 +5434,9 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                           📦 Mouvements d'inventaire — qté nette à déduire dans LAUTOPAK ({detail.mouvements.length} SKU)
                                         </div>
                                         <div style={{fontSize:10,color:sub,marginBottom:8}}>
-                                          Net = Vendu − Retourné + Perdu. Source = fichier payments du settlement (garanti complet).
-                                          Qté perdue estimée via prix unitaire (CSV historique ou coûtant Traction).
+                                          <strong>Net LAUTOPAK</strong> = Vendu − Retourné + Perdu − Trouvé.
+                                          Convention LAUTOPAK : <span style={{color:C.green,fontWeight:700}}>+ = sortie inventaire</span>, <span style={{color:C.red,fontWeight:700}}>− = ajout inventaire</span>.
+                                          Perdu = WAREHOUSE_LOST/DAMAGE/REVERSAL (Amazon paie). Trouvé = COMPENSATED_CLAWBACK (Amazon reprend son argent car unité retrouvée).
                                         </div>
                                         {detail.lost_qualite && detail.lost_qualite.sku_count > 0 && (
                                           <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 12px',marginBottom:8,fontSize:11,display:'flex',gap:14,flexWrap:'wrap',alignItems:'center'}}>
@@ -5460,14 +5461,17 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                               <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Vendu</th>
                                               <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Retourné</th>
                                               <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Perdu</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Trouvé</th>
                                               <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>$ reçu</th>
-                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>Net</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>Net LAUTOPAK</th>
                                               <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Coût unit.</th>
                                               <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Valeur nette</th>
                                             </tr></thead>
                                             <tbody>
                                               {detail.mouvements.map((m:any) => {
-                                                const methodBadge = m.lost_method === 'csv_exact' ? '✅' : m.lost_method === 'csv_historique' ? '🎯' : m.lost_method === 'coutant_traction' ? '📊' : m.lost_method === 'assume_1_par_ligne' ? '⚠️' : ''
+                                                const lostBadge = m.lost_method === 'csv_exact' ? '✅' : m.lost_method === 'csv_historique' ? '🎯' : m.lost_method === 'coutant_traction' ? '📊' : m.lost_method === 'assume_1_par_ligne' ? '⚠️' : ''
+                                                const foundBadge = m.found_method === 'csv_historique' ? '🎯' : m.found_method === 'coutant_traction' ? '📊' : m.found_method === 'assume_1_par_ligne' ? '⚠️' : ''
+                                                const netAmount = (m.lost_amount || 0) - (m.found_amount || 0)
                                                 return (
                                                 <tr key={m.sku}>
                                                   <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{m.sku}</td>
@@ -5475,12 +5479,17 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                                   <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.sold>0?C.green:sub}}>{m.sold||''}</td>
                                                   <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.returned>0?C.yellow:sub}}>{m.returned>0?`−${m.returned}`:''}</td>
                                                   <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.lost>0?C.red:sub}} title={m.lost_method||''}>
-                                                    {m.lost>0?`+${m.lost} ${methodBadge}`:''}
+                                                    {m.lost>0?`+${m.lost} ${lostBadge}`:''}
                                                   </td>
-                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:m.lost_amount>0?C.green:sub,fontSize:11}}>
-                                                    {m.lost_amount>0?fmt$(m.lost_amount):''}
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.found>0?C.blue:sub}} title={m.found_method||''}>
+                                                    {m.found>0?`−${m.found} ${foundBadge}`:''}
                                                   </td>
-                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontSize:14,fontWeight:900,color:m.net>0?C.green:m.net<0?C.red:sub}}>{m.net}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:netAmount!==0?(netAmount>0?C.green:C.red):sub,fontSize:11}}>
+                                                    {netAmount!==0?fmt$(netAmount):''}
+                                                  </td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontSize:14,fontWeight:900,color:m.net>0?C.green:m.net<0?C.red:sub}}>
+                                                    {m.net>0?'+':''}{m.net}
+                                                  </td>
                                                   <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{m.coutant>0?`${m.coutant.toFixed(2)}$`:'—'}</td>
                                                   <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.valeur_net>=0?C.green:C.red}}>{m.valeur_net!==0?fmt$(m.valeur_net):'—'}</td>
                                                 </tr>
@@ -5490,8 +5499,9 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                                 <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.green}}>{detail.mouv_totals.sold}</td>
                                                 <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.yellow}}>−{detail.mouv_totals.returned}</td>
                                                 <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.red}}>+{detail.mouv_totals.lost}</td>
-                                                <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.green}}>{fmt$(detail.mouv_totals.lost_amount||0)}</td>
-                                                <td style={{padding:'9px 10px',textAlign:'right',fontSize:14,fontWeight:900,color:C.green}}>{detail.mouv_totals.net}</td>
+                                                <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.blue}}>−{detail.mouv_totals.found||0}</td>
+                                                <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.green}}>{fmt$((detail.mouv_totals.lost_amount||0) - (detail.mouv_totals.found_amount||0))}</td>
+                                                <td style={{padding:'9px 10px',textAlign:'right',fontSize:14,fontWeight:900,color:C.green}}>{detail.mouv_totals.net>0?'+':''}{detail.mouv_totals.net}</td>
                                                 <td></td>
                                                 <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.green}}>{fmt$(detail.mouv_totals.valeur_net)}</td>
                                               </tr>
