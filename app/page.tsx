@@ -4424,20 +4424,17 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
 function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVerifies, validationsCompta, setValidationsCompta}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const userEmail = profil?.email || profil?.nom || 'Inconnu'
-  const [suivis, setSuivis] = useState<any[]>([])
   const [comptages, setComptages] = useState<any[]>([])
   const [vue, setVue] = useState<'a_valider'|'historique'>('a_valider')
-  const [filtSource, setFiltSource] = useState<'tous'|'negatif'|'commande'|'comptage'>('tous')
+  const [filtSource, setFiltSource] = useState<'tous'|'negatif'|'comptage'>('tous')
   const [loadingAction, setLoadingAction] = useState<string|null>(null)
 
   async function recharger() {
     try {
-      const [s, c, v] = await Promise.all([
-        fetch('/api/suivi-commandes').then(r=>r.json()),
+      const [c, v] = await Promise.all([
         fetch('/api/inventaire/comptages').then(r=>r.json()),
         fetch('/api/validations-comptables').then(r=>r.json()),
       ])
-      if (Array.isArray(s)) setSuivis(s)
       if (Array.isArray(c)) setComptages(c)
       if (Array.isArray(v)) setValidationsCompta(v)
     } catch {}
@@ -4451,7 +4448,6 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
 
   // Sources à valider
   const negatifsAValider = (negsVerifies||[]).filter((n:any) => !estValide('negatif', n.id))
-  const commandesVerifiees = (suivis||[]).filter((s:any) => s.statut === 'verifie' && !estValide('commande', s.id))
   const comptagesEcart = (comptages||[]).filter((c:any) => c.ecart !== 0 && c.ecart !== null && !estValide('comptage', c.id))
 
   async function valider(source:string, refId:any, code_piece:string, snapshot:any) {
@@ -4482,10 +4478,10 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
 
   const fmtDate = (d:string) => d ? new Date(d).toLocaleDateString('fr-CA',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'
 
-  const labelSource = (s:string) => s === 'negatif' ? '🔴 Négatif vérifié' : s === 'commande' ? '📋 Commande vérifiée' : '📦 Comptage écart'
-  const colorSource = (s:string) => s === 'negatif' ? C.red : s === 'commande' ? C.yellow : C.blue
+  const labelSource = (s:string) => s === 'negatif' ? '🔴 Négatif vérifié' : '📦 Comptage écart'
+  const colorSource = (s:string) => s === 'negatif' ? C.red : C.blue
 
-  const totalAValider = negatifsAValider.length + commandesVerifiees.length + comptagesEcart.length
+  const totalAValider = negatifsAValider.length + comptagesEcart.length
   const historique = [...validations].sort((a:any,b:any) => new Date(b.date_validation).getTime() - new Date(a.date_validation).getTime())
   const historiqueFiltre = filtSource === 'tous' ? historique : historique.filter((v:any) => v.source === filtSource)
 
@@ -4517,14 +4513,10 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
       {vue === 'a_valider' && (
         <div style={{display:'flex',flexDirection:'column',gap:18}}>
           {/* Compteurs */}
-          <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(3,1fr)',gap:10}}>
+          <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(2,1fr)',gap:10}}>
             <div style={{...card1,borderLeft:`4px solid ${C.red}`}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Négatifs vérifiés</div>
               <div style={{fontSize:26,fontWeight:900,color:C.red}}>{negatifsAValider.length}</div>
-            </div>
-            <div style={{...card1,borderLeft:`4px solid ${C.yellow}`}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Commandes vérifiées</div>
-              <div style={{fontSize:26,fontWeight:900,color:C.yellow}}>{commandesVerifiees.length}</div>
             </div>
             <div style={{...card1,borderLeft:`4px solid ${C.blue}`}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Comptages avec écart</div>
@@ -4532,139 +4524,203 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
             </div>
           </div>
 
-          {/* Section négatifs */}
+          {/* Section négatifs — cartes détaillées */}
           <div>
             <div style={{fontSize:14,fontWeight:800,marginBottom:8,color:C.red}}>🔴 Négatifs vérifiés ({negatifsAValider.length})</div>
-            <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
-              {negatifsAValider.length === 0
-                ? <div style={{textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucun négatif en attente de validation</div>
-                : <div style={{overflowX:'auto'}}>
-                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-                      <thead><tr style={{background:thBg}}>
-                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code</th>
-                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Stock</th>
-                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Ajust.</th>
-                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Cause</th>
-                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Vérifié par</th>
-                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Date</th>
-                        <th style={{padding:'9px 10px',borderBottom:`2px solid ${bdr}`}}></th>
-                      </tr></thead>
-                      <tbody>
-                        {negatifsAValider.map((n:any) => {
-                          const k = `negatif:${n.id}`
-                          return (
-                            <tr key={n.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace'}}>{n.code_piece}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.red,fontWeight:700}}>{n.stock_au_moment}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:900,color:Number(n.ajustement)>=0?C.green:C.red}}>{Number(n.ajustement)>=0?'+':''}{Number(n.ajustement??0).toFixed(0)}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,color:C.blue,fontSize:11}}>{n.cause||'—'}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>👤 {n.employe}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontSize:11,color:sub,whiteSpace:'nowrap'}}>{fmtDate(n.date_verification)}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
-                                <button disabled={loadingAction===k} onClick={()=>valider('negatif', n.id, n.code_piece, n)}
-                                  style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'7px 14px',fontWeight:700,cursor:'pointer',fontSize:12,opacity:loadingAction===k?0.6:1}}>
-                                  {loadingAction===k?'⏳':'✓ Valider'}
-                                </button>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-              }
-            </div>
+            {negatifsAValider.length === 0
+              ? <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucun négatif en attente de validation</div>
+              : <div style={{display:'flex',flexDirection:'column',gap:12}}>
+                  {negatifsAValider.map((v:any) => {
+                    const k = `negatif:${v.id}`
+                    return (
+                      <div key={v.id} style={{background:card,borderRadius:14,border:`2px solid ${Number(v.ajustement)!==0?C.red:C.green}`,padding:16}}>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12,flexWrap:'wrap',gap:10}}>
+                          <div>
+                            <div style={{fontWeight:900,fontSize:18,fontFamily:'monospace'}}>{v.code_piece}</div>
+                            <div style={{fontSize:12,color:sub,marginTop:2}}>👤 {v.employe} — {fmtDate(v.date_verification)}</div>
+                          </div>
+                          <div style={{textAlign:'right'}}>
+                            <div style={{fontSize:10,color:sub}}>Ajustement</div>
+                            <div style={{fontSize:30,fontWeight:900,color:Number(v.ajustement)===0?C.green:C.red}}>
+                              {Number(v.ajustement)>=0?'+':''}{Number(v.ajustement??0).toFixed(0)}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:10,padding:'10px 12px',marginBottom:10}}>
+                          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6}}>Stocks au moment</div>
+                          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,textAlign:'center'}}>
+                            <div><div style={{fontSize:10,color:sub}}>Système</div><div style={{fontSize:18,fontWeight:900,color:C.red}}>{v.stock_au_moment}</div></div>
+                            <div><div style={{fontSize:10,color:sub}}>Tablette</div><div style={{fontSize:18,fontWeight:900,color:C.blue}}>{v.qte_reelle??'—'}</div></div>
+                            <div><div style={{fontSize:10,color:sub}}>Valeur</div><div style={{fontSize:13,fontWeight:700,color:C.red}}>−{Number(v.valeur_au_moment||0).toFixed(0)}$</div></div>
+                          </div>
+                        </div>
+
+                        <div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:10,padding:'10px 12px',marginBottom:10}}>
+                          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Transactions</div>
+                          <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:4}}>
+                            {[
+                              {l:'Serv. détail',v2:v.serv_detail},
+                              {l:'Serv. interne',v2:v.serv_interne},
+                              {l:'Serv. gar.',v2:v.serv_gar},
+                              {l:'Pce détail',v2:v.pce_detail},
+                              {l:'Récept. comm.',v2:v.recept_comm},
+                              {l:'Déc. physique',v2:v.dec_physique},
+                              {l:'Autre',v2:v.autre},
+                            ].map(t=>(
+                              <div key={t.l} style={{display:'flex',justifyContent:'space-between',fontSize:12,padding:'3px 6px',borderBottom:`1px solid ${bdr}`}}>
+                                <span style={{color:sub}}>{t.l}</span>
+                                <span style={{fontWeight:700,color:Number(t.v2)===0?sub:Number(t.v2)<0?C.red:C.green}}>{Number(t.v2??0)>0?'+':''}{Number(t.v2??0).toFixed(0)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {v.cause && <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:8,padding:'10px 12px',fontSize:13,color:C.blue,marginBottom:8,fontWeight:600,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>📋 {v.cause}</div>}
+                        {v.commentaire && <div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:8,padding:'10px 12px',fontSize:12,color:sub,marginBottom:8,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>💬 {v.commentaire}</div>}
+
+                        {(v.photo_url || v.photo_url2) && (
+                          <div style={{display:'flex',gap:10,marginBottom:10,flexWrap:'wrap'}}>
+                            {v.photo_url && (
+                              <a href={v.photo_url} target="_blank" rel="noreferrer" style={{display:'inline-block'}}>
+                                <img src={v.photo_url} alt="Preuve" onError={(e:any)=>{e.target.style.display='none'}} style={{width:140,height:100,objectFit:'cover',borderRadius:10,border:`2px solid ${C.green}`}}/>
+                              </a>
+                            )}
+                            {v.photo_url2 && (
+                              <a href={v.photo_url2} target="_blank" rel="noreferrer" style={{display:'inline-block'}}>
+                                <img src={v.photo_url2} alt="Preuve 2" onError={(e:any)=>{e.target.style.display='none'}} style={{width:140,height:100,objectFit:'cover',borderRadius:10,border:`2px solid ${C.green}`}}/>
+                              </a>
+                            )}
+                          </div>
+                        )}
+
+                        {v.alt_code_piece && (
+                          <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:10,padding:'10px 12px',marginBottom:10,border:`1px solid ${C.green}33`}}>
+                            <div style={{fontSize:12,fontWeight:700,color:C.green,marginBottom:6}}>🔄 Pièce alternative — {v.alt_code_piece}</div>
+                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+                              <span style={{fontSize:12,color:sub}}>Ajustement alternatif</span>
+                              <span style={{fontSize:20,fontWeight:900,color:Number(v.alt_ajustement)===0?C.green:C.red}}>{Number(v.alt_ajustement)>=0?'+':''}{Number(v.alt_ajustement??0).toFixed(0)}</span>
+                            </div>
+                            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:3}}>
+                              {[
+                                {l:'Serv. détail',v2:v.alt_serv_detail},
+                                {l:'Serv. interne',v2:v.alt_serv_interne},
+                                {l:'Serv. gar.',v2:v.alt_serv_gar},
+                                {l:'Pce détail',v2:v.alt_pce_detail},
+                                {l:'Récept. comm.',v2:v.alt_recept_comm},
+                                {l:'Déc. physique',v2:v.alt_dec_physique},
+                                {l:'Autre',v2:v.alt_autre},
+                                {l:'Tablette',v2:v.alt_qte_reelle},
+                              ].map(t=>(
+                                <div key={t.l} style={{display:'flex',justifyContent:'space-between',fontSize:11,padding:'2px 6px',borderBottom:`1px solid ${bdr}`}}>
+                                  <span style={{color:sub}}>{t.l}</span>
+                                  <span style={{fontWeight:700,color:Number(t.v2)===0?sub:Number(t.v2)<0?C.red:C.green}}>{Number(t.v2??0)>0?'+':''}{Number(t.v2??0).toFixed(0)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <button disabled={loadingAction===k} onClick={()=>valider('negatif', v.id, v.code_piece, v)}
+                          style={{width:'100%',background:C.green,color:'#fff',border:'none',borderRadius:10,padding:'12px 0',fontWeight:800,cursor:'pointer',fontSize:14,opacity:loadingAction===k?0.6:1}}>
+                          {loadingAction===k?'⏳ Validation...':'✓ Valider comptablement'}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+            }
           </div>
 
-          {/* Section commandes */}
-          <div>
-            <div style={{fontSize:14,fontWeight:800,marginBottom:8,color:C.yellow}}>📋 Commandes vérifiées ({commandesVerifiees.length})</div>
-            <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
-              {commandesVerifiees.length === 0
-                ? <div style={{textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucune commande vérifiée en attente</div>
-                : <div style={{overflowX:'auto'}}>
-                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-                      <thead><tr style={{background:thBg}}>
-                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code</th>
-                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Fournisseur</th>
-                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Qté sugg.</th>
-                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Stock</th>
-                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Par</th>
-                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Date</th>
-                        <th style={{padding:'9px 10px',borderBottom:`2px solid ${bdr}`}}></th>
-                      </tr></thead>
-                      <tbody>
-                        {commandesVerifiees.map((s:any) => {
-                          const k = `commande:${s.id}`
-                          return (
-                            <tr key={s.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace'}}>{s.code_piece}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>{s.fournisseur||'—'}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700,color:C.blue}}>{s.qte_suggeree??'—'}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{s.stock_au_moment??'—'}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>👤 {s.employe||'—'}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontSize:11,color:sub,whiteSpace:'nowrap'}}>{fmtDate(s.date_action)}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
-                                <button disabled={loadingAction===k} onClick={()=>valider('commande', s.id, s.code_piece, s)}
-                                  style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'7px 14px',fontWeight:700,cursor:'pointer',fontSize:12,opacity:loadingAction===k?0.6:1}}>
-                                  {loadingAction===k?'⏳':'✓ Valider'}
-                                </button>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-              }
-            </div>
-          </div>
-
-          {/* Section comptages */}
+          {/* Section comptages — cartes détaillées */}
           <div>
             <div style={{fontSize:14,fontWeight:800,marginBottom:8,color:C.blue}}>📦 Comptages avec écart ({comptagesEcart.length})</div>
-            <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
-              {comptagesEcart.length === 0
-                ? <div style={{textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucun comptage avec écart en attente</div>
-                : <div style={{overflowX:'auto'}}>
-                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-                      <thead><tr style={{background:thBg}}>
-                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code</th>
-                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Localisation</th>
-                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Système</th>
-                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Compté</th>
-                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Écart</th>
-                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Par</th>
-                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Date</th>
-                        <th style={{padding:'9px 10px',borderBottom:`2px solid ${bdr}`}}></th>
-                      </tr></thead>
-                      <tbody>
-                        {comptagesEcart.map((c:any) => {
-                          const k = `comptage:${c.id}`
-                          const ec = c.statut === 'reconcilie' ? c.ecart_reconcilie : c.ecart
-                          return (
-                            <tr key={c.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace'}}>{c.code_piece}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:C.blue}}>{c.localisation}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:sub}}>{c.qte_systeme}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.green,fontWeight:700}}>{c.qte_comptee}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:900,color:ec===0?C.green:C.red}}>{ec>0?'+':''}{ec}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>👤 {c.employe}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontSize:11,color:sub,whiteSpace:'nowrap'}}>{fmtDate(c.date_comptage)}</td>
-                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
-                                <button disabled={loadingAction===k} onClick={()=>valider('comptage', c.id, c.code_piece, c)}
-                                  style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'7px 14px',fontWeight:700,cursor:'pointer',fontSize:12,opacity:loadingAction===k?0.6:1}}>
-                                  {loadingAction===k?'⏳':'✓ Valider'}
-                                </button>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-              }
-            </div>
+            {comptagesEcart.length === 0
+              ? <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucun comptage avec écart en attente</div>
+              : <div style={{display:'flex',flexDirection:'column',gap:12}}>
+                  {comptagesEcart.map((c:any) => {
+                    const k = `comptage:${c.id}`
+                    const estReconcilie = c.statut === 'reconcilie'
+                    const ecartFinal = estReconcilie ? c.ecart_reconcilie : c.ecart
+                    return (
+                      <div key={c.id} style={{background:card,borderRadius:14,border:`2px solid ${ecartFinal!==0&&ecartFinal!==null?C.red:estReconcilie?C.green:C.yellow}`,padding:16}}>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12,flexWrap:'wrap',gap:10}}>
+                          <div>
+                            <div style={{fontWeight:900,fontSize:18,fontFamily:'monospace'}}>{c.code_piece}</div>
+                            <div style={{marginTop:4}}>
+                              <span style={{background:dark?'#1a233a':'#e8f0fe',color:C.blue,padding:'3px 10px',borderRadius:6,fontWeight:600,fontFamily:'monospace',fontSize:12}}>{c.localisation}</span>
+                            </div>
+                            <div style={{fontSize:12,color:sub,marginTop:6}}>👤 {c.employe} — {fmtDate(c.date_comptage)}</div>
+                          </div>
+                          <div style={{textAlign:'right'}}>
+                            <div style={{fontSize:10,color:sub}}>{estReconcilie?'Écart réconcilié':'Écart brut'}</div>
+                            <div style={{fontSize:30,fontWeight:900,color:ecartFinal===0?C.green:C.red}}>
+                              {ecartFinal>0?'+':''}{ecartFinal}
+                            </div>
+                            {estReconcilie
+                              ? <span style={{background:C.green+'22',color:C.green,padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:700}}>✅ Réconcilié</span>
+                              : <span style={{background:C.yellow+'22',color:C.yellow,padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:700}}>⏳ En attente J+1</span>
+                            }
+                          </div>
+                        </div>
+
+                        <div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:10,padding:'12px',marginBottom:10}}>
+                          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Quantités</div>
+                          <div style={{display:'grid',gridTemplateColumns:estReconcilie?'repeat(4,1fr)':'repeat(3,1fr)',gap:8,textAlign:'center'}}>
+                            <div>
+                              <div style={{fontSize:10,color:sub}}>Système (comptage)</div>
+                              <div style={{fontSize:20,fontWeight:900,color:C.blue}}>{c.qte_systeme}</div>
+                            </div>
+                            <div>
+                              <div style={{fontSize:10,color:sub}}>Compté</div>
+                              <div style={{fontSize:20,fontWeight:900,color:C.green}}>{c.qte_comptee}</div>
+                            </div>
+                            {c.qte_reservee != null && (
+                              <div>
+                                <div style={{fontSize:10,color:sub}}>Réservé</div>
+                                <div style={{fontSize:20,fontWeight:900,color:sub}}>{c.qte_reservee}</div>
+                              </div>
+                            )}
+                            {estReconcilie && (
+                              <div>
+                                <div style={{fontSize:10,color:sub}}>Stock J+1</div>
+                                <div style={{fontSize:20,fontWeight:900,color:C.blue}}>{c.stock_apres_sync??'—'}</div>
+                              </div>
+                            )}
+                          </div>
+                          {estReconcilie && c.ecart !== c.ecart_reconcilie && (
+                            <div style={{fontSize:11,color:sub,marginTop:8,textAlign:'center'}}>
+                              Ventes entre-temps : <strong style={{color:C.blue}}>{c.qte_systeme - c.stock_apres_sync}</strong> unité(s) vendue(s) après le comptage
+                            </div>
+                          )}
+                        </div>
+
+                        {c.note && <div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:8,padding:'10px 12px',fontSize:12,color:sub,marginBottom:10,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>💬 {c.note}</div>}
+
+                        {c.photo_url && (
+                          <div style={{marginBottom:10}}>
+                            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6}}>📸 Photo preuve</div>
+                            <a href={c.photo_url} target="_blank" rel="noreferrer" style={{display:'inline-block'}}>
+                              <img src={c.photo_url} alt="Preuve comptage" onError={(e:any)=>{e.target.style.display='none'}} style={{width:200,height:140,objectFit:'cover',borderRadius:10,border:`2px solid ${C.green}`}}/>
+                            </a>
+                          </div>
+                        )}
+
+                        {estReconcilie && c.date_reconciliation && (
+                          <div style={{fontSize:11,color:sub,marginBottom:10}}>
+                            Réconcilié le {fmtDate(c.date_reconciliation)}
+                          </div>
+                        )}
+
+                        <button disabled={loadingAction===k} onClick={()=>valider('comptage', c.id, c.code_piece, c)}
+                          style={{width:'100%',background:C.green,color:'#fff',border:'none',borderRadius:10,padding:'12px 0',fontWeight:800,cursor:'pointer',fontSize:14,opacity:loadingAction===k?0.6:1}}>
+                          {loadingAction===k?'⏳ Validation...':'✓ Valider comptablement'}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+            }
           </div>
         </div>
       )}
@@ -4676,7 +4732,6 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
             {[
               {id:'tous', label:`Tout (${historique.length})`, color:sub},
               {id:'negatif', label:`🔴 Négatifs (${historique.filter((v:any)=>v.source==='negatif').length})`, color:C.red},
-              {id:'commande', label:`📋 Commandes (${historique.filter((v:any)=>v.source==='commande').length})`, color:C.yellow},
               {id:'comptage', label:`📦 Comptages (${historique.filter((v:any)=>v.source==='comptage').length})`, color:C.blue},
             ].map(f => (
               <button key={f.id} onClick={()=>setFiltSource(f.id as any)}
@@ -4704,7 +4759,6 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                         const snap = v.snapshot || {}
                         let detail = '—'
                         if (v.source === 'negatif') detail = `Ajust ${Number(snap.ajustement??0)>=0?'+':''}${Number(snap.ajustement??0).toFixed(0)} — ${snap.cause||''}`
-                        else if (v.source === 'commande') detail = `Qté ${snap.qte_suggeree??'—'} — ${snap.fournisseur||''}`
                         else if (v.source === 'comptage') {
                           const ec = snap.statut === 'reconcilie' ? snap.ecart_reconcilie : snap.ecart
                           detail = `${snap.localisation||''} — Écart ${ec>0?'+':''}${ec??'—'} (sys ${snap.qte_systeme} / cpt ${snap.qte_comptee})`
