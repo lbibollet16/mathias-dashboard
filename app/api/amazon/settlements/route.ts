@@ -184,18 +184,43 @@ export async function GET(req: NextRequest) {
     }
     const topSkus = Array.from(skuStats.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 20)
 
-    // ─── Remboursements du settlement + traçage prix coûtant ─────────────
-    // On joint par approval_date dans la période du settlement.
+    // ─── Remboursements du settlement (attribution unique + balance check) ─
+    //
+    // Stratégie:
+    //   1. On trie tous les settlements par settlement_end croissant
+    //   2. Chaque remboursement est attribué au premier settlement dont
+    //      settlement_end >= approval_date (fenêtre ouverte à gauche par
+    //      settlement_end du settlement PRÉCÉDENT).
+    //   3. Ceci garantit qu'un même remboursement n'est attribué qu'à UN
+    //      seul settlement, quelque soit l'ordre d'import.
+    //
     let reimbs: any[] = []
-    if (settlement.settlement_start && settlement.settlement_end) {
-      const { data: rData } = await supabaseAdmin
+    if (settlement.settlement_end) {
+      const { data: allSettlements } = await supabaseAdmin
+        .from('amazon_settlements')
+        .select('settlement_id, settlement_end')
+        .order('settlement_end', { ascending: true })
+      const idx = (allSettlements || []).findIndex((s: any) => s.settlement_id === settlement.settlement_id)
+      const prevEnd = idx > 0 ? (allSettlements as any[])[idx - 1].settlement_end : null
+
+      let q = supabaseAdmin
         .from('amazon_reimbursements')
         .select('*')
-        .gte('approval_date', settlement.settlement_start)
         .lte('approval_date', settlement.settlement_end)
-        .order('approval_date', { ascending: false })
+      if (prevEnd) q = q.gt('approval_date', prevEnd)
+      const { data: rData } = await q.order('approval_date', { ascending: false })
       reimbs = rData || []
     }
+
+    // Vérification de balance: $ remboursé dans payments (FBA Inventory
+    // Reimbursement) vs $ total des remboursements CSV attribués.
+    let moneyInPayments = 0
+    for (const t of allTx) {
+      if (t.amount_type === 'FBA Inventory Reimbursement') moneyInPayments += Number(t.amount || 0)
+    }
+    const moneyInCsv = reimbs.reduce((a: number, r: any) => a + Number(r.amount_total || 0), 0)
+    const balanceDelta = moneyInPayments - moneyInCsv
+    const balanceOk = Math.abs(balanceDelta) < 0.01
 
     // Construire le map PKCode → prix_coutant Traction (priorité au premier non-zéro)
     const needCodes = new Set<string>()
@@ -321,6 +346,12 @@ export async function GET(req: NextRequest) {
       orders: ordersArr,
       reimbursements: reimbursementsEnriched,
       reimb_totals: reimbTotals,
+      reimb_balance: {
+        money_in_payments: moneyInPayments,
+        money_in_csv: moneyInCsv,
+        delta: balanceDelta,
+        balanced: balanceOk,
+      },
       mouvements: mouvementsArr,
       mouv_totals: mouvTotals,
     })

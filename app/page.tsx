@@ -5442,14 +5442,29 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                     )}
 
                                     {/* ─── Traçage remboursements (preuve + écart prix coûtant) ─── */}
-                                    {detail.reimbursements && detail.reimbursements.length > 0 && (
+                                    {((detail.reimbursements && detail.reimbursements.length > 0) || (detail.reimb_balance && detail.reimb_balance.money_in_payments !== 0)) && (
                                       <>
                                         <div style={{fontSize:12,fontWeight:800,marginBottom:6,color:C.red,textTransform:'uppercase'}}>
-                                          💸 Remboursements Amazon ({detail.reimbursements.length}) — traçage prix coûtant
+                                          💸 Remboursements Amazon ({detail.reimbursements?.length || 0}) — traçage prix coûtant
                                         </div>
                                         <div style={{fontSize:10,color:sub,marginBottom:8}}>
-                                          Preuve qu'Amazon t'a bien remboursé. Écart = montant remboursé − prix coûtant Traction. Un écart négatif (rouge) = Amazon t'a sous-remboursé.
+                                          Attribution unique par fenêtre de dates (chaque remboursement compte dans 1 seul settlement).
+                                          Écart = montant remboursé − prix coûtant Traction (rouge = Amazon sous-remboursé).
                                         </div>
+
+                                        {/* Vérification de balance $ payments vs $ CSV */}
+                                        {detail.reimb_balance && (
+                                          <div style={{background:detail.reimb_balance.balanced?(dark?'#0d2a18':'#e6f4ea'):(dark?'#2b1113':'#fce8e6'),border:`2px solid ${detail.reimb_balance.balanced?C.green:C.red}`,borderRadius:10,padding:'10px 14px',marginBottom:10,display:'flex',gap:18,flexWrap:'wrap',alignItems:'center',fontSize:12}}>
+                                            <div style={{fontWeight:900,color:detail.reimb_balance.balanced?C.green:C.red,fontSize:14}}>
+                                              {detail.reimb_balance.balanced?'✅ BALANCE OK':'⚠️ ÉCART DE BALANCE'}
+                                            </div>
+                                            <div style={{color:sub}}>•</div>
+                                            <div><span style={{color:sub}}>$ reçus (payments) : </span><strong>{fmt$(detail.reimb_balance.money_in_payments)}</strong></div>
+                                            <div><span style={{color:sub}}>$ attribués (CSV) : </span><strong>{fmt$(detail.reimb_balance.money_in_csv)}</strong></div>
+                                            <div><span style={{color:sub}}>Delta : </span><strong style={{color:detail.reimb_balance.balanced?C.green:C.red}}>{fmt$(detail.reimb_balance.delta)}</strong></div>
+                                          </div>
+                                        )}
+
                                         {/* Stats remboursements */}
                                         <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:8,marginBottom:10}}>
                                           <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 10px',borderLeft:`3px solid ${C.blue}`}}>
