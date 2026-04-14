@@ -5141,27 +5141,55 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                       <th style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}></th>
                     </tr></thead>
                     <tbody>
-                      {unresolved.map((u:any) => (
-                        <tr key={u.amazon_sku} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
-                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{u.amazon_sku}</td>
-                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:sub}}>{u.count}</td>
-                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub}}>{(u.sources||[]).join(', ')}</td>
-                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}>
+                      {unresolved.map((u:any) => {
+                        const suggestions = u.suggestions || []
+                        const topSug = suggestions[0]
+                        return (
+                        <tr key={u.amazon_sku} style={{borderBottom:`1px solid ${bdr}`}}>
+                          <td style={{padding:'10px',fontFamily:'monospace',fontWeight:700,verticalAlign:'top'}}>{u.amazon_sku}</td>
+                          <td style={{padding:'10px',textAlign:'center',color:sub,verticalAlign:'top'}}>{u.count}</td>
+                          <td style={{padding:'10px',fontSize:11,color:sub,verticalAlign:'top'}}>{(u.sources||[]).join(', ')}</td>
+                          <td style={{padding:'10px',verticalAlign:'top'}}>
                             <input
-                              value={mappingInput[u.amazon_sku]||''}
+                              value={mappingInput[u.amazon_sku] ?? (topSug?.traction_code || '')}
                               onChange={e=>setMappingInput(prev=>({...prev,[u.amazon_sku]:e.target.value}))}
                               placeholder="PKCode Traction..."
-                              style={{...S,fontSize:12,padding:'5px 8px',minWidth:160,fontFamily:'monospace'}}
+                              style={{...S,fontSize:12,padding:'5px 8px',minWidth:160,fontFamily:'monospace',borderColor:topSug?(topSug.score>=0.9?C.green:C.yellow):bdr}}
                               onKeyDown={e=>{ if (e.key==='Enter') validerMapping(u.amazon_sku) }}/>
+                            {suggestions.length > 0 && (
+                              <div style={{marginTop:6,display:'flex',gap:4,flexWrap:'wrap',alignItems:'center'}}>
+                                <span style={{fontSize:10,color:sub,fontWeight:700}}>
+                                  {topSug.score>=0.9?'💡':'⚠️'} Propositions :
+                                </span>
+                                {suggestions.map((s:any) => {
+                                  const scoreColor = s.score>=0.95 ? C.green : s.score>=0.88 ? C.blue : C.yellow
+                                  const isChosen = (mappingInput[u.amazon_sku] ?? topSug?.traction_code) === s.traction_code
+                                  return (
+                                    <button key={s.traction_code}
+                                      onClick={()=>setMappingInput(prev=>({...prev,[u.amazon_sku]:s.traction_code}))}
+                                      title={`Source: ${s.source} · Score: ${(s.score*100).toFixed(0)}%`}
+                                      style={{background:isChosen?scoreColor+'33':'transparent',border:`1px solid ${scoreColor}`,borderRadius:10,padding:'3px 8px',fontFamily:'monospace',fontSize:11,cursor:'pointer',color:scoreColor,fontWeight:700}}>
+                                      {s.traction_code} <span style={{fontSize:9,opacity:0.8}}>{(s.score*100).toFixed(0)}%</span>
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            )}
                           </td>
-                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
-                            <button onClick={()=>validerMapping(u.amazon_sku)}
+                          <td style={{padding:'10px',textAlign:'right',verticalAlign:'top'}}>
+                            <button onClick={()=>{
+                                const codeToUse = mappingInput[u.amazon_sku] ?? topSug?.traction_code
+                                if (codeToUse && mappingInput[u.amazon_sku] === undefined) {
+                                  setMappingInput(prev=>({...prev, [u.amazon_sku]: codeToUse}))
+                                }
+                                validerMapping(u.amazon_sku)
+                              }}
                               style={{background:C.green,color:'#fff',border:'none',borderRadius:6,padding:'5px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
                               ✓ Mapper
                             </button>
                           </td>
                         </tr>
-                      ))}
+                      )})}
                     </tbody>
                   </table>
                 </div>

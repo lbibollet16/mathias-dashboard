@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { SkuResolver } from '@/lib/amazon-sku'
 
-// GET — liste les SKU Amazon non résolus (union transactions + FBA inventory + reimbursements)
-// + liste des mappings existants
+// GET — liste les SKU Amazon non résolus (avec suggestions fuzzy) + mappings existants
 export async function GET(req: NextRequest) {
   try {
     const mode = req.nextUrl.searchParams.get('mode') || 'unresolved'
@@ -16,7 +16,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(data || [])
     }
 
-    // Unresolved = SKU vus dans les 3 sources sans traction_code résolu
     const [tx, fba, rb] = await Promise.all([
       supabaseAdmin.from('amazon_transactions').select('sku').is('traction_code', null),
       supabaseAdmin.from('amazon_fba_inventory').select('sku').is('traction_code', null),
@@ -35,11 +34,19 @@ export async function GET(req: NextRequest) {
     for (const r of fba.data || []) bump(r.sku, 'fba_inventory')
     for (const r of rb.data || [])  bump(r.sku, 'reimbursements')
 
-    const result = Array.from(bySku.values()).map(e => ({
-      amazon_sku: e.amazon_sku,
-      sources: Array.from(e.sources),
-      count: e.count,
-    })).sort((a, b) => b.count - a.count)
+    // Enrichir avec des suggestions fuzzy pour chaque SKU non résolu
+    const resolver = new SkuResolver()
+    await resolver.init()
+
+    const result = Array.from(bySku.values()).map(e => {
+      const suggestions = resolver.suggest(e.amazon_sku, 5, 0.80)
+      return {
+        amazon_sku: e.amazon_sku,
+        sources: Array.from(e.sources),
+        count: e.count,
+        suggestions,  // [{ traction_code, score, source }]
+      }
+    }).sort((a, b) => b.count - a.count)
 
     return NextResponse.json(result)
   } catch (e: any) {
