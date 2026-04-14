@@ -222,8 +222,9 @@ async function handleFbaInventory(objs: Record<string, string>[], fileName: stri
 async function handleReimbursements(objs: Record<string, string>[], fileName: string, resolver: SkuResolver) {
   if (objs.length === 0) return { success: false, erreur: 'Fichier vide' }
 
-  const rows: any[] = []
+  const rowsById = new Map<string, any>()
   let unresolved = 0
+  let duplicates = 0
   for (const o of objs) {
     const reimbursement_id = o['reimbursement-id']
     if (!reimbursement_id) continue
@@ -236,7 +237,7 @@ async function handleReimbursements(objs: Record<string, string>[], fileName: st
       resolution_source = r.source
       if (!traction_code) unresolved++
     }
-    rows.push({
+    const row = {
       reimbursement_id,
       approval_date: parseDate(o['approval-date']),
       case_id: o['case-id'] || null,
@@ -256,19 +257,27 @@ async function handleReimbursements(objs: Record<string, string>[], fileName: st
       original_reimbursement_type: o['original-reimbursement-type'] || null,
       traction_code,
       resolution_source,
-    })
+    }
+    if (rowsById.has(reimbursement_id)) duplicates++
+    rowsById.set(reimbursement_id, row)
   }
+  const rows = Array.from(rowsById.values())
 
-  const { error } = await supabaseAdmin
-    .from('amazon_reimbursements')
-    .upsert(rows, { onConflict: 'reimbursement_id' })
-  if (error) throw error
+  // Upsert par lots pour éviter les payload trop gros
+  for (let i = 0; i < rows.length; i += 500) {
+    const batch = rows.slice(i, i + 500)
+    const { error } = await supabaseAdmin
+      .from('amazon_reimbursements')
+      .upsert(batch, { onConflict: 'reimbursement_id' })
+    if (error) throw error
+  }
 
   return {
     success: true,
     type: 'reimbursements',
     rows_inserted: rows.length,
     unresolved_sku: unresolved,
+    duplicates_deduped: duplicates,
   }
 }
 

@@ -5046,6 +5046,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           if (j.rows_inserted != null) msg += ` • ${j.rows_inserted} lignes`
           if (j.snapshot_date) msg += ` snapshot=${j.snapshot_date}`
           if (j.unresolved_sku) msg += ` • ${j.unresolved_sku} SKU non résolus`
+          if (j.duplicates_deduped) msg += ` • ${j.duplicates_deduped} doublons dédupliqués`
           setImportLog(l => [...l, msg])
         } else {
           setImportLog(l => [...l, `❌ ${file.name} : ${j.erreur || 'erreur inconnue'}`])
