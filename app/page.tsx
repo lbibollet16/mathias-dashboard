@@ -4988,6 +4988,24 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     } catch (e:any) { alert(e.message) }
   }
 
+  async function reconcilierRemboursements(silencieux: boolean = false) {
+    try {
+      const r = await fetch('/api/amazon/reconcile', { method: 'POST' })
+      const j = await r.json()
+      if (j.success) {
+        if (!silencieux || j.matched > 0) {
+          setImportLog(l => [...l, `🔗 Réconciliation : ${j.matched}/${j.total_reimbursements} remboursements attribués • ${j.unmatched} orphelins`])
+        }
+        await charger()
+        setDetailCache({})  // force reload settlement details
+      } else if (!silencieux) {
+        setImportLog(l => [...l, `❌ Réconciliation : ${j.erreur || 'erreur'}`])
+      }
+    } catch (e:any) {
+      if (!silencieux) setImportLog(l => [...l, `❌ Réconciliation : ${e.message}`])
+    }
+  }
+
   async function autoResolve(silencieux: boolean = false) {
     try {
       const r = await fetch('/api/amazon/sku-mapping/auto-resolve', { method: 'POST' })
@@ -5057,6 +5075,8 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     }
     setImporting(false)
     await charger()
+    // Auto-réconciliation des remboursements après tout import
+    await reconcilierRemboursements(true)
     if (fileRef.current) fileRef.current.value = ''
   }
 
@@ -5161,6 +5181,20 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               <button onClick={syncTraction} disabled={syncing}
                 style={{background:syncing?bdr:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 18px',fontWeight:700,cursor:syncing?'default':'pointer',fontSize:13}}>
                 {syncing?'⏳ Sync...':'🔄 Sync Traction'}
+              </button>
+            </div>
+          </div>
+
+          {/* Bloc Réconciliation */}
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'14px 16px',marginBottom:12}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:800,marginBottom:4}}>🔗 Réconcilier remboursements ↔ settlements</div>
+                <div style={{fontSize:11,color:sub}}>Matching exact SKU + montant entre le CSV reimbursements et les lignes FBA Inventory Reimbursement du payments. Déclenché auto après chaque import.</div>
+              </div>
+              <button onClick={()=>reconcilierRemboursements(false)}
+                style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'10px 18px',fontWeight:700,cursor:'pointer',fontSize:13}}>
+                🔗 Réconcilier
               </button>
             </div>
           </div>

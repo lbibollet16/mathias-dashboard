@@ -184,33 +184,16 @@ export async function GET(req: NextRequest) {
     }
     const topSkus = Array.from(skuStats.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 20)
 
-    // ─── Remboursements du settlement (attribution unique + balance check) ─
-    //
-    // Stratégie:
-    //   1. On trie tous les settlements par settlement_end croissant
-    //   2. Chaque remboursement est attribué au premier settlement dont
-    //      settlement_end >= approval_date (fenêtre ouverte à gauche par
-    //      settlement_end du settlement PRÉCÉDENT).
-    //   3. Ceci garantit qu'un même remboursement n'est attribué qu'à UN
-    //      seul settlement, quelque soit l'ordre d'import.
-    //
-    let reimbs: any[] = []
-    if (settlement.settlement_end) {
-      const { data: allSettlements } = await supabaseAdmin
-        .from('amazon_settlements')
-        .select('settlement_id, settlement_end')
-        .order('settlement_end', { ascending: true })
-      const idx = (allSettlements || []).findIndex((s: any) => s.settlement_id === settlement.settlement_id)
-      const prevEnd = idx > 0 ? (allSettlements as any[])[idx - 1].settlement_end : null
-
-      let q = supabaseAdmin
-        .from('amazon_reimbursements')
-        .select('*')
-        .lte('approval_date', settlement.settlement_end)
-      if (prevEnd) q = q.gt('approval_date', prevEnd)
-      const { data: rData } = await q.order('approval_date', { ascending: false })
-      reimbs = rData || []
-    }
+    // ─── Remboursements attribués à CE settlement ─────────────────────
+    // Attribution exacte via la colonne settlement_id (peuplée par
+    // /api/amazon/reconcile qui matche SKU + montant avec les lignes
+    // FBA Inventory Reimbursement du payments).
+    const { data: rData } = await supabaseAdmin
+      .from('amazon_reimbursements')
+      .select('*')
+      .eq('settlement_id', settlement.settlement_id)
+      .order('approval_date', { ascending: false })
+    const reimbs = rData || []
 
     // Vérification de balance: $ remboursé dans payments (FBA Inventory
     // Reimbursement) vs $ total des remboursements CSV attribués.

@@ -239,3 +239,9 @@ ALTER TABLE amazon_transactions      DISABLE ROW LEVEL SECURITY;
 ALTER TABLE amazon_fba_inventory     DISABLE ROW LEVEL SECURITY;
 ALTER TABLE amazon_reimbursements    DISABLE ROW LEVEL SECURITY;
 ALTER TABLE amazon_sku_mapping       DISABLE ROW LEVEL SECURITY;
+
+-- Phase 2 Amazon: attribution exacte des remboursements aux settlements
+-- (matching 1-pour-1 par SKU + montant avec les lignes FBA Inventory
+-- Reimbursement du fichier payments)
+ALTER TABLE amazon_reimbursements ADD COLUMN IF NOT EXISTS settlement_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_amz_reimb_settlement ON amazon_reimbursements(settlement_id);
