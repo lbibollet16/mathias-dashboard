@@ -184,12 +184,145 @@ export async function GET(req: NextRequest) {
     }
     const topSkus = Array.from(skuStats.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 20)
 
+    // ─── Remboursements du settlement + traçage prix coûtant ─────────────
+    // On joint par approval_date dans la période du settlement.
+    let reimbs: any[] = []
+    if (settlement.settlement_start && settlement.settlement_end) {
+      const { data: rData } = await supabaseAdmin
+        .from('amazon_reimbursements')
+        .select('*')
+        .gte('approval_date', settlement.settlement_start)
+        .lte('approval_date', settlement.settlement_end)
+        .order('approval_date', { ascending: false })
+      reimbs = rData || []
+    }
+
+    // Construire le map PKCode → prix_coutant Traction (priorité au premier non-zéro)
+    const needCodes = new Set<string>()
+    for (const r of reimbs) if (r.traction_code) needCodes.add(r.traction_code)
+    for (const o of allTx) if (o.traction_code) needCodes.add(o.traction_code)
+
+    const coutantMap = new Map<string, number>()
+    if (needCodes.size > 0) {
+      const { data: cData } = await supabaseAdmin
+        .from('traction_amazon_lignes')
+        .select('pk_code, prix_coutant')
+        .in('pk_code', Array.from(needCodes))
+      for (const c of cData || []) {
+        const cur = coutantMap.get(c.pk_code)
+        const v = Number(c.prix_coutant || 0)
+        if (v > 0 && (cur === undefined || cur === 0)) coutantMap.set(c.pk_code, v)
+        else if (cur === undefined) coutantMap.set(c.pk_code, v)
+      }
+    }
+
+    // Enrichir les remboursements avec traction_coutant + écart
+    const reimbursementsEnriched = reimbs.map((r: any) => {
+      const coutant = r.traction_code ? (coutantMap.get(r.traction_code) || 0) : 0
+      const qtyTotal = Number(r.quantity_reimbursed_total || 0)
+      const qtyCash = Number(r.quantity_reimbursed_cash || 0)
+      const qtyInv  = Number(r.quantity_reimbursed_inventory || 0)
+      const amountPerUnit = Number(r.amount_per_unit || 0)
+      const ecartUnit = coutant > 0 ? (amountPerUnit - coutant) : 0
+      const ecartTotal = coutant > 0 ? (ecartUnit * qtyTotal) : 0
+      const coutantTotal = coutant * qtyTotal
+      return {
+        ...r,
+        traction_coutant: coutant,
+        coutant_total: coutantTotal,
+        ecart_unitaire: ecartUnit,
+        ecart_total: ecartTotal,
+        qty_cash: qtyCash,
+        qty_inventory: qtyInv,
+      }
+    })
+
+    const reimbTotals = reimbursementsEnriched.reduce((acc: any, r: any) => {
+      acc.count++
+      acc.amount_total += Number(r.amount_total || 0)
+      acc.coutant_total += Number(r.coutant_total || 0)
+      acc.ecart_total += Number(r.ecart_total || 0)
+      acc.qty_cash += Number(r.qty_cash || 0)
+      acc.qty_inventory += Number(r.qty_inventory || 0)
+      return acc
+    }, { count: 0, amount_total: 0, coutant_total: 0, ecart_total: 0, qty_cash: 0, qty_inventory: 0 })
+
+    // ─── Mouvements d'inventaire (SKU → qty net à déduire LAUTOPAK) ──────
+    // net_to_deduct = qty_sold - qty_returned + qty_reimbursed_cash
+    //   qty_sold         = sum quantity_purchased pour Order / ItemPrice / Principal
+    //   qty_returned     = 1 par ligne Refund / ItemPrice / Principal (qty non-fournie par Amazon)
+    //   qty_reimb_cash   = quantity_reimbursed_cash des remboursements (période settlement)
+    type Mouvement = {
+      sku: string; traction_code: string | null; description: string | null;
+      sold: number; returned: number; lost: number;
+      net: number; coutant: number; valeur_net: number;
+    }
+    const mouvements = new Map<string, Mouvement>()
+    const ensure = (sku: string, tractionCode: string | null): Mouvement => {
+      if (!mouvements.has(sku)) {
+        mouvements.set(sku, {
+          sku, traction_code: tractionCode,
+          description: null,
+          sold: 0, returned: 0, lost: 0,
+          net: 0, coutant: 0, valeur_net: 0,
+        })
+      }
+      const m = mouvements.get(sku)!
+      if (!m.traction_code && tractionCode) m.traction_code = tractionCode
+      return m
+    }
+
+    for (const t of allTx) {
+      if (!t.sku) continue
+      if (t.amount_type !== 'ItemPrice' || t.amount_description !== 'Principal') continue
+      const m = ensure(t.sku, t.traction_code)
+      if (t.transaction_type === 'Order') {
+        m.sold += Number(t.quantity_purchased || 1)
+      } else if (t.transaction_type === 'Refund') {
+        // qty non fournie par Amazon pour les refunds → 1 par ligne
+        const q = Number(t.quantity_purchased || 0)
+        m.returned += (q > 0 ? q : 1)
+      }
+    }
+
+    for (const r of reimbursementsEnriched) {
+      if (!r.sku) continue
+      const m = ensure(r.sku, r.traction_code)
+      m.lost += Number(r.qty_cash || 0)
+    }
+
+    // Finaliser net + valeur (en utilisant coutant Traction)
+    const mouvementsArr = Array.from(mouvements.values()).map(m => {
+      const coutant = m.traction_code ? (coutantMap.get(m.traction_code) || 0) : 0
+      const net = m.sold - m.returned + m.lost
+      return {
+        ...m,
+        coutant,
+        net,
+        valeur_net: coutant * net,
+      }
+    }).filter(m => m.sold !== 0 || m.returned !== 0 || m.lost !== 0)
+      .sort((a, b) => b.net - a.net || b.sold - a.sold)
+
+    const mouvTotals = mouvementsArr.reduce((acc: any, m: any) => {
+      acc.sold += m.sold
+      acc.returned += m.returned
+      acc.lost += m.lost
+      acc.net += m.net
+      acc.valeur_net += m.valeur_net
+      return acc
+    }, { sold: 0, returned: 0, lost: 0, net: 0, valeur_net: 0 })
+
     return NextResponse.json({
       settlement,
       totals: { brut: total_brut, fba: total_fba, fbm: total_fbm, nb_orders: orders.size, nb_transactions: allTx.length },
       breakdown: breakdownArr,
       top_skus: topSkus,
       orders: ordersArr,
+      reimbursements: reimbursementsEnriched,
+      reimb_totals: reimbTotals,
+      mouvements: mouvementsArr,
+      mouv_totals: mouvTotals,
     })
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message }, { status: 500 })

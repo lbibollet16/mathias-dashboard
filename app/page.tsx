@@ -5392,6 +5392,128 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                       </table>
                                     </div>
 
+                                    {/* ─── Mouvements d'inventaire (ce qu'il faut rentrer dans LAUTOPAK) ─── */}
+                                    {detail.mouvements && detail.mouvements.length > 0 && (
+                                      <>
+                                        <div style={{fontSize:12,fontWeight:800,marginBottom:6,color:C.green,textTransform:'uppercase'}}>
+                                          📦 Mouvements d'inventaire — qté nette à déduire dans LAUTOPAK ({detail.mouvements.length} SKU)
+                                        </div>
+                                        <div style={{fontSize:10,color:sub,marginBottom:8}}>
+                                          Net = Vendu − Retourné + Perdu (cash). Utilise ces quantités pour ajuster tes stocks Traction.
+                                        </div>
+                                        <div style={{background:card,borderRadius:8,border:`2px solid ${C.green}33`,overflow:'hidden',marginBottom:14,maxHeight:360,overflowY:'auto'}}>
+                                          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                                            <thead><tr style={{background:thBg,position:'sticky',top:0,zIndex:1}}>
+                                              <th style={{padding:'7px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
+                                              <th style={{padding:'7px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Traction</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Vendu</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Retourné</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Perdu (cash)</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>Net</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Coût unit.</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Valeur nette</th>
+                                            </tr></thead>
+                                            <tbody>
+                                              {detail.mouvements.map((m:any) => (
+                                                <tr key={m.sku}>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{m.sku}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',color:m.traction_code?C.blue:C.red,fontSize:11}}>{m.traction_code||'— non mappé'}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.sold>0?C.green:sub}}>{m.sold||''}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.returned>0?C.yellow:sub}}>{m.returned>0?`−${m.returned}`:''}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.lost>0?C.red:sub}}>{m.lost>0?`+${m.lost}`:''}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontSize:14,fontWeight:900,color:m.net>0?C.green:m.net<0?C.red:sub}}>{m.net}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{m.coutant>0?`${m.coutant.toFixed(2)}$`:'—'}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.valeur_net>=0?C.green:C.red}}>{m.valeur_net!==0?fmt$(m.valeur_net):'—'}</td>
+                                                </tr>
+                                              ))}
+                                              <tr style={{background:thBg}}>
+                                                <td colSpan={2} style={{padding:'9px 10px',fontWeight:900}}>TOTAUX</td>
+                                                <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.green}}>{detail.mouv_totals.sold}</td>
+                                                <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.yellow}}>−{detail.mouv_totals.returned}</td>
+                                                <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.red}}>+{detail.mouv_totals.lost}</td>
+                                                <td style={{padding:'9px 10px',textAlign:'right',fontSize:14,fontWeight:900,color:C.green}}>{detail.mouv_totals.net}</td>
+                                                <td></td>
+                                                <td style={{padding:'9px 10px',textAlign:'right',fontWeight:900,color:C.green}}>{fmt$(detail.mouv_totals.valeur_net)}</td>
+                                              </tr>
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </>
+                                    )}
+
+                                    {/* ─── Traçage remboursements (preuve + écart prix coûtant) ─── */}
+                                    {detail.reimbursements && detail.reimbursements.length > 0 && (
+                                      <>
+                                        <div style={{fontSize:12,fontWeight:800,marginBottom:6,color:C.red,textTransform:'uppercase'}}>
+                                          💸 Remboursements Amazon ({detail.reimbursements.length}) — traçage prix coûtant
+                                        </div>
+                                        <div style={{fontSize:10,color:sub,marginBottom:8}}>
+                                          Preuve qu'Amazon t'a bien remboursé. Écart = montant remboursé − prix coûtant Traction. Un écart négatif (rouge) = Amazon t'a sous-remboursé.
+                                        </div>
+                                        {/* Stats remboursements */}
+                                        <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:8,marginBottom:10}}>
+                                          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 10px',borderLeft:`3px solid ${C.blue}`}}>
+                                            <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>Remboursé par Amazon</div>
+                                            <div style={{fontSize:16,fontWeight:900,color:C.green}}>{fmt$(detail.reimb_totals.amount_total)}</div>
+                                          </div>
+                                          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 10px',borderLeft:`3px solid ${sub}`}}>
+                                            <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>Coûtant Traction</div>
+                                            <div style={{fontSize:16,fontWeight:900}}>{fmt$(detail.reimb_totals.coutant_total)}</div>
+                                          </div>
+                                          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 10px',borderLeft:`3px solid ${detail.reimb_totals.ecart_total>=0?C.green:C.red}`}}>
+                                            <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>Écart total</div>
+                                            <div style={{fontSize:16,fontWeight:900,color:detail.reimb_totals.ecart_total>=0?C.green:C.red}}>{fmt$(detail.reimb_totals.ecart_total)}</div>
+                                          </div>
+                                          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 10px',borderLeft:`3px solid ${C.yellow}`}}>
+                                            <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>Qté perdues / remplacées</div>
+                                            <div style={{fontSize:14,fontWeight:900}}><span style={{color:C.red}}>{detail.reimb_totals.qty_cash} cash</span> / <span style={{color:C.blue}}>{detail.reimb_totals.qty_inventory} inv</span></div>
+                                          </div>
+                                        </div>
+                                        <div style={{background:card,borderRadius:8,border:`2px solid ${C.red}33`,overflow:'hidden',marginBottom:14,maxHeight:400,overflowY:'auto'}}>
+                                          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                                            <thead><tr style={{background:thBg,position:'sticky',top:0,zIndex:1}}>
+                                              <th style={{padding:'7px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Date</th>
+                                              <th style={{padding:'7px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Raison</th>
+                                              <th style={{padding:'7px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Reimb. ID</th>
+                                              <th style={{padding:'7px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>SKU</th>
+                                              <th style={{padding:'7px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Traction</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Qté $</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Qté inv</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>$/unité</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Coût Tract.</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Total $</th>
+                                              <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`1px solid ${bdr}`}}>Écart</th>
+                                            </tr></thead>
+                                            <tbody>
+                                              {detail.reimbursements.map((r:any) => {
+                                                const isDamage = r.reason && String(r.reason).toLowerCase().includes('damage')
+                                                const isLost = r.reason && String(r.reason).toLowerCase().includes('lost')
+                                                const reasonColor = isDamage ? C.yellow : isLost ? C.red : sub
+                                                return (
+                                                <tr key={r.reimbursement_id}>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,whiteSpace:'nowrap'}}>{r.approval_date?new Date(r.approval_date).toLocaleDateString('fr-CA',{month:'short',day:'numeric'}):'—'}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>
+                                                    <span style={{background:reasonColor+'22',color:reasonColor,padding:'2px 6px',borderRadius:6,fontWeight:700,fontSize:10}}>{r.reason||'—'}</span>
+                                                  </td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:10,color:sub}}>{r.reimbursement_id}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11}}>{r.sku||'—'}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',color:r.traction_code?C.blue:C.red,fontSize:11}}>{r.traction_code||'— non mappé'}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:r.qty_cash>0?C.red:sub,fontWeight:700}}>{r.qty_cash||''}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:r.qty_inventory>0?C.blue:sub,fontWeight:700}}>{r.qty_inventory||''}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:C.green}}>{Number(r.amount_per_unit||0).toFixed(2)}$</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:r.traction_coutant>0?sub:C.red,fontSize:11}}>{r.traction_coutant>0?`${r.traction_coutant.toFixed(2)}$`:'?'}</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:C.green}}>{Number(r.amount_total||0).toFixed(2)}$</td>
+                                                  <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:900,color:r.ecart_total>=0?C.green:C.red}}>
+                                                    {r.traction_coutant>0?fmt$(r.ecart_total):'?'}
+                                                  </td>
+                                                </tr>
+                                              )})}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </>
+                                    )}
+
                                     {/* Top SKU */}
                                     {detail.top_skus && detail.top_skus.length > 0 && (
                                       <>
