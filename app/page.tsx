@@ -1920,7 +1920,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
 
     // Créer/reprendre une session pour cette localisation
     try {
-      const pieces_attendues = data.map((p:any) => p.code_piece)
+      const pieces_attendues = dataFiltered.map((p:any) => p.code_piece)
       const sessR = await fetch('/api/inventaire/session', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},

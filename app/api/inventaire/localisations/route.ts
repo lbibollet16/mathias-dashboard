@@ -13,6 +13,8 @@ export async function GET(req: NextRequest) {
       if (error) throw error
       const map = new Map<string, Set<string>>()
       for (const r of data || []) {
+        // Exclure les placeholders LOC_* créés lors de la création d'une nouvelle localisation
+        if (r.code_piece && r.code_piece.startsWith('LOC_')) continue
         const locs = [r.localisation1, r.localisation2, r.localisation3, r.localisation4].filter(Boolean)
         for (const loc of locs) {
           if (!map.has(loc)) map.set(loc, new Set())
