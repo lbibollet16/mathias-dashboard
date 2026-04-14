@@ -4421,13 +4421,19 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
 }
 
 // ── Comptabilité Tab ─────────────────────────────────────────────────────────
+// ── Comptabilité Tab ─────────────────────────────────────────────────────────
 function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVerifies, validationsCompta, setValidationsCompta}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const userEmail = profil?.email || profil?.nom || 'Inconnu'
   const [comptages, setComptages] = useState<any[]>([])
   const [vue, setVue] = useState<'a_valider'|'historique'>('a_valider')
-  const [filtSource, setFiltSource] = useState<'tous'|'negatif'|'comptage'>('tous')
+  const [filtType, setFiltType] = useState<'tous'|'negatif'|'comptage'|'photo'>('tous')
+  const [tri, setTri] = useState<'date_desc'|'ecart_desc'|'code_asc'>('date_desc')
+  const [search, setSearch] = useState('')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [loadingAction, setLoadingAction] = useState<string|null>(null)
+  const [filtSourceHist, setFiltSourceHist] = useState<'tous'|'negatif'|'comptage'>('tous')
 
   async function recharger() {
     try {
@@ -4446,25 +4452,113 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   const validesKey = new Set(validations.map((v:any) => `${v.source}:${v.ref_id}`))
   const estValide = (source:string, refId:any) => validesKey.has(`${source}:${refId}`)
 
-  // Sources à valider
-  const negatifsAValider = (negsVerifies||[]).filter((n:any) => !estValide('negatif', n.id))
-  const comptagesEcart = (comptages||[]).filter((c:any) => c.ecart !== 0 && c.ecart !== null && !estValide('comptage', c.id))
+  type Item = {
+    key: string; source: 'negatif'|'comptage'; id: number; code_piece: string;
+    date: string; ecart: number; valeur: number; employe: string;
+    hasPhoto: boolean; hasComment: boolean; hasAlt: boolean; raw: any;
+  }
+  const items: Item[] = []
+  for (const n of (negsVerifies||[])) {
+    if (estValide('negatif', n.id)) continue
+    items.push({
+      key: `negatif:${n.id}`, source: 'negatif', id: n.id, code_piece: n.code_piece,
+      date: n.date_verification, ecart: Number(n.ajustement||0),
+      valeur: Number(n.valeur_au_moment||0), employe: n.employe||'',
+      hasPhoto: !!(n.photo_url || n.photo_url2),
+      hasComment: !!n.commentaire,
+      hasAlt: !!n.alt_code_piece,
+      raw: n,
+    })
+  }
+  for (const c of (comptages||[])) {
+    if (c.statut !== 'reconcilie') continue
+    const ec = c.ecart_reconcilie
+    if (ec === 0 || ec === null || ec === undefined) continue
+    if (estValide('comptage', c.id)) continue
+    items.push({
+      key: `comptage:${c.id}`, source: 'comptage', id: c.id, code_piece: c.code_piece,
+      date: c.date_reconciliation || c.date_comptage, ecart: Number(ec),
+      valeur: 0, employe: c.employe||'',
+      hasPhoto: !!c.photo_url,
+      hasComment: !!c.note,
+      hasAlt: false,
+      raw: c,
+    })
+  }
 
-  async function valider(source:string, refId:any, code_piece:string, snapshot:any) {
-    const key = `${source}:${refId}`
-    setLoadingAction(key)
+  const searchLower = search.trim().toLowerCase()
+  const itemsFiltered = items.filter(it => {
+    if (filtType === 'negatif' && it.source !== 'negatif') return false
+    if (filtType === 'comptage' && it.source !== 'comptage') return false
+    if (filtType === 'photo' && !it.hasPhoto) return false
+    if (searchLower && !it.code_piece.toLowerCase().includes(searchLower)) return false
+    return true
+  })
+
+  const itemsSorted = [...itemsFiltered].sort((a,b) => {
+    if (tri === 'date_desc') return new Date(b.date).getTime() - new Date(a.date).getTime()
+    if (tri === 'ecart_desc') return Math.abs(b.ecart) - Math.abs(a.ecart)
+    return a.code_piece.localeCompare(b.code_piece)
+  })
+
+  const totalValeur = itemsFiltered.reduce((s,it) => s + Math.abs(it.valeur), 0)
+  const nbNegatifs = items.filter(i=>i.source==='negatif').length
+  const nbComptages = items.filter(i=>i.source==='comptage').length
+  const nbPhoto = items.filter(i=>i.hasPhoto).length
+
+  function toggleExpand(k: string) {
+    setExpanded(prev => {
+      const s = new Set(prev)
+      if (s.has(k)) s.delete(k); else s.add(k)
+      return s
+    })
+  }
+  function toggleSelect(k: string, e?: any) {
+    if (e) e.stopPropagation()
+    setSelected(prev => {
+      const s = new Set(prev)
+      if (s.has(k)) s.delete(k); else s.add(k)
+      return s
+    })
+  }
+  function toggleSelectAll() {
+    if (selected.size === itemsSorted.length) setSelected(new Set())
+    else setSelected(new Set(itemsSorted.map(i=>i.key)))
+  }
+
+  async function valider(it: Item) {
+    setLoadingAction(it.key)
     try {
       await fetch('/api/validations-comptables', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ source, ref_id: refId, code_piece, snapshot, user_email: userEmail })
+        body: JSON.stringify({ source: it.source, ref_id: it.id, code_piece: it.code_piece, snapshot: it.raw, user_email: userEmail })
       })
+      setSelected(prev => { const s = new Set(prev); s.delete(it.key); return s })
+      await recharger()
+    } finally { setLoadingAction(null) }
+  }
+
+  async function validerLot() {
+    if (selected.size === 0) return
+    if (!confirm(`Valider comptablement ${selected.size} élément(s) ?`)) return
+    setLoadingAction('lot')
+    try {
+      const toValidate = itemsSorted.filter(i => selected.has(i.key))
+      await Promise.all(toValidate.map(it =>
+        fetch('/api/validations-comptables', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ source: it.source, ref_id: it.id, code_piece: it.code_piece, snapshot: it.raw, user_email: userEmail })
+        })
+      ))
+      setSelected(new Set())
       await recharger()
     } finally { setLoadingAction(null) }
   }
 
   async function annuler(id:number) {
-    if (!confirm('Annuler cette validation ? La pièce réapparaîtra dans son onglet d\'origine.')) return
+    if (!confirm("Annuler cette validation ? La pièce réapparaîtra dans son onglet d'origine.")) return
     setLoadingAction(`undo:${id}`)
     try {
       await fetch('/api/validations-comptables', {
@@ -4476,250 +4570,232 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     } finally { setLoadingAction(null) }
   }
 
-  const fmtDate = (d:string) => d ? new Date(d).toLocaleDateString('fr-CA',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'
+  const fmtDate = (d:string) => d ? new Date(d).toLocaleDateString('fr-CA',{year:'2-digit',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'
+  const fmtDateLong = (d:string) => d ? new Date(d).toLocaleDateString('fr-CA',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'
 
-  const labelSource = (s:string) => s === 'negatif' ? '🔴 Négatif vérifié' : '📦 Comptage écart'
+  const labelSource = (s:string) => s === 'negatif' ? '🔴 Négatif' : '📦 Comptage'
   const colorSource = (s:string) => s === 'negatif' ? C.red : C.blue
 
-  const totalAValider = negatifsAValider.length + comptagesEcart.length
   const historique = [...validations].sort((a:any,b:any) => new Date(b.date_validation).getTime() - new Date(a.date_validation).getTime())
-  const historiqueFiltre = filtSource === 'tous' ? historique : historique.filter((v:any) => v.source === filtSource)
+  const historiqueFiltre = filtSourceHist === 'tous' ? historique : historique.filter((v:any) => v.source === filtSourceHist)
 
-  const card1: any = {background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'12px 14px'}
+  function NegDetails({n}: any) {
+    return (
+      <div style={{background:dark?'#0f0f0f':'#fafbfc',padding:'14px 16px',borderTop:`1px solid ${bdr}`}}>
+        <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:12}}>
+          <div style={{background:card,borderRadius:8,padding:'10px 12px',border:`1px solid ${bdr}`}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6}}>Stocks au moment</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6,textAlign:'center'}}>
+              <div><div style={{fontSize:9,color:sub}}>Système</div><div style={{fontSize:16,fontWeight:900,color:C.red}}>{n.stock_au_moment}</div></div>
+              <div><div style={{fontSize:9,color:sub}}>Tablette</div><div style={{fontSize:16,fontWeight:900,color:C.blue}}>{n.qte_reelle??'—'}</div></div>
+              <div><div style={{fontSize:9,color:sub}}>Valeur</div><div style={{fontSize:13,fontWeight:700,color:C.red}}>−{Number(n.valeur_au_moment||0).toFixed(0)}$</div></div>
+            </div>
+          </div>
+          <div style={{background:card,borderRadius:8,padding:'10px 12px',border:`1px solid ${bdr}`}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6}}>Transactions</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'2px 10px',fontSize:11}}>
+              {[
+                {l:'Serv. détail',v2:n.serv_detail},
+                {l:'Serv. interne',v2:n.serv_interne},
+                {l:'Serv. gar.',v2:n.serv_gar},
+                {l:'Pce détail',v2:n.pce_detail},
+                {l:'Récept.',v2:n.recept_comm},
+                {l:'Déc. phys.',v2:n.dec_physique},
+                {l:'Autre',v2:n.autre},
+              ].map(t=>(
+                <div key={t.l} style={{display:'flex',justifyContent:'space-between'}}>
+                  <span style={{color:sub}}>{t.l}</span>
+                  <span style={{fontWeight:700,color:Number(t.v2)===0?sub:Number(t.v2)<0?C.red:C.green}}>{Number(t.v2??0)>0?'+':''}{Number(t.v2??0).toFixed(0)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {n.cause && <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:6,padding:'8px 12px',fontSize:12,color:C.blue,marginTop:10,fontWeight:600,whiteSpace:'pre-wrap'}}>📋 {n.cause}</div>}
+        {n.commentaire && <div style={{background:dark?'#1a1a1a':'#f1f3f5',borderRadius:6,padding:'8px 12px',fontSize:12,color:sub,marginTop:8,whiteSpace:'pre-wrap'}}>💬 {n.commentaire}</div>}
+
+        {(n.photo_url || n.photo_url2) && (
+          <div style={{display:'flex',gap:8,marginTop:10,flexWrap:'wrap'}}>
+            {n.photo_url && <a href={n.photo_url} target="_blank" rel="noreferrer"><img src={n.photo_url} alt="" onError={(e:any)=>e.target.style.display='none'} style={{width:120,height:80,objectFit:'cover',borderRadius:6,border:`2px solid ${C.green}`}}/></a>}
+            {n.photo_url2 && <a href={n.photo_url2} target="_blank" rel="noreferrer"><img src={n.photo_url2} alt="" onError={(e:any)=>e.target.style.display='none'} style={{width:120,height:80,objectFit:'cover',borderRadius:6,border:`2px solid ${C.green}`}}/></a>}
+          </div>
+        )}
+
+        {n.alt_code_piece && (
+          <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:8,padding:'10px 12px',marginTop:10,border:`1px solid ${C.green}33`}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+              <span style={{fontSize:12,fontWeight:700,color:C.green}}>🔄 Alt — {n.alt_code_piece}</span>
+              <span style={{fontSize:16,fontWeight:900,color:Number(n.alt_ajustement)===0?C.green:C.red}}>{Number(n.alt_ajustement)>=0?'+':''}{Number(n.alt_ajustement??0).toFixed(0)}</span>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function ComptDetails({c}: any) {
+    return (
+      <div style={{background:dark?'#0f0f0f':'#fafbfc',padding:'14px 16px',borderTop:`1px solid ${bdr}`}}>
+        <div style={{background:card,borderRadius:8,padding:'10px 12px',border:`1px solid ${bdr}`,marginBottom:10}}>
+          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6}}>Quantités</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,textAlign:'center'}}>
+            <div><div style={{fontSize:9,color:sub}}>Système</div><div style={{fontSize:16,fontWeight:900,color:C.blue}}>{c.qte_systeme}</div></div>
+            <div><div style={{fontSize:9,color:sub}}>Compté</div><div style={{fontSize:16,fontWeight:900,color:C.green}}>{c.qte_comptee}</div></div>
+            <div><div style={{fontSize:9,color:sub}}>Stock J+1</div><div style={{fontSize:16,fontWeight:900,color:C.blue}}>{c.stock_apres_sync??'—'}</div></div>
+            <div><div style={{fontSize:9,color:sub}}>Loc</div><div style={{fontSize:13,fontWeight:700,fontFamily:'monospace',color:C.blue}}>{c.localisation}</div></div>
+          </div>
+          {c.ecart !== c.ecart_reconcilie && (
+            <div style={{fontSize:11,color:sub,marginTop:8,textAlign:'center'}}>
+              Ventes entre-temps : <strong style={{color:C.blue}}>{c.qte_systeme - c.stock_apres_sync}</strong> unité(s)
+            </div>
+          )}
+        </div>
+        {c.note && <div style={{background:dark?'#1a1a1a':'#f1f3f5',borderRadius:6,padding:'8px 12px',fontSize:12,color:sub,marginBottom:10,whiteSpace:'pre-wrap'}}>💬 {c.note}</div>}
+        {c.photo_url && (
+          <a href={c.photo_url} target="_blank" rel="noreferrer" style={{display:'inline-block'}}>
+            <img src={c.photo_url} alt="" onError={(e:any)=>e.target.style.display='none'} style={{width:160,height:110,objectFit:'cover',borderRadius:6,border:`2px solid ${C.green}`}}/>
+          </a>
+        )}
+        <div style={{fontSize:11,color:sub,marginTop:8}}>Réconcilié le {fmtDateLong(c.date_reconciliation)}</div>
+      </div>
+    )
+  }
 
   return (
     <div>
-      {/* Header */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10,marginBottom:14}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10,marginBottom:12}}>
         <div>
           <div style={{fontSize:20,fontWeight:900}}>💰 Comptabilité</div>
-          <div style={{fontSize:12,color:sub,marginTop:2}}>Validation comptable des écritures et historique</div>
+          <div style={{fontSize:11,color:sub,marginTop:2}}>Validation comptable et historique</div>
         </div>
-        <button onClick={recharger} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:13}}>🔄 Actualiser</button>
+        <button onClick={recharger} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'7px 12px',fontWeight:700,cursor:'pointer',fontSize:12}}>🔄 Actualiser</button>
       </div>
 
-      {/* Sous-onglets */}
-      <div style={{display:'flex',gap:8,marginBottom:14,flexWrap:'wrap'}}>
+      <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>
         <button onClick={()=>setVue('a_valider')}
-          style={{padding:isMobile?'12px 18px':'8px 16px',borderRadius:20,border:`2px solid ${vue==='a_valider'?C.blue:bdr}`,background:vue==='a_valider'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='a_valider'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:isMobile?14:13}}>
-          📥 À valider ({totalAValider})
+          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='a_valider'?C.blue:bdr}`,background:vue==='a_valider'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='a_valider'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+          📥 À valider ({items.length})
         </button>
         <button onClick={()=>setVue('historique')}
-          style={{padding:isMobile?'12px 18px':'8px 16px',borderRadius:20,border:`2px solid ${vue==='historique'?C.green:bdr}`,background:vue==='historique'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:vue==='historique'?C.green:sub,fontWeight:700,cursor:'pointer',fontSize:isMobile?14:13}}>
+          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='historique'?C.green:bdr}`,background:vue==='historique'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:vue==='historique'?C.green:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
           📚 Historique ({historique.length})
         </button>
       </div>
 
       {vue === 'a_valider' && (
-        <div style={{display:'flex',flexDirection:'column',gap:18}}>
-          {/* Compteurs */}
-          <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(2,1fr)',gap:10}}>
-            <div style={{...card1,borderLeft:`4px solid ${C.red}`}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Négatifs vérifiés</div>
-              <div style={{fontSize:26,fontWeight:900,color:C.red}}>{negatifsAValider.length}</div>
+        <div>
+          <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:10,display:'flex',gap:18,flexWrap:'wrap',alignItems:'center',fontSize:12}}>
+            <div><span style={{color:sub}}>Total : </span><strong style={{fontSize:15,color:dark?'#fff':'#1a1a1a'}}>{items.length}</strong></div>
+            <div style={{color:sub}}>•</div>
+            <div><span style={{color:C.red}}>🔴 {nbNegatifs}</span></div>
+            <div><span style={{color:C.blue}}>📦 {nbComptages}</span></div>
+            <div><span style={{color:sub}}>📸 {nbPhoto}</span></div>
+            <div style={{color:sub}}>•</div>
+            <div><span style={{color:sub}}>Valeur en jeu : </span><strong style={{color:C.red}}>{totalValeur.toFixed(0)}$</strong></div>
+          </div>
+
+          <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:10,display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Code pièce..."
+              style={{...S,maxWidth:180,fontSize:12,padding:'7px 10px'}}/>
+            <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+              {[
+                {id:'tous', label:`Tous (${items.length})`, color:sub},
+                {id:'negatif', label:`🔴 Nég (${nbNegatifs})`, color:C.red},
+                {id:'comptage', label:`📦 Cpt (${nbComptages})`, color:C.blue},
+                {id:'photo', label:`📸 Photo (${nbPhoto})`, color:C.green},
+              ].map(f => (
+                <button key={f.id} onClick={()=>setFiltType(f.id as any)}
+                  style={{padding:'6px 11px',borderRadius:14,border:`1px solid ${filtType===f.id?f.color:bdr}`,background:filtType===f.id?f.color+'22':'transparent',color:filtType===f.id?f.color:sub,fontWeight:700,cursor:'pointer',fontSize:11}}>
+                  {f.label}
+                </button>
+              ))}
             </div>
-            <div style={{...card1,borderLeft:`4px solid ${C.blue}`}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Comptages avec écart</div>
-              <div style={{fontSize:26,fontWeight:900,color:C.blue}}>{comptagesEcart.length}</div>
+            <div style={{marginLeft:'auto',display:'flex',gap:6,alignItems:'center'}}>
+              <span style={{fontSize:11,color:sub}}>Tri :</span>
+              <select value={tri} onChange={e=>setTri(e.target.value as any)} style={{...S,fontSize:11,padding:'5px 8px',width:'auto'}}>
+                <option value="date_desc">Date ↓</option>
+                <option value="ecart_desc">Écart ↓</option>
+                <option value="code_asc">Code A→Z</option>
+              </select>
             </div>
           </div>
 
-          {/* Section négatifs — cartes détaillées */}
-          <div>
-            <div style={{fontSize:14,fontWeight:800,marginBottom:8,color:C.red}}>🔴 Négatifs vérifiés ({negatifsAValider.length})</div>
-            {negatifsAValider.length === 0
-              ? <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucun négatif en attente de validation</div>
-              : <div style={{display:'flex',flexDirection:'column',gap:12}}>
-                  {negatifsAValider.map((v:any) => {
-                    const k = `negatif:${v.id}`
+          {selected.size > 0 && (
+            <div style={{background:C.green+'15',border:`2px solid ${C.green}`,borderRadius:10,padding:'10px 14px',marginBottom:10,display:'flex',gap:10,alignItems:'center',justifyContent:'space-between',position:'sticky',top:0,zIndex:5}}>
+              <div style={{fontSize:13,fontWeight:700,color:C.green}}>✓ {selected.size} élément(s) sélectionné(s)</div>
+              <div style={{display:'flex',gap:8}}>
+                <button onClick={()=>setSelected(new Set())}
+                  style={{background:'transparent',border:`1px solid ${bdr}`,borderRadius:6,padding:'7px 12px',fontWeight:700,cursor:'pointer',fontSize:12,color:sub}}>
+                  Annuler
+                </button>
+                <button disabled={loadingAction==='lot'} onClick={validerLot}
+                  style={{background:C.green,color:'#fff',border:'none',borderRadius:6,padding:'7px 14px',fontWeight:700,cursor:'pointer',fontSize:12,opacity:loadingAction==='lot'?0.6:1}}>
+                  {loadingAction==='lot'?'⏳ Validation...':`✓ Valider ${selected.size} sélectionné(s)`}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+            {itemsSorted.length === 0
+              ? <div style={{textAlign:'center',padding:40,color:sub,fontSize:13}}>Aucun élément à valider</div>
+              : <>
+                  <div style={{display:'flex',gap:10,padding:'8px 12px',background:thBg,borderBottom:`1px solid ${bdr}`,fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,alignItems:'center'}}>
+                    <input type="checkbox" checked={selected.size===itemsSorted.length && itemsSorted.length>0} onChange={toggleSelectAll} style={{cursor:'pointer'}}/>
+                    <div style={{width:60}}>Type</div>
+                    <div style={{flex:isMobile?2:1.5,minWidth:90}}>Code pièce</div>
+                    <div style={{width:isMobile?60:80,textAlign:'center'}}>Écart/Ajust</div>
+                    {!isMobile && <div style={{width:80,textAlign:'right'}}>Valeur</div>}
+                    {!isMobile && <div style={{width:50,textAlign:'center'}}>Infos</div>}
+                    {!isMobile && <div style={{width:120}}>Par</div>}
+                    {!isMobile && <div style={{width:110,textAlign:'right'}}>Date</div>}
+                    <div style={{width:isMobile?60:90}}></div>
+                  </div>
+
+                  {itemsSorted.map(it => {
+                    const isExp = expanded.has(it.key)
+                    const isSel = selected.has(it.key)
+                    const ecartColor = it.ecart === 0 ? C.green : it.ecart > 0 ? C.green : C.red
                     return (
-                      <div key={v.id} style={{background:card,borderRadius:14,border:`2px solid ${Number(v.ajustement)!==0?C.red:C.green}`,padding:16}}>
-                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12,flexWrap:'wrap',gap:10}}>
-                          <div>
-                            <div style={{fontWeight:900,fontSize:18,fontFamily:'monospace'}}>{v.code_piece}</div>
-                            <div style={{fontSize:12,color:sub,marginTop:2}}>👤 {v.employe} — {fmtDate(v.date_verification)}</div>
+                      <div key={it.key} style={{borderBottom:`1px solid ${bdr}`}}>
+                        <div onClick={()=>toggleExpand(it.key)}
+                          onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr}
+                          onMouseLeave={(e:any)=>e.currentTarget.style.background=isSel?(dark?'#0d2a18':'#e6f4ea'):'transparent'}
+                          style={{display:'flex',gap:10,padding:'10px 12px',alignItems:'center',cursor:'pointer',background:isSel?(dark?'#0d2a18':'#e6f4ea'):'transparent',transition:'background .1s'}}>
+                          <input type="checkbox" checked={isSel} onChange={(e:any)=>toggleSelect(it.key, e)} onClick={(e:any)=>e.stopPropagation()} style={{cursor:'pointer'}}/>
+                          <div style={{width:60}}>
+                            <span style={{background:colorSource(it.source)+'22',color:colorSource(it.source),padding:'2px 6px',borderRadius:8,fontSize:10,fontWeight:700}}>{labelSource(it.source)}</span>
                           </div>
-                          <div style={{textAlign:'right'}}>
-                            <div style={{fontSize:10,color:sub}}>Ajustement</div>
-                            <div style={{fontSize:30,fontWeight:900,color:Number(v.ajustement)===0?C.green:C.red}}>
-                              {Number(v.ajustement)>=0?'+':''}{Number(v.ajustement??0).toFixed(0)}
-                            </div>
+                          <div style={{flex:isMobile?2:1.5,minWidth:90,fontWeight:700,fontFamily:'monospace',fontSize:13}}>
+                            <span style={{display:'inline-block',width:14,color:sub,fontFamily:'sans-serif'}}>{isExp?'▼':'▶'}</span>
+                            {it.code_piece}
                           </div>
-                        </div>
-
-                        <div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:10,padding:'10px 12px',marginBottom:10}}>
-                          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6}}>Stocks au moment</div>
-                          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,textAlign:'center'}}>
-                            <div><div style={{fontSize:10,color:sub}}>Système</div><div style={{fontSize:18,fontWeight:900,color:C.red}}>{v.stock_au_moment}</div></div>
-                            <div><div style={{fontSize:10,color:sub}}>Tablette</div><div style={{fontSize:18,fontWeight:900,color:C.blue}}>{v.qte_reelle??'—'}</div></div>
-                            <div><div style={{fontSize:10,color:sub}}>Valeur</div><div style={{fontSize:13,fontWeight:700,color:C.red}}>−{Number(v.valeur_au_moment||0).toFixed(0)}$</div></div>
+                          <div style={{width:isMobile?60:80,textAlign:'center',fontSize:16,fontWeight:900,color:ecartColor}}>
+                            {it.ecart>=0?'+':''}{it.ecart.toFixed(0)}
                           </div>
-                        </div>
-
-                        <div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:10,padding:'10px 12px',marginBottom:10}}>
-                          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Transactions</div>
-                          <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:4}}>
-                            {[
-                              {l:'Serv. détail',v2:v.serv_detail},
-                              {l:'Serv. interne',v2:v.serv_interne},
-                              {l:'Serv. gar.',v2:v.serv_gar},
-                              {l:'Pce détail',v2:v.pce_detail},
-                              {l:'Récept. comm.',v2:v.recept_comm},
-                              {l:'Déc. physique',v2:v.dec_physique},
-                              {l:'Autre',v2:v.autre},
-                            ].map(t=>(
-                              <div key={t.l} style={{display:'flex',justifyContent:'space-between',fontSize:12,padding:'3px 6px',borderBottom:`1px solid ${bdr}`}}>
-                                <span style={{color:sub}}>{t.l}</span>
-                                <span style={{fontWeight:700,color:Number(t.v2)===0?sub:Number(t.v2)<0?C.red:C.green}}>{Number(t.v2??0)>0?'+':''}{Number(t.v2??0).toFixed(0)}</span>
-                              </div>
-                            ))}
+                          {!isMobile && <div style={{width:80,textAlign:'right',fontSize:12,fontWeight:700,color:it.valeur>0?C.red:sub}}>
+                            {it.valeur>0?`−${it.valeur.toFixed(0)}$`:'—'}
+                          </div>}
+                          {!isMobile && <div style={{width:50,textAlign:'center',fontSize:13}}>
+                            {it.hasPhoto && <span title="Photo">📸</span>}
+                            {it.hasComment && <span title="Commentaire">💬</span>}
+                            {it.hasAlt && <span title="Alternative">🔄</span>}
+                          </div>}
+                          {!isMobile && <div style={{width:120,fontSize:11,color:sub,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>👤 {it.employe}</div>}
+                          {!isMobile && <div style={{width:110,textAlign:'right',fontSize:11,color:sub,whiteSpace:'nowrap'}}>{fmtDate(it.date)}</div>}
+                          <div style={{width:isMobile?60:90,textAlign:'right'}}>
+                            <button disabled={loadingAction===it.key} onClick={(e:any)=>{e.stopPropagation();valider(it)}}
+                              style={{background:C.green,color:'#fff',border:'none',borderRadius:6,padding:isMobile?'6px 8px':'6px 12px',fontWeight:700,cursor:'pointer',fontSize:11,opacity:loadingAction===it.key?0.6:1}}>
+                              {loadingAction===it.key?'⏳':'✓'}
+                            </button>
                           </div>
                         </div>
-
-                        {v.cause && <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:8,padding:'10px 12px',fontSize:13,color:C.blue,marginBottom:8,fontWeight:600,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>📋 {v.cause}</div>}
-                        {v.commentaire && <div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:8,padding:'10px 12px',fontSize:12,color:sub,marginBottom:8,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>💬 {v.commentaire}</div>}
-
-                        {(v.photo_url || v.photo_url2) && (
-                          <div style={{display:'flex',gap:10,marginBottom:10,flexWrap:'wrap'}}>
-                            {v.photo_url && (
-                              <a href={v.photo_url} target="_blank" rel="noreferrer" style={{display:'inline-block'}}>
-                                <img src={v.photo_url} alt="Preuve" onError={(e:any)=>{e.target.style.display='none'}} style={{width:140,height:100,objectFit:'cover',borderRadius:10,border:`2px solid ${C.green}`}}/>
-                              </a>
-                            )}
-                            {v.photo_url2 && (
-                              <a href={v.photo_url2} target="_blank" rel="noreferrer" style={{display:'inline-block'}}>
-                                <img src={v.photo_url2} alt="Preuve 2" onError={(e:any)=>{e.target.style.display='none'}} style={{width:140,height:100,objectFit:'cover',borderRadius:10,border:`2px solid ${C.green}`}}/>
-                              </a>
-                            )}
-                          </div>
-                        )}
-
-                        {v.alt_code_piece && (
-                          <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:10,padding:'10px 12px',marginBottom:10,border:`1px solid ${C.green}33`}}>
-                            <div style={{fontSize:12,fontWeight:700,color:C.green,marginBottom:6}}>🔄 Pièce alternative — {v.alt_code_piece}</div>
-                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
-                              <span style={{fontSize:12,color:sub}}>Ajustement alternatif</span>
-                              <span style={{fontSize:20,fontWeight:900,color:Number(v.alt_ajustement)===0?C.green:C.red}}>{Number(v.alt_ajustement)>=0?'+':''}{Number(v.alt_ajustement??0).toFixed(0)}</span>
-                            </div>
-                            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:3}}>
-                              {[
-                                {l:'Serv. détail',v2:v.alt_serv_detail},
-                                {l:'Serv. interne',v2:v.alt_serv_interne},
-                                {l:'Serv. gar.',v2:v.alt_serv_gar},
-                                {l:'Pce détail',v2:v.alt_pce_detail},
-                                {l:'Récept. comm.',v2:v.alt_recept_comm},
-                                {l:'Déc. physique',v2:v.alt_dec_physique},
-                                {l:'Autre',v2:v.alt_autre},
-                                {l:'Tablette',v2:v.alt_qte_reelle},
-                              ].map(t=>(
-                                <div key={t.l} style={{display:'flex',justifyContent:'space-between',fontSize:11,padding:'2px 6px',borderBottom:`1px solid ${bdr}`}}>
-                                  <span style={{color:sub}}>{t.l}</span>
-                                  <span style={{fontWeight:700,color:Number(t.v2)===0?sub:Number(t.v2)<0?C.red:C.green}}>{Number(t.v2??0)>0?'+':''}{Number(t.v2??0).toFixed(0)}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        <button disabled={loadingAction===k} onClick={()=>valider('negatif', v.id, v.code_piece, v)}
-                          style={{width:'100%',background:C.green,color:'#fff',border:'none',borderRadius:10,padding:'12px 0',fontWeight:800,cursor:'pointer',fontSize:14,opacity:loadingAction===k?0.6:1}}>
-                          {loadingAction===k?'⏳ Validation...':'✓ Valider comptablement'}
-                        </button>
+                        {isExp && (it.source === 'negatif' ? <NegDetails n={it.raw}/> : <ComptDetails c={it.raw}/>)}
                       </div>
                     )
                   })}
-                </div>
-            }
-          </div>
-
-          {/* Section comptages — cartes détaillées */}
-          <div>
-            <div style={{fontSize:14,fontWeight:800,marginBottom:8,color:C.blue}}>📦 Comptages avec écart ({comptagesEcart.length})</div>
-            {comptagesEcart.length === 0
-              ? <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucun comptage avec écart en attente</div>
-              : <div style={{display:'flex',flexDirection:'column',gap:12}}>
-                  {comptagesEcart.map((c:any) => {
-                    const k = `comptage:${c.id}`
-                    const estReconcilie = c.statut === 'reconcilie'
-                    const ecartFinal = estReconcilie ? c.ecart_reconcilie : c.ecart
-                    return (
-                      <div key={c.id} style={{background:card,borderRadius:14,border:`2px solid ${ecartFinal!==0&&ecartFinal!==null?C.red:estReconcilie?C.green:C.yellow}`,padding:16}}>
-                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12,flexWrap:'wrap',gap:10}}>
-                          <div>
-                            <div style={{fontWeight:900,fontSize:18,fontFamily:'monospace'}}>{c.code_piece}</div>
-                            <div style={{marginTop:4}}>
-                              <span style={{background:dark?'#1a233a':'#e8f0fe',color:C.blue,padding:'3px 10px',borderRadius:6,fontWeight:600,fontFamily:'monospace',fontSize:12}}>{c.localisation}</span>
-                            </div>
-                            <div style={{fontSize:12,color:sub,marginTop:6}}>👤 {c.employe} — {fmtDate(c.date_comptage)}</div>
-                          </div>
-                          <div style={{textAlign:'right'}}>
-                            <div style={{fontSize:10,color:sub}}>{estReconcilie?'Écart réconcilié':'Écart brut'}</div>
-                            <div style={{fontSize:30,fontWeight:900,color:ecartFinal===0?C.green:C.red}}>
-                              {ecartFinal>0?'+':''}{ecartFinal}
-                            </div>
-                            {estReconcilie
-                              ? <span style={{background:C.green+'22',color:C.green,padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:700}}>✅ Réconcilié</span>
-                              : <span style={{background:C.yellow+'22',color:C.yellow,padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:700}}>⏳ En attente J+1</span>
-                            }
-                          </div>
-                        </div>
-
-                        <div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:10,padding:'12px',marginBottom:10}}>
-                          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Quantités</div>
-                          <div style={{display:'grid',gridTemplateColumns:estReconcilie?'repeat(4,1fr)':'repeat(3,1fr)',gap:8,textAlign:'center'}}>
-                            <div>
-                              <div style={{fontSize:10,color:sub}}>Système (comptage)</div>
-                              <div style={{fontSize:20,fontWeight:900,color:C.blue}}>{c.qte_systeme}</div>
-                            </div>
-                            <div>
-                              <div style={{fontSize:10,color:sub}}>Compté</div>
-                              <div style={{fontSize:20,fontWeight:900,color:C.green}}>{c.qte_comptee}</div>
-                            </div>
-                            {c.qte_reservee != null && (
-                              <div>
-                                <div style={{fontSize:10,color:sub}}>Réservé</div>
-                                <div style={{fontSize:20,fontWeight:900,color:sub}}>{c.qte_reservee}</div>
-                              </div>
-                            )}
-                            {estReconcilie && (
-                              <div>
-                                <div style={{fontSize:10,color:sub}}>Stock J+1</div>
-                                <div style={{fontSize:20,fontWeight:900,color:C.blue}}>{c.stock_apres_sync??'—'}</div>
-                              </div>
-                            )}
-                          </div>
-                          {estReconcilie && c.ecart !== c.ecart_reconcilie && (
-                            <div style={{fontSize:11,color:sub,marginTop:8,textAlign:'center'}}>
-                              Ventes entre-temps : <strong style={{color:C.blue}}>{c.qte_systeme - c.stock_apres_sync}</strong> unité(s) vendue(s) après le comptage
-                            </div>
-                          )}
-                        </div>
-
-                        {c.note && <div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:8,padding:'10px 12px',fontSize:12,color:sub,marginBottom:10,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>💬 {c.note}</div>}
-
-                        {c.photo_url && (
-                          <div style={{marginBottom:10}}>
-                            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6}}>📸 Photo preuve</div>
-                            <a href={c.photo_url} target="_blank" rel="noreferrer" style={{display:'inline-block'}}>
-                              <img src={c.photo_url} alt="Preuve comptage" onError={(e:any)=>{e.target.style.display='none'}} style={{width:200,height:140,objectFit:'cover',borderRadius:10,border:`2px solid ${C.green}`}}/>
-                            </a>
-                          </div>
-                        )}
-
-                        {estReconcilie && c.date_reconciliation && (
-                          <div style={{fontSize:11,color:sub,marginBottom:10}}>
-                            Réconcilié le {fmtDate(c.date_reconciliation)}
-                          </div>
-                        )}
-
-                        <button disabled={loadingAction===k} onClick={()=>valider('comptage', c.id, c.code_piece, c)}
-                          style={{width:'100%',background:C.green,color:'#fff',border:'none',borderRadius:10,padding:'12px 0',fontWeight:800,cursor:'pointer',fontSize:14,opacity:loadingAction===k?0.6:1}}>
-                          {loadingAction===k?'⏳ Validation...':'✓ Valider comptablement'}
-                        </button>
-                      </div>
-                    )
-                  })}
-                </div>
+                </>
             }
           </div>
         </div>
@@ -4727,55 +4803,54 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
 
       {vue === 'historique' && (
         <div>
-          {/* Filtres historique */}
-          <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap'}}>
+          <div style={{display:'flex',gap:6,marginBottom:10,flexWrap:'wrap'}}>
             {[
               {id:'tous', label:`Tout (${historique.length})`, color:sub},
               {id:'negatif', label:`🔴 Négatifs (${historique.filter((v:any)=>v.source==='negatif').length})`, color:C.red},
               {id:'comptage', label:`📦 Comptages (${historique.filter((v:any)=>v.source==='comptage').length})`, color:C.blue},
             ].map(f => (
-              <button key={f.id} onClick={()=>setFiltSource(f.id as any)}
-                style={{padding:'7px 14px',borderRadius:20,border:`2px solid ${filtSource===f.id?f.color:bdr}`,background:filtSource===f.id?(dark?'#1a1a2e':'#f0f4ff'):'transparent',color:filtSource===f.id?f.color:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+              <button key={f.id} onClick={()=>setFiltSourceHist(f.id as any)}
+                style={{padding:'6px 12px',borderRadius:14,border:`1px solid ${filtSourceHist===f.id?f.color:bdr}`,background:filtSourceHist===f.id?f.color+'22':'transparent',color:filtSourceHist===f.id?f.color:sub,fontWeight:700,cursor:'pointer',fontSize:11}}>
                 {f.label}
               </button>
             ))}
           </div>
 
-          <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+          <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden'}}>
             {historiqueFiltre.length === 0
               ? <div style={{textAlign:'center',padding:40,color:sub}}>Aucune validation dans l'historique</div>
               : <div style={{overflowX:'auto'}}>
                   <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
                     <thead><tr style={{background:thBg}}>
-                      <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Source</th>
-                      <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code pièce</th>
-                      <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Détail</th>
-                      <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Validé par</th>
-                      <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Date validation</th>
-                      <th style={{padding:'9px 10px',borderBottom:`2px solid ${bdr}`}}></th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Type</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Code</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Détail</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Validé par</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Date</th>
+                      <th style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}></th>
                     </tr></thead>
                     <tbody>
                       {historiqueFiltre.map((v:any) => {
                         const snap = v.snapshot || {}
                         let detail = '—'
-                        if (v.source === 'negatif') detail = `Ajust ${Number(snap.ajustement??0)>=0?'+':''}${Number(snap.ajustement??0).toFixed(0)} — ${snap.cause||''}`
+                        if (v.source === 'negatif') detail = `Ajust ${Number(snap.ajustement??0)>=0?'+':''}${Number(snap.ajustement??0).toFixed(0)}${snap.cause?' — '+snap.cause:''}`
                         else if (v.source === 'comptage') {
-                          const ec = snap.statut === 'reconcilie' ? snap.ecart_reconcilie : snap.ecart
-                          detail = `${snap.localisation||''} — Écart ${ec>0?'+':''}${ec??'—'} (sys ${snap.qte_systeme} / cpt ${snap.qte_comptee})`
+                          const ec = snap.ecart_reconcilie ?? snap.ecart
+                          detail = `${snap.localisation||''} — Écart ${ec>0?'+':''}${ec??'—'}`
                         }
                         return (
-                          <tr key={v.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                            <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`}}>
-                              <span style={{background:colorSource(v.source)+'22',color:colorSource(v.source),padding:'3px 8px',borderRadius:10,fontSize:11,fontWeight:700}}>{labelSource(v.source)}</span>
+                          <tr key={v.id} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
+                            <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}>
+                              <span style={{background:colorSource(v.source)+'22',color:colorSource(v.source),padding:'2px 8px',borderRadius:8,fontSize:10,fontWeight:700}}>{labelSource(v.source)}</span>
                             </td>
-                            <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace'}}>{v.code_piece}</td>
-                            <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub}}>{detail}</td>
-                            <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>👤 {v.user_email||'—'}</td>
-                            <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontSize:11,color:sub,whiteSpace:'nowrap'}}>{fmtDate(v.date_validation)}</td>
-                            <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
+                            <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace'}}>{v.code_piece}</td>
+                            <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub}}>{detail}</td>
+                            <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>👤 {v.user_email||'—'}</td>
+                            <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontSize:11,color:sub,whiteSpace:'nowrap'}}>{fmtDate(v.date_validation)}</td>
+                            <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
                               <button disabled={loadingAction===`undo:${v.id}`} onClick={()=>annuler(v.id)}
-                                style={{background:C.yellow+'22',color:C.yellow,border:`1px solid ${C.yellow}`,borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}}>
-                                {loadingAction===`undo:${v.id}`?'⏳':'↩ Annuler'}
+                                style={{background:'transparent',color:C.yellow,border:`1px solid ${C.yellow}`,borderRadius:6,padding:'4px 9px',fontSize:11,fontWeight:700,cursor:'pointer'}}>
+                                {loadingAction===`undo:${v.id}`?'⏳':'↩'}
                               </button>
                             </td>
                           </tr>
@@ -4791,4 +4866,3 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     </div>
   )
 }
-
