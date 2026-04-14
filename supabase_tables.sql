@@ -87,3 +87,155 @@ CREATE TABLE validations_comptables (
 CREATE INDEX idx_valcompt_source_ref ON validations_comptables(source, ref_id);
 CREATE INDEX idx_valcompt_date ON validations_comptables(date_validation DESC);
 ALTER TABLE validations_comptables DISABLE ROW LEVEL SECURITY;
+
+-- ==========================================================================
+-- PHASE 1 — Onglet Amazon : réconciliation paiements, inventaire FBA,
+-- remboursements. Données source: Traction (lignes AMA/FBA/FBM) + fichiers
+-- Amazon Seller Central (settlement TSV, FBA inventory CSV, reimbursements CSV).
+-- ==========================================================================
+
+-- 8. Miroir des pièces Traction sur les lignes Amazon (AMA/FBA/FBM)
+-- Une même PKCode peut exister plusieurs fois (fournisseurs différents),
+-- d'où la clé composite (pk_code, pk_fournisseur, code_ligne).
+CREATE TABLE traction_amazon_lignes (
+  id BIGSERIAL PRIMARY KEY,
+  pk_code TEXT NOT NULL,
+  pk_fournisseur TEXT NOT NULL DEFAULT '',
+  code_ligne TEXT NOT NULL,           -- AMA | FBA | FBM
+  qty NUMERIC DEFAULT 0,
+  qty_minus_reserved NUMERIC DEFAULT 0,
+  qte_reserve NUMERIC DEFAULT 0,
+  prix_coutant NUMERIC DEFAULT 0,
+  prix_liste1 NUMERIC DEFAULT 0,
+  code_barres TEXT,
+  desc_fra TEXT,
+  synced_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(pk_code, pk_fournisseur, code_ligne)
+);
+CREATE INDEX idx_tal_pkcode ON traction_amazon_lignes(pk_code);
+CREATE INDEX idx_tal_code_ligne ON traction_amazon_lignes(code_ligne);
+
+-- 9. Settlements Amazon (un par période de paiement ~2 semaines)
+CREATE TABLE amazon_settlements (
+  id BIGSERIAL PRIMARY KEY,
+  settlement_id TEXT NOT NULL UNIQUE,
+  settlement_start TIMESTAMPTZ,
+  settlement_end TIMESTAMPTZ,
+  deposit_date TIMESTAMPTZ,
+  total_amount NUMERIC,
+  currency TEXT,
+  marketplace TEXT,
+  file_name TEXT,
+  -- Réconciliation LAUTOPAK
+  lautopak_invoice_ref TEXT,          -- n° de facture LAUTOPAK (texte libre)
+  lautopak_invoice_date TIMESTAMPTZ,
+  lautopak_status TEXT DEFAULT 'pending',  -- pending | facture | ignore
+  lautopak_notes TEXT,
+  imported_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_amz_settlements_status ON amazon_settlements(lautopak_status);
+
+-- 10. Transactions détaillées d'un settlement
+CREATE TABLE amazon_transactions (
+  id BIGSERIAL PRIMARY KEY,
+  settlement_id TEXT NOT NULL,        -- FK logique vers amazon_settlements.settlement_id
+  transaction_type TEXT,              -- Order | Refund | Adjustment | other-transaction
+  order_id TEXT,
+  merchant_order_id TEXT,
+  adjustment_id TEXT,
+  shipment_id TEXT,
+  marketplace TEXT,
+  amount_type TEXT,                   -- ItemPrice | ItemFees | ItemWithheldTax | FBA Inventory Reimbursement | Cost of Advertising | ...
+  amount_description TEXT,            -- Principal | Shipping | Tax | Commission | FBAPerUnitFulfillmentFee | ...
+  amount NUMERIC,
+  fulfillment_id TEXT,                -- AFN (FBA) | MFN (FBM)
+  posted_date TIMESTAMPTZ,
+  order_item_code TEXT,
+  sku TEXT,
+  quantity_purchased NUMERIC,
+  promotion_id TEXT,
+  -- Résolution SKU
+  traction_code TEXT,                 -- PKCode Traction résolu (null si non matché)
+  resolution_source TEXT              -- cache | exact | suffix | prefix | manuel | none
+);
+CREATE INDEX idx_amz_tx_settlement ON amazon_transactions(settlement_id);
+CREATE INDEX idx_amz_tx_sku ON amazon_transactions(sku);
+CREATE INDEX idx_amz_tx_traction ON amazon_transactions(traction_code);
+CREATE INDEX idx_amz_tx_posted ON amazon_transactions(posted_date);
+
+-- 11. Snapshots d'inventaire FBA (chaque import = un snapshot daté)
+CREATE TABLE amazon_fba_inventory (
+  id BIGSERIAL PRIMARY KEY,
+  snapshot_date DATE NOT NULL,
+  sku TEXT NOT NULL,
+  fnsku TEXT,
+  asin TEXT,
+  product_name TEXT,
+  condition TEXT,
+  your_price NUMERIC,
+  afn_warehouse_quantity NUMERIC DEFAULT 0,
+  afn_fulfillable_quantity NUMERIC DEFAULT 0,
+  afn_unsellable_quantity NUMERIC DEFAULT 0,
+  afn_reserved_quantity NUMERIC DEFAULT 0,
+  afn_total_quantity NUMERIC DEFAULT 0,
+  afn_inbound_working_quantity NUMERIC DEFAULT 0,
+  afn_inbound_shipped_quantity NUMERIC DEFAULT 0,
+  afn_inbound_receiving_quantity NUMERIC DEFAULT 0,
+  traction_code TEXT,
+  resolution_source TEXT,
+  imported_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(snapshot_date, sku)
+);
+CREATE INDEX idx_amz_fba_sku ON amazon_fba_inventory(sku);
+CREATE INDEX idx_amz_fba_traction ON amazon_fba_inventory(traction_code);
+
+-- 12. Remboursements Amazon (Lost/Damaged warehouse)
+CREATE TABLE amazon_reimbursements (
+  id BIGSERIAL PRIMARY KEY,
+  reimbursement_id TEXT NOT NULL UNIQUE,
+  approval_date TIMESTAMPTZ,
+  case_id TEXT,
+  amazon_order_id TEXT,
+  reason TEXT,                         -- Lost_Warehouse | Damaged_Warehouse | ...
+  sku TEXT,
+  fnsku TEXT,
+  asin TEXT,
+  product_name TEXT,
+  currency TEXT,
+  amount_per_unit NUMERIC,
+  amount_total NUMERIC,
+  quantity_reimbursed_cash NUMERIC DEFAULT 0,
+  quantity_reimbursed_inventory NUMERIC DEFAULT 0,
+  quantity_reimbursed_total NUMERIC DEFAULT 0,
+  original_reimbursement_id TEXT,
+  original_reimbursement_type TEXT,
+  traction_code TEXT,
+  resolution_source TEXT,
+  -- Réconciliation LAUTOPAK
+  lautopak_ref TEXT,
+  lautopak_status TEXT DEFAULT 'pending',
+  lautopak_notes TEXT,
+  imported_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_amz_reimb_sku ON amazon_reimbursements(sku);
+CREATE INDEX idx_amz_reimb_status ON amazon_reimbursements(lautopak_status);
+
+-- 13. Mapping persistant SKU Amazon → code Traction (appris + manuel)
+CREATE TABLE amazon_sku_mapping (
+  id BIGSERIAL PRIMARY KEY,
+  amazon_sku TEXT NOT NULL UNIQUE,
+  traction_code TEXT NOT NULL,
+  source TEXT NOT NULL,               -- auto | manuel
+  confidence NUMERIC DEFAULT 1.0,     -- 1.0 = exact, 0.9 = suffix/prefix stripped
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_amz_sku_map_traction ON amazon_sku_mapping(traction_code);
+
+ALTER TABLE traction_amazon_lignes   DISABLE ROW LEVEL SECURITY;
+ALTER TABLE amazon_settlements       DISABLE ROW LEVEL SECURITY;
+ALTER TABLE amazon_transactions      DISABLE ROW LEVEL SECURITY;
+ALTER TABLE amazon_fba_inventory     DISABLE ROW LEVEL SECURITY;
+ALTER TABLE amazon_reimbursements    DISABLE ROW LEVEL SECURITY;
+ALTER TABLE amazon_sku_mapping       DISABLE ROW LEVEL SECURITY;

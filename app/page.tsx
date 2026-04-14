@@ -8,8 +8,8 @@ const supabaseCli = createClient(
 )
 
 const ROLES_ONGLETS: Record<string, string[]> = {
-  admin:        ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','utilisateurs'],
-  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite'],
+  admin:        ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon','utilisateurs'],
+  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon'],
   commis:       ['commandes','fournitures','retours'],
   employe_piece: ['fournitures','negatifs','inventaire','retours'],
 }
@@ -348,7 +348,7 @@ export default function Dashboard() {
 
       {/* TABS */}
       <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,overflowX:'auto',display:'flex',WebkitOverflowScrolling:'touch',scrollbarWidth:'none',gap:isMobile?2:0}}>
-        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>(profil?.onglets_custom && Array.isArray(profil.onglets_custom) && profil.onglets_custom.length>0 ? profil.onglets_custom : (ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis'])).includes(t.id)).map(t=>(
+        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>(profil?.onglets_custom && Array.isArray(profil.onglets_custom) && profil.onglets_custom.length>0 ? profil.onglets_custom : (ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis'])).includes(t.id)).map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:isMobile?'12px 14px':'12px 16px',border:'none',background:tab===t.id?(dark?'#1a233a':'#dbeafe'):'transparent',cursor:'pointer',fontSize:isMobile?14:13,fontWeight:tab===t.id?800:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',borderRadius:isMobile?'8px 8px 0 0':0,transition:'all .15s',whiteSpace:'nowrap',flexShrink:0}}>
             {t.l}
           </button>
@@ -687,6 +687,7 @@ export default function Dashboard() {
         {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts} fournituresData={fournituresData} setFournituresData={setFournituresData} profil={profil} validationsCompta={validationsCompta}/>}
         {tab==='inventaire' && <InventaireTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} validationsCompta={validationsCompta}/>}
         {tab==='comptabilite' && <ComptabiliteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} validationsCompta={validationsCompta} setValidationsCompta={setValidationsCompta}/>}
+        {tab==='amazon' && <AmazonTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
         {tab==='utilisateurs' && <UtilisateursTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
         {tab==='fournitures' && <FournituresTab fournituresData={fournituresData} setFournituresData={setFournituresData} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} data={data} profil={profil}/>}
       </div>
@@ -3143,12 +3144,13 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
     { id: 'fournitures', label: '💡 Suggestions',         desc: 'Suggestions de réapprovisionnement' },
     { id: 'inventaire',  label: '📦 Inventaire',          desc: 'Inventaire cyclique et comptage' },
     { id: 'comptabilite',label: '💰 Comptabilité',        desc: 'Validation comptable et historique' },
+    { id: 'amazon',      label: '📦 Amazon',              desc: 'Réconciliation FBA/FBM et LAUTOPAK' },
     { id: 'utilisateurs',label: '👥 Utilisateurs',        desc: 'Gestion des accès et utilisateurs' },
   ]
 
   const ROLES_LEGACY: Record<string, string[]> = {
-    admin:         ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','utilisateurs'],
-    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite'],
+    admin:         ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon','utilisateurs'],
+    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon'],
     commis:        ['commandes','fournitures','retours'],
     employe_piece: ['fournitures','negatifs','inventaire','retours'],
   }
@@ -4856,6 +4858,349 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                           </tr>
                         )
                       })}
+                    </tbody>
+                  </table>
+                </div>
+            }
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Amazon Tab (Phase 1) ─────────────────────────────────────────────────────
+function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+  const [vue, setVue] = useState<'import'|'mapping'>('import')
+  const [data, setData] = useState<any>({ counts: {}, settlements: [] })
+  const [loading, setLoading] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [importLog, setImportLog] = useState<string[]>([])
+  const [importing, setImporting] = useState(false)
+  const [unresolved, setUnresolved] = useState<any[]>([])
+  const [mappings, setMappings] = useState<any[]>([])
+  const [mappingInput, setMappingInput] = useState<Record<string,string>>({})
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  async function charger() {
+    setLoading(true)
+    try {
+      const [d, u, m] = await Promise.all([
+        fetch('/api/amazon/data').then(r=>r.json()),
+        fetch('/api/amazon/sku-mapping?mode=unresolved').then(r=>r.json()),
+        fetch('/api/amazon/sku-mapping?mode=mappings').then(r=>r.json()),
+      ])
+      if (d && !d.erreur) setData(d)
+      if (Array.isArray(u)) setUnresolved(u)
+      if (Array.isArray(m)) setMappings(m)
+    } catch {}
+    setLoading(false)
+  }
+
+  useEffect(() => { charger() }, [])
+
+  async function syncTraction() {
+    setSyncing(true)
+    setImportLog(l => [...l, '🔄 Synchronisation du flux Traction...'])
+    try {
+      const r = await fetch('/api/amazon/sync-traction', { method: 'POST' })
+      const j = await r.json()
+      if (j.success) {
+        const parts = Object.entries(j.par_ligne || {}).map(([k,v]:any) => `${k}=${v}`).join(', ')
+        setImportLog(l => [...l, `✅ Traction synchronisé : ${j.lignes} lignes (${parts})`])
+      } else {
+        setImportLog(l => [...l, `❌ Erreur Traction : ${j.erreur || 'inconnue'}`])
+      }
+      await charger()
+    } catch (e:any) {
+      setImportLog(l => [...l, `❌ Exception Traction : ${e.message}`])
+    }
+    setSyncing(false)
+  }
+
+  async function onFiles(files: FileList | null) {
+    if (!files || files.length === 0) return
+    setImporting(true)
+    for (const file of Array.from(files)) {
+      setImportLog(l => [...l, `📥 Import ${file.name}...`])
+      try {
+        const fd = new FormData()
+        fd.append('file', file)
+        const r = await fetch('/api/amazon/import', { method: 'POST', body: fd })
+        const j = await r.json()
+        if (j.success) {
+          let msg = `✅ ${file.name} : type=${j.type}`
+          if (j.settlement_id) msg += ` settlement=${j.settlement_id}`
+          if (j.transactions_inserted != null) msg += ` • ${j.transactions_inserted} transactions`
+          if (j.rows_inserted != null) msg += ` • ${j.rows_inserted} lignes`
+          if (j.snapshot_date) msg += ` snapshot=${j.snapshot_date}`
+          if (j.unresolved_sku) msg += ` • ${j.unresolved_sku} SKU non résolus`
+          setImportLog(l => [...l, msg])
+        } else {
+          setImportLog(l => [...l, `❌ ${file.name} : ${j.erreur || 'erreur inconnue'}`])
+        }
+      } catch (e:any) {
+        setImportLog(l => [...l, `❌ ${file.name} : ${e.message}`])
+      }
+    }
+    setImporting(false)
+    await charger()
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
+  async function validerMapping(amazon_sku: string) {
+    const traction_code = (mappingInput[amazon_sku] || '').trim()
+    if (!traction_code) { alert('Entrez un code Traction'); return }
+    try {
+      const r = await fetch('/api/amazon/sku-mapping', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ amazon_sku, traction_code })
+      })
+      const j = await r.json()
+      if (j.success) {
+        setMappingInput(prev => { const n = {...prev}; delete n[amazon_sku]; return n })
+        await charger()
+      } else {
+        alert(j.erreur || 'Erreur')
+      }
+    } catch (e:any) { alert(e.message) }
+  }
+
+  async function supprimerMapping(amazon_sku: string) {
+    if (!confirm(`Supprimer le mapping ${amazon_sku} ?`)) return
+    await fetch('/api/amazon/sku-mapping', {
+      method: 'DELETE',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ amazon_sku })
+    })
+    await charger()
+  }
+
+  const counts = data.counts || {}
+  const settlements = data.settlements || []
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10,marginBottom:12}}>
+        <div>
+          <div style={{fontSize:20,fontWeight:900}}>📦 Amazon</div>
+          <div style={{fontSize:11,color:sub,marginTop:2}}>Phase 1 — Import, synchronisation Traction, mapping SKU</div>
+        </div>
+        <button onClick={charger} disabled={loading} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'7px 12px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+          {loading?'⏳':'🔄 Actualiser'}
+        </button>
+      </div>
+
+      {/* Stats cards */}
+      <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(6,1fr)',gap:8,marginBottom:12}}>
+        <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
+          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Lignes Traction</div>
+          <div style={{fontSize:20,fontWeight:900,color:C.blue}}>{counts.traction_amazon_lignes||0}</div>
+        </div>
+        <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.green}`}}>
+          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Settlements</div>
+          <div style={{fontSize:20,fontWeight:900,color:C.green}}>{settlements.length}</div>
+        </div>
+        <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
+          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Transactions</div>
+          <div style={{fontSize:20,fontWeight:900,color:C.blue}}>{counts.transactions||0}</div>
+        </div>
+        <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.yellow}`}}>
+          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>FBA Inv.</div>
+          <div style={{fontSize:20,fontWeight:900,color:C.yellow}}>{counts.fba_inventory||0}</div>
+        </div>
+        <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.green}`}}>
+          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Rembours.</div>
+          <div style={{fontSize:20,fontWeight:900,color:C.green}}>{counts.reimbursements||0}</div>
+        </div>
+        <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.red}`}}>
+          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>SKU non mappés</div>
+          <div style={{fontSize:20,fontWeight:900,color:C.red}}>{unresolved.length}</div>
+        </div>
+      </div>
+
+      {/* Sous-onglets */}
+      <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>
+        <button onClick={()=>setVue('import')}
+          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='import'?C.blue:bdr}`,background:vue==='import'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='import'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+          📥 Import
+        </button>
+        <button onClick={()=>setVue('mapping')}
+          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='mapping'?C.red:bdr}`,background:vue==='mapping'?(dark?'#2b1113':'#fce8e6'):'transparent',color:vue==='mapping'?C.red:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+          🗺 SKU non mappés ({unresolved.length})
+        </button>
+      </div>
+
+      {vue === 'import' && (
+        <div>
+          {/* Bloc Traction sync */}
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'14px 16px',marginBottom:12}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:800,marginBottom:4}}>1️⃣ Synchroniser Traction</div>
+                <div style={{fontSize:11,color:sub}}>Charge les pièces Traction sur les lignes AMA/FBA/FBM. À refaire quand tu modifies des pièces dans Traction.</div>
+              </div>
+              <button onClick={syncTraction} disabled={syncing}
+                style={{background:syncing?bdr:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 18px',fontWeight:700,cursor:syncing?'default':'pointer',fontSize:13}}>
+                {syncing?'⏳ Sync...':'🔄 Sync Traction'}
+              </button>
+            </div>
+          </div>
+
+          {/* Dropzone upload */}
+          <div style={{background:card,border:`2px dashed ${bdr}`,borderRadius:10,padding:'20px',marginBottom:12,textAlign:'center'}}>
+            <div style={{fontSize:14,fontWeight:800,marginBottom:4}}>2️⃣ Importer les fichiers Amazon</div>
+            <div style={{fontSize:11,color:sub,marginBottom:14}}>
+              Détection automatique du type (settlement payments, FBA inventory, reimbursements). Tu peux sélectionner plusieurs fichiers à la fois.
+            </div>
+            <input ref={fileRef} type="file" multiple accept=".txt,.csv,.tsv"
+              onChange={e=>onFiles(e.target.files)} disabled={importing}
+              style={{display:'block',margin:'0 auto',fontSize:13}}/>
+            {importing && <div style={{marginTop:10,color:C.blue,fontWeight:700}}>⏳ Import en cours...</div>}
+          </div>
+
+          {/* Log import */}
+          {importLog.length > 0 && (
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                <div style={{fontSize:12,fontWeight:700,color:sub}}>📋 JOURNAL D'IMPORT</div>
+                <button onClick={()=>setImportLog([])} style={{background:'transparent',border:`1px solid ${bdr}`,borderRadius:6,padding:'3px 8px',cursor:'pointer',fontSize:11,color:sub}}>Effacer</button>
+              </div>
+              <div style={{fontFamily:'monospace',fontSize:11,maxHeight:220,overflowY:'auto',color:sub,lineHeight:1.7}}>
+                {importLog.map((l, i) => <div key={i}>{l}</div>)}
+              </div>
+            </div>
+          )}
+
+          {/* Liste settlements */}
+          <div>
+            <div style={{fontSize:14,fontWeight:800,marginBottom:8}}>📋 Settlements importés ({settlements.length})</div>
+            <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+              {settlements.length === 0
+                ? <div style={{textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucun settlement importé pour le moment</div>
+                : <div style={{overflowX:'auto'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                      <thead><tr style={{background:thBg}}>
+                        <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Settlement ID</th>
+                        <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Période</th>
+                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Montant</th>
+                        <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Déposé le</th>
+                        <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Statut</th>
+                      </tr></thead>
+                      <tbody>
+                        {settlements.map((s:any) => (
+                          <tr key={s.id} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
+                            <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11}}>{s.settlement_id}</td>
+                            <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,whiteSpace:'nowrap'}}>
+                              {s.settlement_start ? new Date(s.settlement_start).toLocaleDateString('fr-CA',{month:'short',day:'numeric'}) : '—'}
+                              {' → '}
+                              {s.settlement_end ? new Date(s.settlement_end).toLocaleDateString('fr-CA',{month:'short',day:'numeric'}) : '—'}
+                            </td>
+                            <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:C.green}}>
+                              {Number(s.total_amount||0).toFixed(2)} {s.currency||''}
+                            </td>
+                            <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,whiteSpace:'nowrap'}}>
+                              {s.deposit_date ? new Date(s.deposit_date).toLocaleDateString('fr-CA',{year:'numeric',month:'short',day:'numeric'}) : '—'}
+                            </td>
+                            <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}>
+                              <span style={{background:s.lautopak_status==='facture'?C.green+'22':C.yellow+'22',color:s.lautopak_status==='facture'?C.green:C.yellow,padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:700}}>
+                                {s.lautopak_status==='facture'?'✓ Facturé':'⏳ En attente'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+              }
+            </div>
+          </div>
+        </div>
+      )}
+
+      {vue === 'mapping' && (
+        <div>
+          <div style={{fontSize:11,color:sub,marginBottom:10}}>
+            Ces SKU Amazon n'ont pas pu être résolus automatiquement en code Traction.
+            Entre le code Traction manuellement et il sera mémorisé pour les prochains imports.
+          </div>
+
+          {unresolved.length === 0
+            ? <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,textAlign:'center',padding:30,color:sub}}>✅ Tous les SKU sont résolus</div>
+            : <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden',marginBottom:14}}>
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                    <thead><tr style={{background:thBg}}>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
+                      <th style={{padding:'8px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}># lignes</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Sources</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Code Traction</th>
+                      <th style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}></th>
+                    </tr></thead>
+                    <tbody>
+                      {unresolved.map((u:any) => (
+                        <tr key={u.amazon_sku} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
+                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{u.amazon_sku}</td>
+                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:sub}}>{u.count}</td>
+                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub}}>{(u.sources||[]).join(', ')}</td>
+                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}>
+                            <input
+                              value={mappingInput[u.amazon_sku]||''}
+                              onChange={e=>setMappingInput(prev=>({...prev,[u.amazon_sku]:e.target.value}))}
+                              placeholder="PKCode Traction..."
+                              style={{...S,fontSize:12,padding:'5px 8px',minWidth:160,fontFamily:'monospace'}}
+                              onKeyDown={e=>{ if (e.key==='Enter') validerMapping(u.amazon_sku) }}/>
+                          </td>
+                          <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
+                            <button onClick={()=>validerMapping(u.amazon_sku)}
+                              style={{background:C.green,color:'#fff',border:'none',borderRadius:6,padding:'5px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                              ✓ Mapper
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+          }
+
+          {/* Mappings existants */}
+          <div style={{fontSize:12,fontWeight:700,color:sub,marginBottom:6}}>Mappings mémorisés ({mappings.length})</div>
+          <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+            {mappings.length === 0
+              ? <div style={{textAlign:'center',padding:20,color:sub,fontSize:12}}>Aucun mapping enregistré</div>
+              : <div style={{overflowX:'auto',maxHeight:400}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                    <thead><tr style={{background:thBg,position:'sticky',top:0}}>
+                      <th style={{padding:'7px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
+                      <th style={{padding:'7px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>→ Traction</th>
+                      <th style={{padding:'7px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Source</th>
+                      <th style={{padding:'7px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Confiance</th>
+                      <th style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`}}></th>
+                    </tr></thead>
+                    <tbody>
+                      {mappings.map((m:any) => (
+                        <tr key={m.id}>
+                          <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{m.amazon_sku}</td>
+                          <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',color:C.blue}}>{m.traction_code}</td>
+                          <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                            <span style={{background:m.source==='manuel'?C.green+'22':C.blue+'22',color:m.source==='manuel'?C.green:C.blue,padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:700}}>
+                              {m.source}
+                            </span>
+                          </td>
+                          <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontSize:11,color:sub}}>{Number(m.confidence||0).toFixed(2)}</td>
+                          <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
+                            <button onClick={()=>supprimerMapping(m.amazon_sku)}
+                              style={{background:'transparent',color:C.red,border:`1px solid ${C.red}`,borderRadius:6,padding:'3px 8px',fontSize:11,cursor:'pointer',fontWeight:700}}>
+                              🗑
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
