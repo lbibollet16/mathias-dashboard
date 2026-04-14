@@ -245,3 +245,13 @@ ALTER TABLE amazon_sku_mapping       DISABLE ROW LEVEL SECURITY;
 -- Reimbursement du fichier payments)
 ALTER TABLE amazon_reimbursements ADD COLUMN IF NOT EXISTS settlement_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_amz_reimb_settlement ON amazon_reimbursements(settlement_id);
+
+-- Watchlist SKU Amazon (Phase 3 — monitoring inventaire)
+CREATE TABLE IF NOT EXISTS amazon_sku_watchlist (
+  id BIGSERIAL PRIMARY KEY,
+  amazon_sku TEXT NOT NULL UNIQUE,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_amz_watch_sku ON amazon_sku_watchlist(amazon_sku);
+ALTER TABLE amazon_sku_watchlist DISABLE ROW LEVEL SECURITY;

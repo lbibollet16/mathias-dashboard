@@ -4873,9 +4873,11 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
 function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const [vue, setVue] = useState<'import'|'settlements'|'inventaire'|'mapping'>('import')
-  const [inventaireGaps, setInventaireGaps] = useState<any>({ rows: [], totals: {}, snapshot_date: null })
-  const [filtGap, setFiltGap] = useState<'tous'|'ecart'|'ok'|'non_mappe'>('ecart')
+  const [inventaireGaps, setInventaireGaps] = useState<any>({ rows: [], totals: {}, snapshot_date: null, dashboard: null, history: null })
+  const [filtGap, setFiltGap] = useState<'tous'|'action'|'unsellable'|'rupture_fba'|'reclamation'|'ajust_traction'|'watched'|'ok'>('action')
   const [searchGap, setSearchGap] = useState('')
+  const [showHistory, setShowHistory] = useState(false)
+  const [showFbm, setShowFbm] = useState(false)
   const [data, setData] = useState<any>({ counts: {}, settlements: [] })
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -4991,6 +4993,17 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       await charger()
       await chargerDetail(settlement_id)
     } catch (e:any) { alert(e.message) }
+  }
+
+  async function toggleWatchlist(amazon_sku: string, currently: boolean) {
+    try {
+      await fetch('/api/amazon/watchlist', {
+        method: currently ? 'DELETE' : 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ amazon_sku })
+      })
+      await charger()
+    } catch {}
   }
 
   async function reconcilierRemboursements(silencieux: boolean = false) {
@@ -5693,15 +5706,33 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       {vue === 'inventaire' && (() => {
         const fmt$ = (n: number) => `${n>=0?'':'−'}${Math.abs(n).toFixed(2)}$`
         const t = inventaireGaps.totals || {}
+        const d = inventaireGaps.dashboard
+        const h = inventaireGaps.history
         const allRows: any[] = inventaireGaps.rows || []
         const q = searchGap.trim().toLowerCase()
         const filtered = allRows.filter(r => {
-          if (filtGap === 'ecart' && r.ecart === 0) return false
-          if (filtGap === 'ok' && r.ecart !== 0) return false
-          if (filtGap === 'non_mappe' && r.traction_code) return false
+          if (filtGap === 'action' && r.action === 'ok') return false
+          if (filtGap === 'unsellable' && r.action !== 'unsellable') return false
+          if (filtGap === 'rupture_fba' && r.action !== 'rupture_fba') return false
+          if (filtGap === 'reclamation' && r.action !== 'reclamation') return false
+          if (filtGap === 'ajust_traction' && r.action !== 'ajust_traction') return false
+          if (filtGap === 'watched' && !r.is_watched) return false
+          if (filtGap === 'ok' && r.action !== 'ok') return false
           if (q && !String(r.sku||'').toLowerCase().includes(q) && !String(r.traction_code||'').toLowerCase().includes(q)) return false
           return true
         })
+        const actionIcon: Record<string, string> = {
+          unsellable: '🔥', rupture_fba: '🚨', reclamation: '💰',
+          ajust_traction: '📝', non_mappe: '🗺', ok: '✓',
+        }
+        const actionLabel: Record<string, string> = {
+          unsellable: 'Unsellable', rupture_fba: 'Rupture FBA', reclamation: 'Réclamation',
+          ajust_traction: 'Ajuster Traction', non_mappe: 'Non mappé', ok: 'OK',
+        }
+        const actionColor: Record<string, string> = {
+          unsellable: C.red, rupture_fba: C.red, reclamation: C.yellow,
+          ajust_traction: C.blue, non_mappe: sub, ok: C.green,
+        }
         return (
         <div>
           {/* Header + snapshot date */}
@@ -5716,6 +5747,134 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               <div style={{fontSize:11,color:sub}}>📅 Snapshot : <strong>{inventaireGaps.snapshot_date}</strong></div>
             )}
           </div>
+
+          {/* ─── DASHBOARD SANTÉ FBA ─── */}
+          {d && (
+            <div style={{background:card,border:`2px solid ${bdr}`,borderRadius:12,padding:'14px 16px',marginBottom:12}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,flexWrap:'wrap',gap:8}}>
+                <div style={{fontSize:13,fontWeight:900}}>💼 SANTÉ INVENTAIRE FBA</div>
+                {h && (
+                  <button onClick={()=>setShowHistory(v=>!v)}
+                    style={{background:'transparent',border:`1px solid ${bdr}`,borderRadius:6,padding:'5px 10px',cursor:'pointer',fontSize:11,color:sub}}>
+                    {showHistory?'▼':'▶'} Historique ({h.nb_changed} changements depuis {h.previous_date})
+                  </button>
+                )}
+              </div>
+              {/* Valeurs globales */}
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:8,marginBottom:10}}>
+                <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:8,padding:'10px 12px',borderLeft:`3px solid ${C.green}`}}>
+                  <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>Valeur FBA dispo</div>
+                  <div style={{fontSize:18,fontWeight:900,color:C.green}}>{fmt$(d.value_fba_dispo)}</div>
+                  <div style={{fontSize:10,color:sub}}>{d.total_fba_units} unités</div>
+                </div>
+                <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:8,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
+                  <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>Valeur Traction</div>
+                  <div style={{fontSize:18,fontWeight:900,color:C.blue}}>{fmt$(d.value_traction)}</div>
+                  <div style={{fontSize:10,color:sub}}>{d.total_traction_units} unités</div>
+                </div>
+                <div style={{background:card,borderRadius:8,padding:'10px 12px',borderLeft:`3px solid ${d.delta_value>=0?C.blue:C.red}`}}>
+                  <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>Delta valeur</div>
+                  <div style={{fontSize:18,fontWeight:900,color:d.delta_value>=0?C.blue:C.red}}>{fmt$(d.delta_value)}</div>
+                  <div style={{fontSize:10,color:sub}}>FBA − Traction</div>
+                </div>
+                <div style={{background:d.value_fba_unsellable>0?(dark?'#2b1113':'#fce8e6'):card,borderRadius:8,padding:'10px 12px',borderLeft:`3px solid ${d.value_fba_unsellable>0?C.red:sub}`}}>
+                  <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>🔥 Unsellable</div>
+                  <div style={{fontSize:18,fontWeight:900,color:d.value_fba_unsellable>0?C.red:sub}}>{fmt$(d.value_fba_unsellable)}</div>
+                  <div style={{fontSize:10,color:sub}}>{d.total_unsellable_units} unités perdues</div>
+                </div>
+              </div>
+
+              {/* Cartes d'actions */}
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(5,1fr)',gap:6,marginBottom:10}}>
+                {[
+                  {k:'unsellable', icon:'🔥', label:'À réclamer', color:C.red},
+                  {k:'rupture_fba', icon:'🚨', label:'Rupture FBA', color:C.red},
+                  {k:'reclamation', icon:'💰', label:'Réclamation', color:C.yellow},
+                  {k:'ajust_traction', icon:'📝', label:'Ajuster Traction', color:C.blue},
+                  {k:'non_mappe', icon:'🗺', label:'Non mappés', color:sub},
+                ].map(a => {
+                  const stats = d.actions[a.k] || {count:0, value:0}
+                  return (
+                    <button key={a.k} onClick={()=>setFiltGap(a.k as any)}
+                      style={{background:filtGap===a.k?a.color+'22':card,border:`1px solid ${filtGap===a.k?a.color:bdr}`,borderRadius:8,padding:'8px 10px',cursor:'pointer',textAlign:'left'}}>
+                      <div style={{fontSize:10,color:sub,fontWeight:700}}>{a.icon} {a.label}</div>
+                      <div style={{fontSize:16,fontWeight:900,color:a.color}}>{stats.count}</div>
+                      {stats.value > 0 && <div style={{fontSize:10,color:sub}}>{fmt$(stats.value)}</div>}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Top pertes / gains */}
+              {(d.top_pertes.length > 0 || d.top_gains.length > 0) && (
+                <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:10}}>
+                  {d.top_pertes.length > 0 && (
+                    <div>
+                      <div style={{fontSize:10,fontWeight:800,color:C.red,textTransform:'uppercase',marginBottom:4}}>⬇️ Top pertes (Amazon &lt; Traction)</div>
+                      <div style={{background:dark?'#1a1a1a':'#fafbfc',borderRadius:6,padding:'6px 8px',fontSize:11}}>
+                        {d.top_pertes.map((p:any) => (
+                          <div key={p.sku} style={{display:'flex',justifyContent:'space-between',padding:'3px 0',borderBottom:`1px solid ${bdr}`}}>
+                            <span style={{fontFamily:'monospace',fontWeight:700}}>{p.sku}</span>
+                            <span style={{color:C.red,fontWeight:700}}>{p.ecart} → {fmt$(p.valeur_ecart)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {d.top_gains.length > 0 && (
+                    <div>
+                      <div style={{fontSize:10,fontWeight:800,color:C.blue,textTransform:'uppercase',marginBottom:4}}>⬆️ Top gains (Amazon &gt; Traction)</div>
+                      <div style={{background:dark?'#1a1a1a':'#fafbfc',borderRadius:6,padding:'6px 8px',fontSize:11}}>
+                        {d.top_gains.map((p:any) => (
+                          <div key={p.sku} style={{display:'flex',justifyContent:'space-between',padding:'3px 0',borderBottom:`1px solid ${bdr}`}}>
+                            <span style={{fontFamily:'monospace',fontWeight:700}}>{p.sku}</span>
+                            <span style={{color:C.blue,fontWeight:700}}>+{p.ecart} → {fmt$(p.valeur_ecart)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Historique déplié */}
+              {showHistory && h && (
+                <div style={{marginTop:10,background:dark?'#1a1a1a':'#fafbfc',borderRadius:8,padding:'10px 12px'}}>
+                  <div style={{fontSize:11,fontWeight:800,marginBottom:6}}>📈 Évolution depuis {h.previous_date}</div>
+                  <div style={{display:'flex',gap:14,flexWrap:'wrap',fontSize:12,marginBottom:8}}>
+                    <span>Unités : <strong style={{color:h.delta_units>=0?C.green:C.red}}>{h.delta_units>=0?'+':''}{h.delta_units}</strong></span>
+                    <span>Valeur : <strong style={{color:h.delta_value>=0?C.green:C.red}}>{fmt$(h.delta_value)}</strong></span>
+                    <span style={{color:C.red}}>⬇️ Dégradés : <strong>{h.nb_degraded}</strong></span>
+                    <span style={{color:C.green}}>⬆️ Améliorés : <strong>{h.nb_improved}</strong></span>
+                  </div>
+                  {h.top_deltas && h.top_deltas.length > 0 && (
+                    <div style={{maxHeight:200,overflowY:'auto'}}>
+                      <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
+                        <thead><tr style={{background:thBg}}>
+                          <th style={{padding:'5px 8px',textAlign:'left',color:sub,fontSize:9}}>SKU</th>
+                          <th style={{padding:'5px 8px',textAlign:'right',color:sub,fontSize:9}}>Avant</th>
+                          <th style={{padding:'5px 8px',textAlign:'right',color:sub,fontSize:9}}>Après</th>
+                          <th style={{padding:'5px 8px',textAlign:'right',color:sub,fontSize:9}}>Δ</th>
+                          <th style={{padding:'5px 8px',textAlign:'right',color:sub,fontSize:9}}>Valeur</th>
+                        </tr></thead>
+                        <tbody>
+                          {h.top_deltas.map((dt:any) => (
+                            <tr key={dt.sku}>
+                              <td style={{padding:'3px 8px',fontFamily:'monospace',fontWeight:700}}>{dt.sku}</td>
+                              <td style={{padding:'3px 8px',textAlign:'right',color:sub}}>{dt.prev_qty}</td>
+                              <td style={{padding:'3px 8px',textAlign:'right',color:sub}}>{dt.current_qty}</td>
+                              <td style={{padding:'3px 8px',textAlign:'right',fontWeight:700,color:dt.diff>=0?C.green:C.red}}>{dt.diff>=0?'+':''}{dt.diff}</td>
+                              <td style={{padding:'3px 8px',textAlign:'right',fontWeight:700,color:dt.value_diff>=0?C.green:C.red}}>{fmt$(dt.value_diff)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Stats */}
           <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(5,1fr)',gap:8,marginBottom:10}}>
@@ -5747,9 +5906,9 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               style={{...S,maxWidth:220,fontSize:12,padding:'7px 10px'}}/>
             <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
               {[
-                {id:'ecart', label:`⚠️ Écarts (${t.nb_ecart||0})`, color:C.red},
-                {id:'ok', label:`✅ OK (${t.nb_ok||0})`, color:C.green},
-                {id:'non_mappe', label:`🗺 Non mappés (${t.nb_non_mappes||0})`, color:C.yellow},
+                {id:'action', label:`⚠️ Actions (${(d?.actions?.unsellable?.count||0)+(d?.actions?.rupture_fba?.count||0)+(d?.actions?.reclamation?.count||0)+(d?.actions?.ajust_traction?.count||0)})`, color:C.red},
+                {id:'watched', label:`⭐ Watchlist (${d?.watched_count||0})`, color:C.yellow},
+                {id:'ok', label:`✅ OK (${d?.actions?.ok?.count||t.nb_ok||0})`, color:C.green},
                 {id:'tous', label:`Tous (${t.nb_total||0})`, color:sub},
               ].map(f => (
                 <button key={f.id} onClick={()=>setFiltGap(f.id as any)}
@@ -5758,6 +5917,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 </button>
               ))}
             </div>
+            <label style={{display:'flex',alignItems:'center',gap:6,fontSize:11,color:sub,cursor:'pointer',marginLeft:'auto'}}>
+              <input type="checkbox" checked={showFbm} onChange={e=>setShowFbm(e.target.checked)}/>
+              Colonne FBM cross-check
+            </label>
           </div>
 
           {/* Tableau des écarts */}
@@ -5771,32 +5934,50 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               : <div style={{overflowX:'auto'}}>
                   <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
                     <thead><tr style={{background:thBg}}>
-                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
+                      <th style={{padding:'8px 6px',borderBottom:`1px solid ${bdr}`,width:24}}></th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Action</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>SKU</th>
                       <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Traction</th>
                       <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Description</th>
                       <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>FBA dispo</th>
-                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Fulfil.</th>
-                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Inbound</th>
-                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Réservé</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Inb.</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`1px solid ${bdr}`}}>Unsell.</th>
                       <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Traction</th>
                       <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`1px solid ${bdr}`}}>Écart</th>
+                      {showFbm && <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>MFN</th>}
+                      {showFbm && <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Tract.FBM</th>}
+                      {showFbm && <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>ΔFBM</th>}
                       <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Coût</th>
                       <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`1px solid ${bdr}`}}>Valeur écart</th>
                     </tr></thead>
                     <tbody>
                       {filtered.map((r:any) => (
                         <tr key={r.sku} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
-                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{r.sku}</td>
+                          <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                            <button onClick={()=>toggleWatchlist(r.sku, r.is_watched)}
+                              title={r.is_watched?'Retirer de la watchlist':'Ajouter à la watchlist'}
+                              style={{background:'transparent',border:'none',cursor:'pointer',fontSize:14,padding:0}}>
+                              {r.is_watched?'⭐':'☆'}
+                            </button>
+                          </td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`}}>
+                            <span style={{background:actionColor[r.action]+'22',color:actionColor[r.action],padding:'2px 7px',borderRadius:8,fontSize:10,fontWeight:700,whiteSpace:'nowrap'}}>
+                              {actionIcon[r.action]} {actionLabel[r.action]}
+                            </span>
+                          </td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11}}>{r.sku}</td>
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',color:r.traction_code?C.blue:C.red,fontSize:11}}>{r.traction_code||'— non mappé'}</td>
-                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:260,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={r.product_name}>{r.product_name||'—'}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={r.product_name}>{r.product_name||'—'}</td>
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:C.blue}}>{r.amazon_dispo}</td>
-                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{r.amazon_fulfillable}</td>
-                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{r.amazon_inbound}</td>
-                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{r.amazon_reserved}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:r.amazon_inbound>0?C.blue:sub,fontSize:11}}>{r.amazon_inbound||''}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:r.amazon_unsellable>0?C.red:sub,fontSize:11,fontWeight:r.amazon_unsellable>0?800:400}}>{r.amazon_unsellable||''}</td>
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:r.traction_code?C.green:sub}}>{r.traction_code?r.traction_qty:'?'}</td>
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontSize:14,fontWeight:900,color:r.ecart===0?C.green:r.ecart>0?C.blue:C.red}}>
                             {r.ecart>0?'+':''}{r.ecart}
                           </td>
+                          {showFbm && <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{r.mfn_fulfillable||'—'}</td>}
+                          {showFbm && <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{r.traction_fbm||'—'}</td>}
+                          {showFbm && <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:r.ecart_fbm===0?sub:r.ecart_fbm>0?C.blue:C.red,fontSize:11}}>{r.ecart_fbm!==0?(r.ecart_fbm>0?'+':'')+r.ecart_fbm:'—'}</td>}
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{r.coutant>0?`${Number(r.coutant).toFixed(2)}$`:'—'}</td>
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:r.valeur_ecart===0?sub:r.valeur_ecart>0?C.blue:C.red}}>
                             {r.valeur_ecart!==0?fmt$(r.valeur_ecart):'—'}
