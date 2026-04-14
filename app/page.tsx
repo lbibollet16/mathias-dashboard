@@ -4872,7 +4872,10 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
 // ── Amazon Tab (Phase 1) ─────────────────────────────────────────────────────
 function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
-  const [vue, setVue] = useState<'import'|'settlements'|'mapping'>('import')
+  const [vue, setVue] = useState<'import'|'settlements'|'inventaire'|'mapping'>('import')
+  const [inventaireGaps, setInventaireGaps] = useState<any>({ rows: [], totals: {}, snapshot_date: null })
+  const [filtGap, setFiltGap] = useState<'tous'|'ecart'|'ok'|'non_mappe'>('ecart')
+  const [searchGap, setSearchGap] = useState('')
   const [data, setData] = useState<any>({ counts: {}, settlements: [] })
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -4894,16 +4897,18 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   async function charger() {
     setLoading(true)
     try {
-      const [d, u, m, s] = await Promise.all([
+      const [d, u, m, s, g] = await Promise.all([
         fetch('/api/amazon/data').then(r=>r.json()),
         fetch('/api/amazon/sku-mapping?mode=unresolved').then(r=>r.json()),
         fetch('/api/amazon/sku-mapping?mode=mappings').then(r=>r.json()),
         fetch('/api/amazon/settlements').then(r=>r.json()),
+        fetch('/api/amazon/inventory-gaps').then(r=>r.json()),
       ])
       if (d && !d.erreur) setData(d)
       if (Array.isArray(u)) setUnresolved(u)
       if (Array.isArray(m)) setMappings(m)
       if (Array.isArray(s)) setSettlementsList(s)
+      if (g && !g.erreur) setInventaireGaps(g)
     } catch {}
     setLoading(false)
   }
@@ -5162,6 +5167,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         <button onClick={()=>setVue('settlements')}
           style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='settlements'?C.green:bdr}`,background:vue==='settlements'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:vue==='settlements'?C.green:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
           💰 Settlements ({settlementsList.length})
+        </button>
+        <button onClick={()=>setVue('inventaire')}
+          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='inventaire'?C.yellow:bdr}`,background:vue==='inventaire'?(dark?'#2b2413':'#fdf6e3'):'transparent',color:vue==='inventaire'?C.yellow:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+          📊 Écarts inventaire ({inventaireGaps.totals?.nb_ecart||0})
         </button>
         <button onClick={()=>setVue('mapping')}
           style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='mapping'?C.red:bdr}`,background:vue==='mapping'?(dark?'#2b1113':'#fce8e6'):'transparent',color:vue==='mapping'?C.red:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
@@ -5676,6 +5685,135 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   })}
                 </>
             }
+          </div>
+        </div>
+        )
+      })()}
+
+      {vue === 'inventaire' && (() => {
+        const fmt$ = (n: number) => `${n>=0?'':'−'}${Math.abs(n).toFixed(2)}$`
+        const t = inventaireGaps.totals || {}
+        const allRows: any[] = inventaireGaps.rows || []
+        const q = searchGap.trim().toLowerCase()
+        const filtered = allRows.filter(r => {
+          if (filtGap === 'ecart' && r.ecart === 0) return false
+          if (filtGap === 'ok' && r.ecart !== 0) return false
+          if (filtGap === 'non_mappe' && r.traction_code) return false
+          if (q && !String(r.sku||'').toLowerCase().includes(q) && !String(r.traction_code||'').toLowerCase().includes(q)) return false
+          return true
+        })
+        return (
+        <div>
+          {/* Header + snapshot date */}
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap',marginBottom:10}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:800}}>📊 Comparaison Amazon FBA ↔ Traction</div>
+              <div style={{fontSize:11,color:sub,marginTop:2}}>
+                Compare le dernier snapshot FBA (afn fulfillable + inbound + reserved) au stock Traction disponible (QTYMINUSRESERVED) sur toutes les lignes AMA/FBA/FBM confondues.
+              </div>
+            </div>
+            {inventaireGaps.snapshot_date && (
+              <div style={{fontSize:11,color:sub}}>📅 Snapshot : <strong>{inventaireGaps.snapshot_date}</strong></div>
+            )}
+          </div>
+
+          {/* Stats */}
+          <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(5,1fr)',gap:8,marginBottom:10}}>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Total SKU FBA</div>
+              <div style={{fontSize:20,fontWeight:900}}>{t.nb_total||0}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.red}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Avec écart</div>
+              <div style={{fontSize:20,fontWeight:900,color:C.red}}>{t.nb_ecart||0}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.green}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>OK (pas d'écart)</div>
+              <div style={{fontSize:20,fontWeight:900,color:C.green}}>{t.nb_ok||0}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Valeur écart net</div>
+              <div style={{fontSize:18,fontWeight:900,color:(t.valeur_ecart_net||0)>=0?C.green:C.red}}>{fmt$(t.valeur_ecart_net||0)}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.yellow}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Valeur écart abs</div>
+              <div style={{fontSize:18,fontWeight:900,color:C.yellow}}>{fmt$(t.valeur_ecart_abs||0)}</div>
+            </div>
+          </div>
+
+          {/* Filtres */}
+          <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:10,display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+            <input value={searchGap} onChange={e=>setSearchGap(e.target.value)} placeholder="🔍 SKU ou code Traction..."
+              style={{...S,maxWidth:220,fontSize:12,padding:'7px 10px'}}/>
+            <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+              {[
+                {id:'ecart', label:`⚠️ Écarts (${t.nb_ecart||0})`, color:C.red},
+                {id:'ok', label:`✅ OK (${t.nb_ok||0})`, color:C.green},
+                {id:'non_mappe', label:`🗺 Non mappés (${t.nb_non_mappes||0})`, color:C.yellow},
+                {id:'tous', label:`Tous (${t.nb_total||0})`, color:sub},
+              ].map(f => (
+                <button key={f.id} onClick={()=>setFiltGap(f.id as any)}
+                  style={{padding:'6px 11px',borderRadius:14,border:`1px solid ${filtGap===f.id?f.color:bdr}`,background:filtGap===f.id?f.color+'22':'transparent',color:filtGap===f.id?f.color:sub,fontWeight:700,cursor:'pointer',fontSize:11}}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Tableau des écarts */}
+          <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+            {filtered.length === 0
+              ? <div style={{textAlign:'center',padding:40,color:sub,fontSize:13}}>
+                  {inventaireGaps.snapshot_date
+                    ? 'Aucun résultat avec ces filtres'
+                    : 'Aucun snapshot FBA importé — importe ton fichier CSV d\'inventaire FBA'}
+                </div>
+              : <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                    <thead><tr style={{background:thBg}}>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Traction</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Description</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>FBA dispo</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Fulfil.</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Inbound</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Réservé</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Traction</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`1px solid ${bdr}`}}>Écart</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Coût</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`1px solid ${bdr}`}}>Valeur écart</th>
+                    </tr></thead>
+                    <tbody>
+                      {filtered.map((r:any) => (
+                        <tr key={r.sku} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{r.sku}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',color:r.traction_code?C.blue:C.red,fontSize:11}}>{r.traction_code||'— non mappé'}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:260,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={r.product_name}>{r.product_name||'—'}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:C.blue}}>{r.amazon_dispo}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{r.amazon_fulfillable}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{r.amazon_inbound}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{r.amazon_reserved}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:r.traction_code?C.green:sub}}>{r.traction_code?r.traction_qty:'?'}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontSize:14,fontWeight:900,color:r.ecart===0?C.green:r.ecart>0?C.blue:C.red}}>
+                            {r.ecart>0?'+':''}{r.ecart}
+                          </td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{r.coutant>0?`${Number(r.coutant).toFixed(2)}$`:'—'}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:r.valeur_ecart===0?sub:r.valeur_ecart>0?C.blue:C.red}}>
+                            {r.valeur_ecart!==0?fmt$(r.valeur_ecart):'—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+            }
+          </div>
+
+          {/* Légende */}
+          <div style={{marginTop:10,fontSize:11,color:sub,lineHeight:1.6}}>
+            <div><strong style={{color:C.blue}}>Écart positif</strong> : Amazon a <em>plus</em> que Traction → Traction sous-déclare (stock à réajuster +)</div>
+            <div><strong style={{color:C.red}}>Écart négatif</strong> : Amazon a <em>moins</em> que Traction → unités manquantes chez Amazon (à investiguer, possible réclamation)</div>
+            <div><strong>Traction</strong> = somme QTYMINUSRESERVED sur toutes lignes AMA/FBA/FBM du même PKCode (tous fournisseurs confondus)</div>
           </div>
         </div>
         )
