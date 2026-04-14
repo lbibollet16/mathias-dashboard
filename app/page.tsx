@@ -8,8 +8,8 @@ const supabaseCli = createClient(
 )
 
 const ROLES_ONGLETS: Record<string, string[]> = {
-  admin:        ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','utilisateurs'],
-  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire'],
+  admin:        ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','utilisateurs'],
+  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite'],
   commis:       ['commandes','fournitures','retours'],
   employe_piece: ['fournitures','negatifs','inventaire','retours'],
 }
@@ -99,6 +99,7 @@ export default function Dashboard() {
   // Import
   const [alts, setAlts] = useState<Map<string,string[]>>(new Map())
   const [negsVerifies, setNegsVerifies] = useState<any[]>([])
+  const [validationsCompta, setValidationsCompta] = useState<any[]>([])
   const [fournituresData, setFournituresData] = useState<{catalogue:any[],demandes:any[]}>({catalogue:[],demandes:[]}) // principal -> [alternatifs]
   const [altReverse, setAltReverse] = useState<Map<string,string>>(new Map()) // alternatif -> principal
   const [iFile, setIFile]   = useState<File|null>(null)
@@ -160,17 +161,19 @@ export default function Dashboard() {
   async function fetchAll() {
     setLoading(true)
     try {
-      const [d, l, n, a, f, nv] = await Promise.all([
+      const [d, l, n, a, f, nv, vc] = await Promise.all([
         fetch('/api/calculateur').then(r=>r.json()),
         fetch('/api/lots').then(r=>r.json()),
         fetch('/api/negatifs').then(r=>r.json()),
         fetch('/api/alternatives').then(r=>r.json()),
         fetch('/api/fournitures').then(r=>r.json()),
         fetch('/api/negatifs-verifies').then(r=>r.json()),
+        fetch('/api/validations-comptables').then(r=>r.json()),
       ])
       setData(d); setLots(Array.isArray(l)?l:[]); setNegs(Array.isArray(n)?n:[])
       if(f&&f.catalogue) setFournituresData(f)
       if(Array.isArray(nv)) setNegsVerifies(nv)
+      if(Array.isArray(vc)) setValidationsCompta(vc)
       // Construire les maps d'alternatives
       if (Array.isArray(a)) {
         const fwd = new Map<string,string[]>()
@@ -680,9 +683,10 @@ export default function Dashboard() {
         {tab==='booking' && <BookingTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} alts={alts}/>}
 
         {/* ── NÉGATIFS ────────────────────────────────────────────── */}
-        {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts} negsVerifies={negsVerifies} setNegsVerifies={setNegsVerifies} profil={profil} data={data} lancerSync={lancerSync} syncing={syncing} syncLog={syncLog}/>}
-        {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts} fournituresData={fournituresData} setFournituresData={setFournituresData} profil={profil}/>}
-        {tab==='inventaire' && <InventaireTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
+        {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts} negsVerifies={negsVerifies} setNegsVerifies={setNegsVerifies} profil={profil} data={data} lancerSync={lancerSync} syncing={syncing} syncLog={syncLog} validationsCompta={validationsCompta}/>}
+        {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts} fournituresData={fournituresData} setFournituresData={setFournituresData} profil={profil} validationsCompta={validationsCompta}/>}
+        {tab==='inventaire' && <InventaireTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} validationsCompta={validationsCompta}/>}
+        {tab==='comptabilite' && <ComptabiliteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} validationsCompta={validationsCompta} setValidationsCompta={setValidationsCompta}/>}
         {tab==='utilisateurs' && <UtilisateursTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
         {tab==='fournitures' && <FournituresTab fournituresData={fournituresData} setFournituresData={setFournituresData} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} data={data} profil={profil}/>}
       </div>
@@ -692,10 +696,11 @@ export default function Dashboard() {
 }
 
 // ── Commandes du Jour ────────────────────────────────────────────────────────
-function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fournituresData, setFournituresData, profil}: any) {
+function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fournituresData, setFournituresData, profil, validationsCompta}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const [filtFourn, setFiltFourn] = useState('ALL')
   const employe = profil?.nom || profil?.email || 'Inconnu'
+  const validesCommandeIds = new Set((validationsCompta||[]).filter((v:any)=>v.source==='commande').map((v:any)=>v.ref_id))
   const [suivis, setSuivis] = useState<any[]>([])
   const [alternatives, setAlternatives] = useState<Map<string,string>>(new Map())
   const [actionModal, setActionModal] = useState<{item: any, type: string} | null>(null)
@@ -751,6 +756,11 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
   function estVerifie(pk: string): boolean {
     const s = getSuivi(pk)
     return s?.statut === 'verifie'
+  }
+
+  function estValideCompta(pk: string): boolean {
+    const s = getSuivi(pk)
+    return !!(s && validesCommandeIds.has(s.id))
   }
 
   async function faireAction(item: any, type: string, extra?: any) {
@@ -824,14 +834,14 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
     const s = getSuivi(it.pk)
     if (filtreStatut === 'actif') return !estCache(it.pk) && !estVerifie(it.pk)
     if (filtreStatut === 'attente') return s?.statut === 'commande_faite'
-    if (filtreStatut === 'verifie') return s?.statut === 'verifie'
+    if (filtreStatut === 'verifie') return s?.statut === 'verifie' && !estValideCompta(it.pk)
     return true
   })
 
   const fournisseurs = Array.from(new Set(toutesLignes.map(it => it.fournisseur))).sort() as string[]
   const totalCommande = suggestions.reduce((s: number, it: any) => s + it.totalLigne, 0)
   const nbAttente = toutesLignes.filter(it => getSuivi(it.pk)?.statut === 'commande_faite').length
-  const nbVerifie = toutesLignes.filter(it => getSuivi(it.pk)?.statut === 'verifie').length
+  const nbVerifie = toutesLignes.filter(it => getSuivi(it.pk)?.statut === 'verifie' && !estValideCompta(it.pk)).length
 
   const parFournisseur = new Map<string, any[]>()
   for (const it of suggestions) {
@@ -1476,7 +1486,7 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
 }
 
 // ── Inventaire Cyclique Tab ───────────────────────────────────────────────────
-function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
+function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validationsCompta}: any) {
   const employe = profil?.nom || profil?.email || 'Inconnu'
   const [sousOnglet, setSousOnglet] = useState<'compter'|'suivi'>('compter')
   const [isMobile, setIsMobile] = useState(false)
@@ -2678,6 +2688,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         filtEcart={filtEcart} setFiltEcart={setFiltEcart}
         chargerComptages={chargerComptages}
         locsStats={locsStats} loadingProg={loadingProg} chargerProgression={chargerProgression}
+        validationsCompta={validationsCompta}
       />
     )}
 
@@ -2692,10 +2703,12 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 // ── SuiviInventaire ──────────────────────────────────────────────────────────
 function SuiviInventaire({dark, card, bdr, sub, thBg, S, C, hvr, isMobile,
   comptages, filtDate, setFiltDate, filtEmploye, setFiltEmploye, filtEcart, setFiltEcart, chargerComptages,
-  locsStats, loadingProg, chargerProgression}: any) {
+  locsStats, loadingProg, chargerProgression, validationsCompta}: any) {
   const [vue, setVue] = useState<'progression'|'detail'>('progression')
-  const employes = Array.from(new Set(comptages.map((c:any)=>c.employe))).sort() as string[]
-  const cFiltres = comptages.filter((c:any) => {
+  const validesComptageIds = new Set((validationsCompta||[]).filter((v:any)=>v.source==='comptage').map((v:any)=>v.ref_id))
+  const comptagesNonValides = comptages.filter((c:any) => !validesComptageIds.has(c.id))
+  const employes = Array.from(new Set(comptagesNonValides.map((c:any)=>c.employe))).sort() as string[]
+  const cFiltres = comptagesNonValides.filter((c:any) => {
     if (filtDate && !c.date_comptage?.startsWith(filtDate)) return false
     if (filtEmploye !== 'ALL' && c.employe !== filtEmploye) return false
     if (filtEcart === 'ecart' && c.ecart === 0) return false
@@ -3129,12 +3142,13 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
     { id: 'commandes',   label: '📋 Commandes du jour',   desc: 'Commandes journalières' },
     { id: 'fournitures', label: '💡 Suggestions',         desc: 'Suggestions de réapprovisionnement' },
     { id: 'inventaire',  label: '📦 Inventaire',          desc: 'Inventaire cyclique et comptage' },
+    { id: 'comptabilite',label: '💰 Comptabilité',        desc: 'Validation comptable et historique' },
     { id: 'utilisateurs',label: '👥 Utilisateurs',        desc: 'Gestion des accès et utilisateurs' },
   ]
 
   const ROLES_LEGACY: Record<string, string[]> = {
-    admin:         ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','utilisateurs'],
-    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire'],
+    admin:         ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','utilisateurs'],
+    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite'],
     commis:        ['commandes','fournitures','retours'],
     employe_piece: ['fournitures','negatifs','inventaire','retours'],
   }
@@ -3536,7 +3550,8 @@ function BookingTab({data,dark,card,bdr,sub,thBg,S,alts}: any) {
   </div>
 }
 
-function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVerifies, setNegsVerifies, profil, data, lancerSync, syncing, syncLog}: any) {
+function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVerifies, setNegsVerifies, profil, data, lancerSync, syncing, syncLog, validationsCompta}: any) {
+  const validesNegatifIds = new Set((validationsCompta||[]).filter((v:any)=>v.source==='negatif').map((v:any)=>v.ref_id))
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const employe = profil?.nom || profil?.email || 'Inconnu'
   const [filtFourn, setFiltFourn] = useState('ALL')
@@ -3751,6 +3766,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
   }
   const negsUniques = Array.from(dedup.values())
   const codesVerifies = new Set(negsVerifies.map((v:any) => v.code_piece))
+  const negsVerifiesVisibles = negsVerifies.filter((v:any) => !validesNegatifIds.has(v.id))
   const fournisseurs = Array.from(new Set(negsUniques.map((n:any) => n.fournisseur))).sort() as string[]
   const lignes = Array.from(new Set(negsUniques.map((n:any) => n.ligne))).sort() as string[]
   const negsActifs = negsUniques.filter((n:any) => !codesVerifies.has(n.code_piece))
@@ -4094,7 +4110,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
         🔴 À vérifier ({negsActifs.length})
       </button>
       <button onClick={()=>setSousOnglet('verifie')} style={{padding:isMobile?'10px 16px':'7px 16px',borderRadius:20,border:`2px solid ${sousOnglet==='verifie'?C.green:bdr}`,background:sousOnglet==='verifie'?C.green+'22':'transparent',color:sousOnglet==='verifie'?C.green:sub,fontSize:isMobile?14:12,fontWeight:700,cursor:'pointer'}}>
-        ✅ Vérifié ({negsVerifies.length})
+        ✅ Vérifié ({negsVerifiesVisibles.length})
       </button>
       {syncLog && <span style={{fontSize:11,color:syncLog.startsWith('✅')?C.green:C.red,fontWeight:600}}>{syncLog}</span>}
     </div>
@@ -4239,9 +4255,9 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
       <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
         {isMobile
           ? <div style={{display:'flex',flexDirection:'column',gap:10,padding:'10px'}}>
-              {negsVerifies.length===0
+              {negsVerifiesVisibles.length===0
                 ? <div style={{textAlign:'center',padding:40,color:sub}}>Aucune pièce vérifiée</div>
-                : negsVerifies.map((v:any)=>(
+                : negsVerifiesVisibles.map((v:any)=>(
                     <div key={v.id} style={{background:card,borderRadius:14,border:`2px solid ${Number(v.ajustement)!==0?C.red:C.green}`,padding:'16px',marginBottom:4}}>
                       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12}}>
                         <div>
@@ -4342,9 +4358,9 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                   <th style={{padding:'9px 8px',borderBottom:`2px solid ${bdr}`}}></th>
                 </tr></thead>
                 <tbody>
-                  {negsVerifies.length===0
+                  {negsVerifiesVisibles.length===0
                     ? <tr><td colSpan={19} style={{textAlign:'center',padding:60,color:sub}}>Aucune pièce vérifiée</td></tr>
-                    : negsVerifies.map((v:any)=>(
+                    : negsVerifiesVisibles.map((v:any)=>(
                         <tr key={v.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                           <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace',fontSize:11}}>{v.code_piece}</td>
                           <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.red,fontWeight:700}}>{v.stock_au_moment}</td>
@@ -4402,5 +4418,323 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
       </div>
     </>}
   </>
+}
+
+// ── Comptabilité Tab ─────────────────────────────────────────────────────────
+function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVerifies, validationsCompta, setValidationsCompta}: any) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+  const userEmail = profil?.email || profil?.nom || 'Inconnu'
+  const [suivis, setSuivis] = useState<any[]>([])
+  const [comptages, setComptages] = useState<any[]>([])
+  const [vue, setVue] = useState<'a_valider'|'historique'>('a_valider')
+  const [filtSource, setFiltSource] = useState<'tous'|'negatif'|'commande'|'comptage'>('tous')
+  const [loadingAction, setLoadingAction] = useState<string|null>(null)
+
+  async function recharger() {
+    try {
+      const [s, c, v] = await Promise.all([
+        fetch('/api/suivi-commandes').then(r=>r.json()),
+        fetch('/api/inventaire/comptages').then(r=>r.json()),
+        fetch('/api/validations-comptables').then(r=>r.json()),
+      ])
+      if (Array.isArray(s)) setSuivis(s)
+      if (Array.isArray(c)) setComptages(c)
+      if (Array.isArray(v)) setValidationsCompta(v)
+    } catch {}
+  }
+
+  useEffect(() => { recharger() }, [])
+
+  const validations = validationsCompta || []
+  const validesKey = new Set(validations.map((v:any) => `${v.source}:${v.ref_id}`))
+  const estValide = (source:string, refId:any) => validesKey.has(`${source}:${refId}`)
+
+  // Sources à valider
+  const negatifsAValider = (negsVerifies||[]).filter((n:any) => !estValide('negatif', n.id))
+  const commandesVerifiees = (suivis||[]).filter((s:any) => s.statut === 'verifie' && !estValide('commande', s.id))
+  const comptagesEcart = (comptages||[]).filter((c:any) => c.ecart !== 0 && c.ecart !== null && !estValide('comptage', c.id))
+
+  async function valider(source:string, refId:any, code_piece:string, snapshot:any) {
+    const key = `${source}:${refId}`
+    setLoadingAction(key)
+    try {
+      await fetch('/api/validations-comptables', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ source, ref_id: refId, code_piece, snapshot, user_email: userEmail })
+      })
+      await recharger()
+    } finally { setLoadingAction(null) }
+  }
+
+  async function annuler(id:number) {
+    if (!confirm('Annuler cette validation ? La pièce réapparaîtra dans son onglet d\'origine.')) return
+    setLoadingAction(`undo:${id}`)
+    try {
+      await fetch('/api/validations-comptables', {
+        method: 'DELETE',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ id })
+      })
+      await recharger()
+    } finally { setLoadingAction(null) }
+  }
+
+  const fmtDate = (d:string) => d ? new Date(d).toLocaleDateString('fr-CA',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'
+
+  const labelSource = (s:string) => s === 'negatif' ? '🔴 Négatif vérifié' : s === 'commande' ? '📋 Commande vérifiée' : '📦 Comptage écart'
+  const colorSource = (s:string) => s === 'negatif' ? C.red : s === 'commande' ? C.yellow : C.blue
+
+  const totalAValider = negatifsAValider.length + commandesVerifiees.length + comptagesEcart.length
+  const historique = [...validations].sort((a:any,b:any) => new Date(b.date_validation).getTime() - new Date(a.date_validation).getTime())
+  const historiqueFiltre = filtSource === 'tous' ? historique : historique.filter((v:any) => v.source === filtSource)
+
+  const card1: any = {background:card,borderRadius:12,border:`1px solid ${bdr}`,padding:'12px 14px'}
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10,marginBottom:14}}>
+        <div>
+          <div style={{fontSize:20,fontWeight:900}}>💰 Comptabilité</div>
+          <div style={{fontSize:12,color:sub,marginTop:2}}>Validation comptable des écritures et historique</div>
+        </div>
+        <button onClick={recharger} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:13}}>🔄 Actualiser</button>
+      </div>
+
+      {/* Sous-onglets */}
+      <div style={{display:'flex',gap:8,marginBottom:14,flexWrap:'wrap'}}>
+        <button onClick={()=>setVue('a_valider')}
+          style={{padding:isMobile?'12px 18px':'8px 16px',borderRadius:20,border:`2px solid ${vue==='a_valider'?C.blue:bdr}`,background:vue==='a_valider'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='a_valider'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:isMobile?14:13}}>
+          📥 À valider ({totalAValider})
+        </button>
+        <button onClick={()=>setVue('historique')}
+          style={{padding:isMobile?'12px 18px':'8px 16px',borderRadius:20,border:`2px solid ${vue==='historique'?C.green:bdr}`,background:vue==='historique'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:vue==='historique'?C.green:sub,fontWeight:700,cursor:'pointer',fontSize:isMobile?14:13}}>
+          📚 Historique ({historique.length})
+        </button>
+      </div>
+
+      {vue === 'a_valider' && (
+        <div style={{display:'flex',flexDirection:'column',gap:18}}>
+          {/* Compteurs */}
+          <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(3,1fr)',gap:10}}>
+            <div style={{...card1,borderLeft:`4px solid ${C.red}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Négatifs vérifiés</div>
+              <div style={{fontSize:26,fontWeight:900,color:C.red}}>{negatifsAValider.length}</div>
+            </div>
+            <div style={{...card1,borderLeft:`4px solid ${C.yellow}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Commandes vérifiées</div>
+              <div style={{fontSize:26,fontWeight:900,color:C.yellow}}>{commandesVerifiees.length}</div>
+            </div>
+            <div style={{...card1,borderLeft:`4px solid ${C.blue}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Comptages avec écart</div>
+              <div style={{fontSize:26,fontWeight:900,color:C.blue}}>{comptagesEcart.length}</div>
+            </div>
+          </div>
+
+          {/* Section négatifs */}
+          <div>
+            <div style={{fontSize:14,fontWeight:800,marginBottom:8,color:C.red}}>🔴 Négatifs vérifiés ({negatifsAValider.length})</div>
+            <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+              {negatifsAValider.length === 0
+                ? <div style={{textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucun négatif en attente de validation</div>
+                : <div style={{overflowX:'auto'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                      <thead><tr style={{background:thBg}}>
+                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code</th>
+                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Stock</th>
+                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Ajust.</th>
+                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Cause</th>
+                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Vérifié par</th>
+                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Date</th>
+                        <th style={{padding:'9px 10px',borderBottom:`2px solid ${bdr}`}}></th>
+                      </tr></thead>
+                      <tbody>
+                        {negatifsAValider.map((n:any) => {
+                          const k = `negatif:${n.id}`
+                          return (
+                            <tr key={n.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace'}}>{n.code_piece}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.red,fontWeight:700}}>{n.stock_au_moment}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:900,color:Number(n.ajustement)>=0?C.green:C.red}}>{Number(n.ajustement)>=0?'+':''}{Number(n.ajustement??0).toFixed(0)}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,color:C.blue,fontSize:11}}>{n.cause||'—'}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>👤 {n.employe}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontSize:11,color:sub,whiteSpace:'nowrap'}}>{fmtDate(n.date_verification)}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
+                                <button disabled={loadingAction===k} onClick={()=>valider('negatif', n.id, n.code_piece, n)}
+                                  style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'7px 14px',fontWeight:700,cursor:'pointer',fontSize:12,opacity:loadingAction===k?0.6:1}}>
+                                  {loadingAction===k?'⏳':'✓ Valider'}
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+              }
+            </div>
+          </div>
+
+          {/* Section commandes */}
+          <div>
+            <div style={{fontSize:14,fontWeight:800,marginBottom:8,color:C.yellow}}>📋 Commandes vérifiées ({commandesVerifiees.length})</div>
+            <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+              {commandesVerifiees.length === 0
+                ? <div style={{textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucune commande vérifiée en attente</div>
+                : <div style={{overflowX:'auto'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                      <thead><tr style={{background:thBg}}>
+                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code</th>
+                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Fournisseur</th>
+                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Qté sugg.</th>
+                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Stock</th>
+                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Par</th>
+                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Date</th>
+                        <th style={{padding:'9px 10px',borderBottom:`2px solid ${bdr}`}}></th>
+                      </tr></thead>
+                      <tbody>
+                        {commandesVerifiees.map((s:any) => {
+                          const k = `commande:${s.id}`
+                          return (
+                            <tr key={s.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace'}}>{s.code_piece}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>{s.fournisseur||'—'}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700,color:C.blue}}>{s.qte_suggeree??'—'}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{s.stock_au_moment??'—'}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>👤 {s.employe||'—'}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontSize:11,color:sub,whiteSpace:'nowrap'}}>{fmtDate(s.date_action)}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
+                                <button disabled={loadingAction===k} onClick={()=>valider('commande', s.id, s.code_piece, s)}
+                                  style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'7px 14px',fontWeight:700,cursor:'pointer',fontSize:12,opacity:loadingAction===k?0.6:1}}>
+                                  {loadingAction===k?'⏳':'✓ Valider'}
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+              }
+            </div>
+          </div>
+
+          {/* Section comptages */}
+          <div>
+            <div style={{fontSize:14,fontWeight:800,marginBottom:8,color:C.blue}}>📦 Comptages avec écart ({comptagesEcart.length})</div>
+            <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+              {comptagesEcart.length === 0
+                ? <div style={{textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucun comptage avec écart en attente</div>
+                : <div style={{overflowX:'auto'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                      <thead><tr style={{background:thBg}}>
+                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code</th>
+                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Localisation</th>
+                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Système</th>
+                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Compté</th>
+                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Écart</th>
+                        <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Par</th>
+                        <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Date</th>
+                        <th style={{padding:'9px 10px',borderBottom:`2px solid ${bdr}`}}></th>
+                      </tr></thead>
+                      <tbody>
+                        {comptagesEcart.map((c:any) => {
+                          const k = `comptage:${c.id}`
+                          const ec = c.statut === 'reconcilie' ? c.ecart_reconcilie : c.ecart
+                          return (
+                            <tr key={c.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace'}}>{c.code_piece}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:C.blue}}>{c.localisation}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:sub}}>{c.qte_systeme}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.green,fontWeight:700}}>{c.qte_comptee}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:900,color:ec===0?C.green:C.red}}>{ec>0?'+':''}{ec}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>👤 {c.employe}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontSize:11,color:sub,whiteSpace:'nowrap'}}>{fmtDate(c.date_comptage)}</td>
+                              <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
+                                <button disabled={loadingAction===k} onClick={()=>valider('comptage', c.id, c.code_piece, c)}
+                                  style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'7px 14px',fontWeight:700,cursor:'pointer',fontSize:12,opacity:loadingAction===k?0.6:1}}>
+                                  {loadingAction===k?'⏳':'✓ Valider'}
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+              }
+            </div>
+          </div>
+        </div>
+      )}
+
+      {vue === 'historique' && (
+        <div>
+          {/* Filtres historique */}
+          <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap'}}>
+            {[
+              {id:'tous', label:`Tout (${historique.length})`, color:sub},
+              {id:'negatif', label:`🔴 Négatifs (${historique.filter((v:any)=>v.source==='negatif').length})`, color:C.red},
+              {id:'commande', label:`📋 Commandes (${historique.filter((v:any)=>v.source==='commande').length})`, color:C.yellow},
+              {id:'comptage', label:`📦 Comptages (${historique.filter((v:any)=>v.source==='comptage').length})`, color:C.blue},
+            ].map(f => (
+              <button key={f.id} onClick={()=>setFiltSource(f.id as any)}
+                style={{padding:'7px 14px',borderRadius:20,border:`2px solid ${filtSource===f.id?f.color:bdr}`,background:filtSource===f.id?(dark?'#1a1a2e':'#f0f4ff'):'transparent',color:filtSource===f.id?f.color:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+            {historiqueFiltre.length === 0
+              ? <div style={{textAlign:'center',padding:40,color:sub}}>Aucune validation dans l'historique</div>
+              : <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                    <thead><tr style={{background:thBg}}>
+                      <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Source</th>
+                      <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Code pièce</th>
+                      <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Détail</th>
+                      <th style={{padding:'9px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Validé par</th>
+                      <th style={{padding:'9px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`}}>Date validation</th>
+                      <th style={{padding:'9px 10px',borderBottom:`2px solid ${bdr}`}}></th>
+                    </tr></thead>
+                    <tbody>
+                      {historiqueFiltre.map((v:any) => {
+                        const snap = v.snapshot || {}
+                        let detail = '—'
+                        if (v.source === 'negatif') detail = `Ajust ${Number(snap.ajustement??0)>=0?'+':''}${Number(snap.ajustement??0).toFixed(0)} — ${snap.cause||''}`
+                        else if (v.source === 'commande') detail = `Qté ${snap.qte_suggeree??'—'} — ${snap.fournisseur||''}`
+                        else if (v.source === 'comptage') {
+                          const ec = snap.statut === 'reconcilie' ? snap.ecart_reconcilie : snap.ecart
+                          detail = `${snap.localisation||''} — Écart ${ec>0?'+':''}${ec??'—'} (sys ${snap.qte_systeme} / cpt ${snap.qte_comptee})`
+                        }
+                        return (
+                          <tr key={v.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                            <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`}}>
+                              <span style={{background:colorSource(v.source)+'22',color:colorSource(v.source),padding:'3px 8px',borderRadius:10,fontSize:11,fontWeight:700}}>{labelSource(v.source)}</span>
+                            </td>
+                            <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace'}}>{v.code_piece}</td>
+                            <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub}}>{detail}</td>
+                            <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>👤 {v.user_email||'—'}</td>
+                            <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontSize:11,color:sub,whiteSpace:'nowrap'}}>{fmtDate(v.date_validation)}</td>
+                            <td style={{padding:'9px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
+                              <button disabled={loadingAction===`undo:${v.id}`} onClick={()=>annuler(v.id)}
+                                style={{background:C.yellow+'22',color:C.yellow,border:`1px solid ${C.yellow}`,borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}}>
+                                {loadingAction===`undo:${v.id}`?'⏳':'↩ Annuler'}
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+            }
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
