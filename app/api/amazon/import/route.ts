@@ -56,15 +56,21 @@ function rowsToObjects(rows: string[][]): Record<string, string>[] {
 function num(v: any): number { const n = parseFloat(v); return isNaN(n) ? 0 : n }
 function parseDate(v: any): string | null {
   if (!v) return null
-  // Format 1: ISO "2026-04-14T09:25:00+00:00"
-  const d1 = new Date(v)
-  if (!isNaN(d1.getTime())) return d1.toISOString()
-  // Format 2: "19.03.2026 06:59:44 UTC"
-  const m = String(v).match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/)
+  const s = String(v).trim()
+  if (!s) return null
+  // ⚠️ Priorité au format européen JJ.MM.AAAA car new Date() interprète
+  // mal '02.04.2026' comme '4 février' au lieu de '2 avril'.
+  // Formats Amazon payments: "19.03.2026 06:59:44 UTC"
+  const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/)
   if (m) {
-    const d2 = new Date(`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:${m[6]}Z`)
+    const [, d, mo, y, hh, mm, ss] = m
+    const iso = `${y}-${mo}-${d}T${hh||'00'}:${mm||'00'}:${ss||'00'}Z`
+    const d2 = new Date(iso)
     if (!isNaN(d2.getTime())) return d2.toISOString()
   }
+  // Fallback ISO (CSV reimbursements: "2026-04-14T09:25:00+00:00")
+  const d1 = new Date(s)
+  if (!isNaN(d1.getTime())) return d1.toISOString()
   return null
 }
 
