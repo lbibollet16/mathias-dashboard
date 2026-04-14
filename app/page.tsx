@@ -4898,7 +4898,27 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     setLoading(false)
   }
 
+  async function autoResolve(silencieux: boolean = false) {
+    try {
+      const r = await fetch('/api/amazon/sku-mapping/auto-resolve', { method: 'POST' })
+      const j = await r.json()
+      if (j.success && j.resolved > 0) {
+        setImportLog(l => [...l, `🔁 Auto-résolution : ${j.resolved}/${j.total_unresolved} SKU mappés automatiquement (≥95%)`])
+        await charger()
+      } else if (!silencieux) {
+        setImportLog(l => [...l, `🔁 Auto-résolution : ${j.message || 'aucun nouveau match'}`])
+      }
+    } catch (e:any) {
+      if (!silencieux) setImportLog(l => [...l, `❌ Auto-résolution : ${e.message}`])
+    }
+  }
+
   useEffect(() => { charger() }, [])
+  // Lance l'auto-résolution dès qu'on ouvre la vue mapping (silencieux si rien à faire)
+  useEffect(() => {
+    if (vue === 'mapping' && unresolved.length > 0) autoResolve(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vue])
 
   async function syncTraction() {
     setSyncing(true)
@@ -5123,9 +5143,15 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 
       {vue === 'mapping' && (
         <div>
-          <div style={{fontSize:11,color:sub,marginBottom:10}}>
-            Ces SKU Amazon n'ont pas pu être résolus automatiquement en code Traction.
-            Entre le code Traction manuellement et il sera mémorisé pour les prochains imports.
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,marginBottom:10,flexWrap:'wrap'}}>
+            <div style={{fontSize:11,color:sub,maxWidth:600}}>
+              Ces SKU Amazon n'ont pas pu être résolus automatiquement en code Traction.
+              Le champ est pré-rempli avec la meilleure suggestion (si ≥80%). Les matches ≥95% sont déjà auto-appliqués.
+            </div>
+            <button onClick={()=>autoResolve(false)}
+              style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+              🔁 Auto-résoudre (≥95%)
+            </button>
           </div>
 
           {unresolved.length === 0
