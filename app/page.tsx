@@ -4895,6 +4895,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
   })
   const [creatingAudit, setCreatingAudit] = useState(false)
+  const [auditInfoCol, setAuditInfoCol] = useState<string|null>(null)
   const [data, setData] = useState<any>({ counts: {}, settlements: [] })
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -6560,19 +6561,67 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   ? <div style={{textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucun résultat</div>
                   : <div style={{overflowX:'auto'}}>
                       <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-                        <thead><tr style={{background:thBg}}>
-                          <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Base</th>
-                          <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Description</th>
-                          <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`1px solid ${bdr}`}}>HUB théo</th>
-                          <th style={{padding:'8px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>HUB compté</th>
-                          <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.yellow,borderBottom:`1px solid ${bdr}`}}>FBM théo</th>
-                          <th style={{padding:'8px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>FBM compté</th>
-                          <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.yellow,borderBottom:`1px solid ${bdr}`}} title="Sans préfixe attendu = théorique − stock chez Amazon">🏷 SP attendu</th>
-                          <th style={{padding:'8px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>SP compté</th>
-                          <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`1px solid ${bdr}`}}>Écart $</th>
-                          <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>FBA Amz</th>
-                          <th style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}></th>
-                        </tr></thead>
+                        {(() => {
+                          const colInfos: Record<string, string> = {
+                            base: "Code de base du produit — obtenu en retirant les préfixes/suffixes HUB, FBA, FBM du SKU Traction pour regrouper les variantes d'un même produit physique sous une seule ligne.",
+                            description: "Nom du produit tel qu'il est dans Traction (champ DescFra). S'affiche tronqué au milieu, le nom complet apparaît au survol de la cellule.",
+                            hub_theo: "Quantité théorique au HUB (entrepôt) = somme des QTYMINUSRESERVED de tous les records Traction dont le PKCode commence par HUB- ou finit par -HUB. C'est le stock que Traction pense avoir physiquement dans ton entrepôt.",
+                            hub_compte: "Quantité physique que tu comptes à l'entrepôt pour ce produit. Entre la valeur et elle est sauvegardée automatiquement quand tu sors du champ. L'écart avec le théorique s'affiche en rouge juste en dessous quand il est ≠ 0.",
+                            fbm_theo: "Quantité théorique en FBM = somme QTYMINUSRESERVED des records dont le PKCode contient FBM. C'est ton stock FBM chez toi (prêt à être expédié manuellement aux clients Amazon).",
+                            fbm_compte: "Quantité physique que tu comptes pour les pièces FBM chez toi. Auto-save au blur, écart rouge/vert calculé.",
+                            sp_attendu: "Sans préfixe attendu = max(0, records sans préfixe − stock chez Amazon FBA). Les records Traction sans préfixe HUB/FBA/FBM représentent souvent le stock total propriété (incluant ce qui est chez Amazon). On déduit ce qu'Amazon détient physiquement pour que tu ne cherches pas des unités fantômes à l'entrepôt. La note '(−X Amz)' en dessous indique combien a été déduit.",
+                            sp_compte: "Quantité physique que tu trouves pour les pièces non taggées (oublis sans préfixe). Ces pièces devraient idéalement être retaggées HUB-xxx ou FBA-xxx dans Traction après l'audit.",
+                            ecart: "Valeur monétaire de l'écart total = (écart HUB + écart FBM) × coût unitaire Traction. En rouge si non nulle. C'est ce que tu as 'perdu' ou 'gagné' en valeur suite à l'audit.",
+                            fba_amz: "Quantité déclarée par Amazon dans leurs entrepôts FBA au moment du dernier snapshot importé (fulfillable + inbound + reserved). Tu n'as rien à compter ici — c'est juste une référence. Cette valeur sert à déduire le stock 'SP attendu'.",
+                          }
+                          const IHeader = ({id, label, align, color}: {id: string, label: React.ReactNode, align?: any, color?: string}) => {
+                            const open = auditInfoCol === id
+                            return (
+                              <th style={{padding:'8px 10px',textAlign:align||'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:color||sub,borderBottom:`1px solid ${bdr}`,position:'relative'}}>
+                                <div style={{display:'inline-flex',alignItems:'center',gap:4,justifyContent:align==='right'?'flex-end':align==='center'?'center':'flex-start',width:'100%'}}>
+                                  <span>{label}</span>
+                                  <button onClick={(e:any)=>{e.stopPropagation(); setAuditInfoCol(open?null:id)}}
+                                    style={{background:open?C.blue:'transparent',color:open?'#fff':sub,border:`1px solid ${open?C.blue:bdr}`,borderRadius:'50%',width:14,height:14,fontSize:9,fontWeight:900,cursor:'pointer',padding:0,display:'inline-flex',alignItems:'center',justifyContent:'center',lineHeight:1}}>
+                                    i
+                                  </button>
+                                </div>
+                              </th>
+                            )
+                          }
+                          return (
+                            <thead>
+                              <tr style={{background:thBg}}>
+                                <IHeader id="base" label="Base" />
+                                <IHeader id="description" label="Description" />
+                                <IHeader id="hub_theo" label="HUB théo" align="right" color={C.blue} />
+                                <IHeader id="hub_compte" label="HUB compté" align="center" color={C.green} />
+                                <IHeader id="fbm_theo" label="FBM théo" align="right" color={C.yellow} />
+                                <IHeader id="fbm_compte" label="FBM compté" align="center" color={C.green} />
+                                <IHeader id="sp_attendu" label="🏷 SP attendu" align="right" color={C.yellow} />
+                                <IHeader id="sp_compte" label="SP compté" align="center" color={C.green} />
+                                <IHeader id="ecart" label="Écart $" align="right" color={C.red} />
+                                <IHeader id="fba_amz" label="FBA Amz" align="right" />
+                                <th style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}></th>
+                              </tr>
+                              {auditInfoCol && (
+                                <tr>
+                                  <td colSpan={11} style={{padding:0,borderBottom:`2px solid ${C.blue}`}}>
+                                    <div style={{background:dark?'#1a233a':'#e8f0fe',padding:'12px 16px',display:'flex',alignItems:'flex-start',gap:10,lineHeight:1.6}}>
+                                      <div style={{fontSize:16,color:C.blue}}>ⓘ</div>
+                                      <div style={{flex:1,fontSize:12,color:dark?'#e8e8e8':'#1a1a1a',whiteSpace:'normal',textTransform:'none',fontWeight:400}}>
+                                        {colInfos[auditInfoCol] || 'Pas de description'}
+                                      </div>
+                                      <button onClick={()=>setAuditInfoCol(null)}
+                                        style={{background:'transparent',border:'none',color:sub,fontSize:18,cursor:'pointer',padding:'0 4px',lineHeight:1}}>
+                                        ×
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </thead>
+                          )
+                        })()}
                         <tbody>
                           {filteredCounts.map((c:any) => {
                             const input = auditInput[c.base_code] || {}
