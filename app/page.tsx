@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseCli = createClient(
@@ -4872,12 +4872,17 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
 // ── Amazon Tab (Phase 1) ─────────────────────────────────────────────────────
 function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
-  const [vue, setVue] = useState<'import'|'settlements'|'inventaire'|'mapping'>('import')
+  const [vue, setVue] = useState<'import'|'settlements'|'inventaire'|'consolide'|'mapping'>('import')
   const [inventaireGaps, setInventaireGaps] = useState<any>({ rows: [], totals: {}, snapshot_date: null, dashboard: null, history: null })
   const [filtGap, setFiltGap] = useState<'tous'|'action'|'unsellable'|'rupture_fba'|'reclamation'|'ajust_traction'|'watched'|'ok'>('action')
   const [searchGap, setSearchGap] = useState('')
   const [showHistory, setShowHistory] = useState(false)
   const [showFbm, setShowFbm] = useState(false)
+  // Phase 4a : Inventaire consolidé
+  const [consolide, setConsolide] = useState<any>({ products: [], totals: {}, snapshot_date: null })
+  const [searchConsolide, setSearchConsolide] = useState('')
+  const [filtConsolide, setFiltConsolide] = useState<'tous'|'oublis'|'ecart_fba'|'ecart_fbm'|'ok'>('tous')
+  const [expandedBase, setExpandedBase] = useState<string|null>(null)
   const [data, setData] = useState<any>({ counts: {}, settlements: [] })
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -4899,18 +4904,20 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   async function charger() {
     setLoading(true)
     try {
-      const [d, u, m, s, g] = await Promise.all([
+      const [d, u, m, s, g, c] = await Promise.all([
         fetch('/api/amazon/data').then(r=>r.json()),
         fetch('/api/amazon/sku-mapping?mode=unresolved').then(r=>r.json()),
         fetch('/api/amazon/sku-mapping?mode=mappings').then(r=>r.json()),
         fetch('/api/amazon/settlements').then(r=>r.json()),
         fetch('/api/amazon/inventory-gaps').then(r=>r.json()),
+        fetch('/api/amazon/inventory-consolidated').then(r=>r.json()),
       ])
       if (d && !d.erreur) setData(d)
       if (Array.isArray(u)) setUnresolved(u)
       if (Array.isArray(m)) setMappings(m)
       if (Array.isArray(s)) setSettlementsList(s)
       if (g && !g.erreur) setInventaireGaps(g)
+      if (c && !c.erreur) setConsolide(c)
     } catch {}
     setLoading(false)
   }
@@ -5184,6 +5191,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         <button onClick={()=>setVue('inventaire')}
           style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='inventaire'?C.yellow:bdr}`,background:vue==='inventaire'?(dark?'#2b2413':'#fdf6e3'):'transparent',color:vue==='inventaire'?C.yellow:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
           📊 Écarts inventaire ({inventaireGaps.totals?.nb_ecart||0})
+        </button>
+        <button onClick={()=>setVue('consolide')}
+          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='consolide'?C.blue:bdr}`,background:vue==='consolide'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='consolide'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+          🏭 Inventaire consolidé ({consolide.totals?.nb_base_products||0})
         </button>
         <button onClick={()=>setVue('mapping')}
           style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='mapping'?C.red:bdr}`,background:vue==='mapping'?(dark?'#2b1113':'#fce8e6'):'transparent',color:vue==='mapping'?C.red:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
@@ -6020,6 +6031,206 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
             <div><strong style={{color:C.blue}}>Écart positif</strong> : Amazon a <em>plus</em> que Traction → Traction sous-déclare (stock à réajuster +)</div>
             <div><strong style={{color:C.red}}>Écart négatif</strong> : Amazon a <em>moins</em> que Traction → unités manquantes chez Amazon (à investiguer, possible réclamation)</div>
             <div><strong>Traction</strong> = somme QTYMINUSRESERVED sur toutes lignes AMA/FBA/FBM du même PKCode (tous fournisseurs confondus)</div>
+          </div>
+        </div>
+        )
+      })()}
+
+      {vue === 'consolide' && (() => {
+        const fmt$ = (n: number) => `${n>=0?'':'−'}${Math.abs(n).toFixed(2)}$`
+        const ct = consolide.totals || {}
+        const products: any[] = consolide.products || []
+        const q = searchConsolide.trim().toLowerCase()
+        const filtered = products.filter(p => {
+          if (filtConsolide === 'oublis' && !p.has_oubli) return false
+          if (filtConsolide === 'ecart_fba' && p.ecart_fba === 0) return false
+          if (filtConsolide === 'ecart_fbm' && p.ecart_fbm === 0) return false
+          if (filtConsolide === 'ok' && p.action !== 'ok') return false
+          if (q) {
+            if (p.base.toLowerCase().includes(q)) return true
+            if (p.description && p.description.toLowerCase().includes(q)) return true
+            if ((p.variants||[]).some((v:any) => v.pk_code.toLowerCase().includes(q))) return true
+            return false
+          }
+          return true
+        })
+        const actionBadge: Record<string, {icon:string, label:string, color:string}> = {
+          unsellable:           {icon:'🔥', label:'Unsellable',        color:C.red},
+          oubli_sans_prefixe:   {icon:'🏷', label:'Oubli sans préfixe', color:C.yellow},
+          reclamation_fba:      {icon:'💰', label:'Réclamation FBA',   color:C.red},
+          ajuster_traction_fba: {icon:'📝', label:'Ajust Traction FBA', color:C.blue},
+          ecart_fbm:            {icon:'⚠️', label:'Écart FBM',         color:C.red},
+          ajuster_traction_fbm: {icon:'📝', label:'Ajust Traction FBM', color:C.blue},
+          ok:                   {icon:'✓',  label:'OK',                color:C.green},
+          empty:                {icon:'∅',  label:'Vide',              color:sub},
+        }
+        return (
+        <div>
+          {/* Header */}
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap',marginBottom:12}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:900}}>🏭 Inventaire Amazon consolidé (par base product)</div>
+              <div style={{fontSize:11,color:sub,marginTop:3,lineHeight:1.5}}>
+                Chaque ligne = un produit logique. Le stock Traction est séparé par emplacement physique (HUB / FBA / FBM / sans préfixe).
+                Les colonnes « Amazon » montrent la réalité Amazon du dernier snapshot FBA.
+                Les <strong style={{color:C.yellow}}>oublis</strong> sont des pièces sur les lignes AMA/FBA/FBM sans préfixe HUB/FBA/FBM → à tagger.
+              </div>
+            </div>
+            {consolide.snapshot_date && <div style={{fontSize:11,color:sub}}>📅 Snapshot FBA : <strong>{consolide.snapshot_date}</strong></div>}
+          </div>
+
+          {/* Cartes totaux */}
+          <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(6,1fr)',gap:8,marginBottom:12}}>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Base products</div>
+              <div style={{fontSize:20,fontWeight:900}}>{ct.nb_base_products||0}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.yellow}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>🏷 Oublis</div>
+              <div style={{fontSize:20,fontWeight:900,color:C.yellow}}>{ct.nb_oublis||0}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>HUB Traction</div>
+              <div style={{fontSize:18,fontWeight:900,color:C.blue}}>{ct.total_hub||0}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.green}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>FBA Traction → Amazon</div>
+              <div style={{fontSize:14,fontWeight:900}}><span style={{color:C.green}}>{ct.total_fba_traction||0}</span> / <span style={{color:C.blue}}>{ct.total_fba_amazon||0}</span></div>
+              <div style={{fontSize:9,color:C.red,marginTop:2}}>écart$ {fmt$(ct.valeur_ecart_fba_abs||0)}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.yellow}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>FBM Traction → Amazon</div>
+              <div style={{fontSize:14,fontWeight:900}}><span style={{color:C.green}}>{ct.total_fbm_traction||0}</span> / <span style={{color:C.blue}}>{ct.total_fbm_amazon||0}</span></div>
+              <div style={{fontSize:9,color:C.red,marginTop:2}}>écart$ {fmt$(ct.valeur_ecart_fbm_abs||0)}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Stock total Traction</div>
+              <div style={{fontSize:20,fontWeight:900}}>{ct.total_traction||0}</div>
+            </div>
+          </div>
+
+          {/* Filtres */}
+          <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:10,display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+            <input value={searchConsolide} onChange={e=>setSearchConsolide(e.target.value)} placeholder="🔍 Base code, SKU, description..."
+              style={{...S,maxWidth:260,fontSize:12,padding:'7px 10px'}}/>
+            <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+              {[
+                {id:'tous', label:`Tous (${products.length})`, color:sub},
+                {id:'oublis', label:`🏷 Oublis (${ct.nb_oublis||0})`, color:C.yellow},
+                {id:'ecart_fba', label:`⚠️ Écart FBA (${ct.nb_ecart_fba||0})`, color:C.red},
+                {id:'ecart_fbm', label:`⚠️ Écart FBM (${ct.nb_ecart_fbm||0})`, color:C.red},
+                {id:'ok', label:`✅ OK`, color:C.green},
+              ].map(f => (
+                <button key={f.id} onClick={()=>setFiltConsolide(f.id as any)}
+                  style={{padding:'6px 11px',borderRadius:14,border:`1px solid ${filtConsolide===f.id?f.color:bdr}`,background:filtConsolide===f.id?f.color+'22':'transparent',color:filtConsolide===f.id?f.color:sub,fontWeight:700,cursor:'pointer',fontSize:11}}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Tableau consolidé */}
+          <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+            {filtered.length === 0
+              ? <div style={{textAlign:'center',padding:40,color:sub,fontSize:13}}>Aucun résultat</div>
+              : <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                    <thead><tr style={{background:thBg}}>
+                      <th style={{padding:'8px 6px',borderBottom:`1px solid ${bdr}`,width:16}}></th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Action</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Base code</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Description</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`1px solid ${bdr}`}}>HUB</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.yellow,borderBottom:`1px solid ${bdr}`}}>🏷 Sans préfix</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>FBA Tract.</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`1px solid ${bdr}`}}>FBA Amz</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`1px solid ${bdr}`}}>ΔFBA</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>FBM Tract.</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`1px solid ${bdr}`}}>FBM Amz</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`1px solid ${bdr}`}}>ΔFBM</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Total</th>
+                    </tr></thead>
+                    <tbody>
+                      {filtered.map((p:any) => {
+                        const badge = actionBadge[p.action] || actionBadge.ok
+                        const isExp = expandedBase === p.base
+                        return (
+                          <React.Fragment key={p.base}>
+                            <tr onClick={()=>setExpandedBase(isExp?null:p.base)}
+                              onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr}
+                              onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}
+                              style={{cursor:'pointer'}}>
+                              <td style={{padding:'6px 6px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11}}>{isExp?'▼':'▶'}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`}}>
+                                <span style={{background:badge.color+'22',color:badge.color,padding:'2px 6px',borderRadius:8,fontSize:10,fontWeight:700,whiteSpace:'nowrap'}}>{badge.icon} {badge.label}</span>
+                              </td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{p.base}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={p.description}>{p.description||'—'}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:p.hub_qty>0?C.blue:sub}}>{p.hub_qty||''}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:p.sans_prefix_qty>0?800:400,color:p.has_oubli?C.yellow:sub}}>{p.sans_prefix_qty||''}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:p.fba_qty_traction>0?C.green:sub}}>{p.fba_qty_traction||''}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:p.fba_qty_amazon>0?C.blue:sub}}>{p.fba_qty_amazon||''}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontSize:13,fontWeight:900,color:p.ecart_fba===0?sub:p.ecart_fba>0?C.blue:C.red}}>{p.ecart_fba!==0?(p.ecart_fba>0?'+':'')+p.ecart_fba:''}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:p.fbm_qty_traction>0?C.green:sub}}>{p.fbm_qty_traction||''}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:p.fbm_qty_amazon>0?C.blue:sub}}>{p.fbm_qty_amazon||''}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontSize:13,fontWeight:900,color:p.ecart_fbm===0?sub:p.ecart_fbm>0?C.blue:C.red}}>{p.ecart_fbm!==0?(p.ecart_fbm>0?'+':'')+p.ecart_fbm:''}</td>
+                              <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800}}>{p.traction_total}</td>
+                            </tr>
+                            {isExp && (
+                              <tr>
+                                <td colSpan={13} style={{padding:'10px 16px',borderBottom:`2px solid ${bdr}`,background:dark?'#0f0f0f':'#fafbfc'}}>
+                                  <div style={{fontSize:11,fontWeight:800,marginBottom:6,color:sub,textTransform:'uppercase'}}>
+                                    🔎 Détail audit — {p.base} : {p.variants.length} variant{p.variants.length>1?'s':''} Traction
+                                  </div>
+                                  <div style={{background:card,borderRadius:6,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+                                    <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
+                                      <thead><tr style={{background:thBg}}>
+                                        <th style={{padding:'5px 8px',textAlign:'left',fontSize:9,color:sub}}>PKCode</th>
+                                        <th style={{padding:'5px 8px',textAlign:'left',fontSize:9,color:sub}}>Location</th>
+                                        <th style={{padding:'5px 8px',textAlign:'left',fontSize:9,color:sub}}>Code ligne</th>
+                                        <th style={{padding:'5px 8px',textAlign:'left',fontSize:9,color:sub}}>Fournisseur</th>
+                                        <th style={{padding:'5px 8px',textAlign:'right',fontSize:9,color:sub}}>QTY</th>
+                                        <th style={{padding:'5px 8px',textAlign:'right',fontSize:9,color:sub}}>Dispo</th>
+                                      </tr></thead>
+                                      <tbody>
+                                        {p.variants.map((v:any, i:number) => (
+                                          <tr key={i}>
+                                            <td style={{padding:'4px 8px',fontFamily:'monospace',fontWeight:700}}>{v.pk_code}</td>
+                                            <td style={{padding:'4px 8px'}}>
+                                              <span style={{background:(v.location==='HUB'?C.blue:v.location==='FBA'?C.green:v.location==='FBM'?C.yellow:sub)+'22',color:v.location==='HUB'?C.blue:v.location==='FBA'?C.green:v.location==='FBM'?C.yellow:sub,padding:'1px 6px',borderRadius:6,fontSize:9,fontWeight:700}}>{v.location}</span>
+                                            </td>
+                                            <td style={{padding:'4px 8px',color:sub}}>{v.code_ligne}</td>
+                                            <td style={{padding:'4px 8px',color:sub,fontSize:10}}>{v.pk_fournisseur||'—'}</td>
+                                            <td style={{padding:'4px 8px',textAlign:'right'}}>{v.qty}</td>
+                                            <td style={{padding:'4px 8px',textAlign:'right',fontWeight:700}}>{v.qty_dispo}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                  {/* Synthèse audit pour comptable */}
+                                  <div style={{marginTop:10,background:dark?'#1a1a1a':'#fff',border:`1px solid ${bdr}`,borderRadius:6,padding:'10px 12px'}}>
+                                    <div style={{fontSize:11,fontWeight:800,marginBottom:6}}>📋 Rapport audit pour ce base code</div>
+                                    <div style={{fontSize:11,lineHeight:1.8}}>
+                                      <div>• <strong style={{color:C.blue}}>À l'entrepôt HUB</strong> : <strong>{p.hub_qty}</strong> unité{p.hub_qty>1?'s':''}</div>
+                                      <div>• <strong style={{color:C.green}}>Chez Amazon FBA (Traction)</strong> : <strong>{p.fba_qty_traction}</strong> | <strong style={{color:C.blue}}>Amazon dit</strong> : <strong>{p.fba_qty_amazon}</strong> {p.ecart_fba!==0 && <span style={{color:C.red,fontWeight:700}}>(écart {p.ecart_fba>0?'+':''}{p.ecart_fba})</span>}</div>
+                                      <div>• <strong style={{color:C.yellow}}>FBM (Traction)</strong> : <strong>{p.fbm_qty_traction}</strong> | <strong style={{color:C.blue}}>Amazon dit</strong> : <strong>{p.fbm_qty_amazon}</strong> {p.ecart_fbm!==0 && <span style={{color:C.red,fontWeight:700}}>(écart {p.ecart_fbm>0?'+':''}{p.ecart_fbm})</span>}</div>
+                                      {p.sans_prefix_qty > 0 && <div>• <strong style={{color:C.yellow}}>🏷 Sans préfixe (à tagger)</strong> : <strong>{p.sans_prefix_qty}</strong></div>}
+                                      <div style={{borderTop:`1px solid ${bdr}`,marginTop:6,paddingTop:6}}>
+                                        = <strong>Total Traction : {p.traction_total}</strong> unités
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+            }
           </div>
         </div>
         )
