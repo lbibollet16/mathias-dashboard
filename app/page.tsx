@@ -4872,7 +4872,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
 // ── Amazon Tab (Phase 1) ─────────────────────────────────────────────────────
 function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
-  const [vue, setVue] = useState<'import'|'settlements'|'inventaire'|'consolide'|'mapping'>('import')
+  const [vue, setVue] = useState<'import'|'settlements'|'inventaire'|'consolide'|'audit'|'mapping'>('import')
   const [inventaireGaps, setInventaireGaps] = useState<any>({ rows: [], totals: {}, snapshot_date: null, dashboard: null, history: null })
   const [filtGap, setFiltGap] = useState<'tous'|'action'|'unsellable'|'rupture_fba'|'reclamation'|'ajust_traction'|'watched'|'ok'>('action')
   const [searchGap, setSearchGap] = useState('')
@@ -4883,6 +4883,18 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [searchConsolide, setSearchConsolide] = useState('')
   const [filtConsolide, setFiltConsolide] = useState<'tous'|'oublis'|'ecart_fba'|'ecart_fbm'|'ok'>('tous')
   const [expandedBase, setExpandedBase] = useState<string|null>(null)
+  // Phase 4b : Audit mensuel
+  const [audits, setAudits] = useState<any[]>([])
+  const [openAudit, setOpenAudit] = useState<any>(null)
+  const [auditCounts, setAuditCounts] = useState<any[]>([])
+  const [auditStats, setAuditStats] = useState<any>({})
+  const [auditFiltre, setAuditFiltre] = useState<'tous'|'restants'|'comptes'|'ecarts'>('restants')
+  const [auditSearch, setAuditSearch] = useState('')
+  const [auditInput, setAuditInput] = useState<Record<string, {hub?:string, fbm?:string, sp?:string}>>({})
+  const [newAuditMois, setNewAuditMois] = useState(() => {
+    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+  })
+  const [creatingAudit, setCreatingAudit] = useState(false)
   const [data, setData] = useState<any>({ counts: {}, settlements: [] })
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -4918,6 +4930,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       if (Array.isArray(s)) setSettlementsList(s)
       if (g && !g.erreur) setInventaireGaps(g)
       if (c && !c.erreur) setConsolide(c)
+      await chargerAudits()
     } catch {}
     setLoading(false)
   }
@@ -5000,6 +5013,136 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       await charger()
       await chargerDetail(settlement_id)
     } catch (e:any) { alert(e.message) }
+  }
+
+  async function chargerAudits() {
+    try {
+      const r = await fetch('/api/amazon/audits')
+      const j = await r.json()
+      if (Array.isArray(j)) setAudits(j)
+    } catch {}
+  }
+
+  async function chargerAuditDetail(auditId: number) {
+    try {
+      const r = await fetch(`/api/amazon/audits/${auditId}`)
+      const j = await r.json()
+      if (!j.erreur) {
+        setOpenAudit(j.audit)
+        setAuditCounts(j.counts || [])
+        setAuditStats(j.stats || {})
+        // Pré-remplir inputs avec les valeurs déjà comptées
+        const pre: Record<string, {hub?:string, fbm?:string, sp?:string}> = {}
+        for (const c of (j.counts || [])) {
+          pre[c.base_code] = {
+            hub: c.hub_compte != null ? String(c.hub_compte) : '',
+            fbm: c.fbm_compte != null ? String(c.fbm_compte) : '',
+            sp: c.sans_prefix_compte != null ? String(c.sans_prefix_compte) : '',
+          }
+        }
+        setAuditInput(pre)
+      }
+    } catch {}
+  }
+
+  async function creerAudit() {
+    if (!newAuditMois) return
+    setCreatingAudit(true)
+    try {
+      const r = await fetch('/api/amazon/audits', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ mois: newAuditMois, started_by: profil?.email || profil?.nom || 'Inconnu' })
+      })
+      const j = await r.json()
+      if (j.success) {
+        await chargerAudits()
+        await chargerAuditDetail(j.audit.id)
+      } else {
+        alert(j.erreur || 'Erreur')
+      }
+    } catch (e:any) { alert(e.message) }
+    setCreatingAudit(false)
+  }
+
+  async function sauvegarderComptage(base_code: string) {
+    if (!openAudit) return
+    const input = auditInput[base_code] || {}
+    const body: any = { base_code, counted_by: profil?.email || profil?.nom || 'Inconnu' }
+    if (input.hub !== undefined) body.hub_compte = input.hub === '' ? null : Number(input.hub)
+    if (input.fbm !== undefined) body.fbm_compte = input.fbm === '' ? null : Number(input.fbm)
+    if (input.sp !== undefined)  body.sans_prefix_compte = input.sp === '' ? null : Number(input.sp)
+    try {
+      await fetch(`/api/amazon/audits/${openAudit.id}`, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+      })
+      await chargerAuditDetail(openAudit.id)
+    } catch (e:any) { alert(e.message) }
+  }
+
+  async function finaliserAudit() {
+    if (!openAudit) return
+    if (!confirm(`Finaliser l'audit ${openAudit.label} ? Il passera en statut 'terminé'.`)) return
+    try {
+      await fetch(`/api/amazon/audits/${openAudit.id}`, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ action: 'finalize', finished_by: profil?.email || profil?.nom || 'Inconnu' })
+      })
+      await chargerAudits()
+      await chargerAuditDetail(openAudit.id)
+    } catch (e:any) { alert(e.message) }
+  }
+
+  async function reouvrirAudit() {
+    if (!openAudit) return
+    try {
+      await fetch(`/api/amazon/audits/${openAudit.id}`, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ action: 'reopen' })
+      })
+      await chargerAudits()
+      await chargerAuditDetail(openAudit.id)
+    } catch (e:any) { alert(e.message) }
+  }
+
+  async function supprimerAudit(id: number, label: string) {
+    if (!confirm(`Supprimer définitivement l'audit "${label}" ?`)) return
+    try {
+      await fetch('/api/amazon/audits', {
+        method: 'DELETE',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ id })
+      })
+      if (openAudit?.id === id) { setOpenAudit(null); setAuditCounts([]) }
+      await chargerAudits()
+    } catch (e:any) { alert(e.message) }
+  }
+
+  function exportAuditCsv() {
+    if (!openAudit || !auditCounts.length) return
+    const headers = ['Base','Description','HUB théo','HUB compté','HUB écart','FBM théo','FBM compté','FBM écart','Sans préfixe théo','Sans préfixe compté','FBA Amazon','FBA Traction','Coût unit','Valeur écart HUB','Valeur écart FBM','Notes']
+    const rows = auditCounts.map((c:any) => [
+      c.base_code,
+      (c.description||'').replace(/"/g,'""'),
+      c.hub_theorique, c.hub_compte??'', c.hub_ecart??'',
+      c.fbm_theorique, c.fbm_compte??'', c.fbm_ecart??'',
+      c.sans_prefix_theorique, c.sans_prefix_compte??'',
+      c.fba_amazon_theorique, c.fba_traction_theorique,
+      c.coutant, c.valeur_hub_ecart, c.valeur_fbm_ecart,
+      (c.notes||'').replace(/"/g,'""'),
+    ].map(v => `"${v}"`).join(','))
+    const csv = [headers.join(','), ...rows].join('\n')
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8'})
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `audit_${openAudit.mois}_${openAudit.id}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   async function toggleWatchlist(amazon_sku: string, currently: boolean) {
@@ -5195,6 +5338,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         <button onClick={()=>setVue('consolide')}
           style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='consolide'?C.blue:bdr}`,background:vue==='consolide'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='consolide'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
           🏭 Inventaire consolidé ({consolide.totals?.nb_base_products||0})
+        </button>
+        <button onClick={()=>{setVue('audit'); if(!audits.length) chargerAudits()}}
+          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='audit'?C.green:bdr}`,background:vue==='audit'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:vue==='audit'?C.green:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+          📋 Audit mensuel ({audits.length})
         </button>
         <button onClick={()=>setVue('mapping')}
           style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='mapping'?C.red:bdr}`,background:vue==='mapping'?(dark?'#2b1113':'#fce8e6'):'transparent',color:vue==='mapping'?C.red:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
@@ -6232,6 +6379,253 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 </div>
             }
           </div>
+        </div>
+        )
+      })()}
+
+      {vue === 'audit' && (() => {
+        const fmt$ = (n: number) => `${n>=0?'':'−'}${Math.abs(n).toFixed(2)}$`
+        const fmtDate = (d:string) => d ? new Date(d).toLocaleDateString('fr-CA',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'
+        const filteredCounts = (auditCounts || []).filter((c:any) => {
+          if (auditFiltre === 'restants' && c.compte) return false
+          if (auditFiltre === 'comptes' && !c.compte) return false
+          if (auditFiltre === 'ecarts' && !c.has_ecart) return false
+          if (auditSearch) {
+            const q = auditSearch.trim().toLowerCase()
+            if (!String(c.base_code||'').toLowerCase().includes(q) && !String(c.description||'').toLowerCase().includes(q)) return false
+          }
+          return true
+        })
+        const termine = openAudit?.statut === 'termine'
+        return (
+        <div>
+          {/* Header création */}
+          {!openAudit && (
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'14px 16px',marginBottom:12}}>
+              <div style={{fontSize:14,fontWeight:800,marginBottom:4}}>📋 Audit mensuel inventaire</div>
+              <div style={{fontSize:11,color:sub,marginBottom:10,lineHeight:1.5}}>
+                Snapshot le stock théorique du jour (HUB + FBM + oublis + FBA), puis saisie des comptages physiques. Écart détecté et archivé pour les comptables.
+              </div>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+                <input type="month" value={newAuditMois} onChange={e=>setNewAuditMois(e.target.value)}
+                  style={{...S,maxWidth:160,fontSize:12,padding:'8px 12px'}}/>
+                <button onClick={creerAudit} disabled={creatingAudit || !newAuditMois}
+                  style={{background:creatingAudit?bdr:C.green,color:'#fff',border:'none',borderRadius:8,padding:'10px 16px',fontWeight:700,cursor:creatingAudit?'default':'pointer',fontSize:12}}>
+                  {creatingAudit?'⏳ Création...':'➕ Démarrer un audit'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Liste des audits */}
+          {!openAudit && (
+            <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden',marginBottom:10}}>
+              <div style={{padding:'10px 14px',borderBottom:`1px solid ${bdr}`,fontSize:12,fontWeight:700,color:sub}}>
+                HISTORIQUE DES AUDITS ({audits.length})
+              </div>
+              {audits.length === 0
+                ? <div style={{textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucun audit encore créé</div>
+                : <div style={{overflowX:'auto'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                      <thead><tr style={{background:thBg}}>
+                        <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Mois</th>
+                        <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Libellé</th>
+                        <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Statut</th>
+                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Progression</th>
+                        <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Démarré</th>
+                        <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Terminé</th>
+                        <th style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}></th>
+                      </tr></thead>
+                      <tbody>
+                        {audits.map((a:any) => {
+                          const pct = a.nb_total > 0 ? Math.round((a.nb_comptes/a.nb_total)*100) : 0
+                          return (
+                            <tr key={a.id} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
+                              <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{a.mois}</td>
+                              <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontSize:12}}>{a.label||'—'}</td>
+                              <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}>
+                                <span style={{background:(a.statut==='termine'?C.green:C.yellow)+'22',color:a.statut==='termine'?C.green:C.yellow,padding:'2px 8px',borderRadius:8,fontSize:10,fontWeight:700}}>
+                                  {a.statut==='termine'?'✓ Terminé':'⏳ En cours'}
+                                </span>
+                              </td>
+                              <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontSize:11,color:sub}}>{a.nb_comptes||0}/{a.nb_total||0} <strong style={{color:pct===100?C.green:C.blue}}>({pct}%)</strong></td>
+                              <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,whiteSpace:'nowrap'}}>{fmtDate(a.started_at)}</td>
+                              <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,whiteSpace:'nowrap'}}>{a.finished_at?fmtDate(a.finished_at):'—'}</td>
+                              <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',whiteSpace:'nowrap'}}>
+                                <button onClick={()=>chargerAuditDetail(a.id)}
+                                  style={{background:C.blue,color:'#fff',border:'none',borderRadius:6,padding:'5px 10px',fontWeight:700,cursor:'pointer',fontSize:11,marginRight:4}}>
+                                  Ouvrir
+                                </button>
+                                <button onClick={()=>supprimerAudit(a.id, a.label||a.mois)}
+                                  style={{background:'transparent',color:C.red,border:`1px solid ${C.red}`,borderRadius:6,padding:'4px 8px',cursor:'pointer',fontSize:10,fontWeight:700}}>
+                                  🗑
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+              }
+            </div>
+          )}
+
+          {/* Détail audit ouvert */}
+          {openAudit && (
+            <div>
+              {/* Header audit ouvert */}
+              <div style={{background:card,border:`2px solid ${termine?C.green:C.yellow}`,borderRadius:10,padding:'14px 16px',marginBottom:10,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:10}}>
+                <div>
+                  <div style={{fontSize:14,fontWeight:900}}>{openAudit.label} <span style={{fontSize:11,color:sub,marginLeft:8}}>({openAudit.mois})</span></div>
+                  <div style={{fontSize:11,color:sub,marginTop:2}}>
+                    {termine?'✓ Terminé':'⏳ En cours'} •
+                    Démarré par <strong>{openAudit.started_by||'—'}</strong> le {fmtDate(openAudit.started_at)}
+                    {openAudit.finished_at && ` • Terminé le ${fmtDate(openAudit.finished_at)}`}
+                  </div>
+                </div>
+                <div style={{display:'flex',gap:8}}>
+                  <button onClick={()=>{setOpenAudit(null); setAuditCounts([])}}
+                    style={{background:'transparent',border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12,color:sub}}>
+                    ← Retour
+                  </button>
+                  <button onClick={exportAuditCsv}
+                    style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                    📥 Export CSV
+                  </button>
+                  {!termine ? (
+                    <button onClick={finaliserAudit}
+                      style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                      ✓ Finaliser
+                    </button>
+                  ) : (
+                    <button onClick={reouvrirAudit}
+                      style={{background:C.yellow,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                      ↩ Rouvrir
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Stats */}
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(6,1fr)',gap:8,marginBottom:10}}>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Total</div>
+                  <div style={{fontSize:20,fontWeight:900}}>{auditStats.total||0}</div>
+                </div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.green}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Comptés</div>
+                  <div style={{fontSize:20,fontWeight:900,color:C.green}}>{auditStats.comptes||0}</div>
+                </div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.yellow}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Restants</div>
+                  <div style={{fontSize:20,fontWeight:900,color:C.yellow}}>{auditStats.restants||0}</div>
+                </div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.red}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Avec écart</div>
+                  <div style={{fontSize:20,fontWeight:900,color:C.red}}>{auditStats.avec_ecart||0}</div>
+                </div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.red}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Valeur écart</div>
+                  <div style={{fontSize:16,fontWeight:900,color:C.red}}>{fmt$(auditStats.valeur_ecart_abs||0)}</div>
+                </div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>HUB comptés</div>
+                  <div style={{fontSize:14,fontWeight:900}}><span style={{color:C.green}}>{auditStats.total_hub_compte||0}</span>/<span style={{color:sub}}>{auditStats.total_hub_theorique||0}</span></div>
+                </div>
+              </div>
+
+              {/* Filtres */}
+              <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:10,display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+                <input value={auditSearch} onChange={e=>setAuditSearch(e.target.value)} placeholder="🔍 Base code ou description..."
+                  style={{...S,maxWidth:260,fontSize:12,padding:'7px 10px'}}/>
+                <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                  {[
+                    {id:'restants', label:`⏳ Restants (${auditStats.restants||0})`, color:C.yellow},
+                    {id:'comptes', label:`✓ Comptés (${auditStats.comptes||0})`, color:C.green},
+                    {id:'ecarts', label:`⚠️ Avec écart (${auditStats.avec_ecart||0})`, color:C.red},
+                    {id:'tous', label:`Tous (${auditStats.total||0})`, color:sub},
+                  ].map(f => (
+                    <button key={f.id} onClick={()=>setAuditFiltre(f.id as any)}
+                      style={{padding:'6px 11px',borderRadius:14,border:`1px solid ${auditFiltre===f.id?f.color:bdr}`,background:auditFiltre===f.id?f.color+'22':'transparent',color:auditFiltre===f.id?f.color:sub,fontWeight:700,cursor:'pointer',fontSize:11}}>
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Liste compacte des comptages */}
+              <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+                {filteredCounts.length === 0
+                  ? <div style={{textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucun résultat</div>
+                  : <div style={{overflowX:'auto'}}>
+                      <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                        <thead><tr style={{background:thBg}}>
+                          <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Base</th>
+                          <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Description</th>
+                          <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`1px solid ${bdr}`}}>HUB théo</th>
+                          <th style={{padding:'8px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>HUB compté</th>
+                          <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.yellow,borderBottom:`1px solid ${bdr}`}}>FBM théo</th>
+                          <th style={{padding:'8px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>FBM compté</th>
+                          <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.yellow,borderBottom:`1px solid ${bdr}`}}>🏷 SP théo</th>
+                          <th style={{padding:'8px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>SP compté</th>
+                          <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`1px solid ${bdr}`}}>Écart $</th>
+                          <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>FBA Amz</th>
+                          <th style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}></th>
+                        </tr></thead>
+                        <tbody>
+                          {filteredCounts.map((c:any) => {
+                            const input = auditInput[c.base_code] || {}
+                            const valEcart = Math.abs(Number(c.valeur_hub_ecart||0)) + Math.abs(Number(c.valeur_fbm_ecart||0))
+                            return (
+                              <tr key={c.base_code} style={{background:c.has_ecart?(dark?'#2b1113':'#fce8e6'):c.compte?(dark?'#0d2a18':'#f4faf5'):'transparent'}}>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{c.base_code}</td>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={c.description}>{c.description||'—'}</td>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:Number(c.hub_theorique)>0?C.blue:sub}}>{Number(c.hub_theorique)||''}</td>
+                                <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                                  {Number(c.hub_theorique)>0 ? (
+                                    <input type="number" disabled={termine} value={input.hub ?? ''}
+                                      onChange={e=>setAuditInput(prev=>({...prev,[c.base_code]:{...prev[c.base_code],hub:e.target.value}}))}
+                                      onBlur={()=>sauvegarderComptage(c.base_code)}
+                                      style={{width:60,padding:'4px 6px',fontSize:12,border:`2px solid ${c.hub_ecart==null?bdr:c.hub_ecart===0?C.green:C.red}`,borderRadius:5,textAlign:'center',background:dark?'#1a1a1a':'#fff',color:dark?'#fff':'#000'}}/>
+                                  ) : <span style={{color:sub,fontSize:10}}>—</span>}
+                                  {c.hub_ecart!=null && c.hub_ecart !== 0 && <div style={{fontSize:9,color:C.red,fontWeight:700}}>{c.hub_ecart>0?'+':''}{c.hub_ecart}</div>}
+                                </td>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:Number(c.fbm_theorique)>0?C.yellow:sub}}>{Number(c.fbm_theorique)||''}</td>
+                                <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                                  {Number(c.fbm_theorique)>0 ? (
+                                    <input type="number" disabled={termine} value={input.fbm ?? ''}
+                                      onChange={e=>setAuditInput(prev=>({...prev,[c.base_code]:{...prev[c.base_code],fbm:e.target.value}}))}
+                                      onBlur={()=>sauvegarderComptage(c.base_code)}
+                                      style={{width:60,padding:'4px 6px',fontSize:12,border:`2px solid ${c.fbm_ecart==null?bdr:c.fbm_ecart===0?C.green:C.red}`,borderRadius:5,textAlign:'center',background:dark?'#1a1a1a':'#fff',color:dark?'#fff':'#000'}}/>
+                                  ) : <span style={{color:sub,fontSize:10}}>—</span>}
+                                  {c.fbm_ecart!=null && c.fbm_ecart !== 0 && <div style={{fontSize:9,color:C.red,fontWeight:700}}>{c.fbm_ecart>0?'+':''}{c.fbm_ecart}</div>}
+                                </td>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:Number(c.sans_prefix_theorique)>0?C.yellow:sub}}>{Number(c.sans_prefix_theorique)||''}</td>
+                                <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                                  {Number(c.sans_prefix_theorique)>0 ? (
+                                    <input type="number" disabled={termine} value={input.sp ?? ''}
+                                      onChange={e=>setAuditInput(prev=>({...prev,[c.base_code]:{...prev[c.base_code],sp:e.target.value}}))}
+                                      onBlur={()=>sauvegarderComptage(c.base_code)}
+                                      style={{width:60,padding:'4px 6px',fontSize:12,border:`2px solid ${c.sans_prefix_ecart==null?bdr:c.sans_prefix_ecart===0?C.green:C.red}`,borderRadius:5,textAlign:'center',background:dark?'#1a1a1a':'#fff',color:dark?'#fff':'#000'}}/>
+                                  ) : <span style={{color:sub,fontSize:10}}>—</span>}
+                                  {c.sans_prefix_ecart!=null && c.sans_prefix_ecart !== 0 && <div style={{fontSize:9,color:C.red,fontWeight:700}}>{c.sans_prefix_ecart>0?'+':''}{c.sans_prefix_ecart}</div>}
+                                </td>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:valEcart>0?C.red:sub,fontSize:11}}>{valEcart>0?fmt$(c.valeur_hub_ecart+c.valeur_fbm_ecart):'—'}</td>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontSize:11,color:sub}}>{Number(c.fba_amazon_theorique)||'—'}</td>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
+                                  {c.compte && <span style={{color:C.green,fontSize:14}}>✓</span>}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                }
+              </div>
+            </div>
+          )}
         </div>
         )
       })()}

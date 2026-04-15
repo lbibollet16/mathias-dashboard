@@ -255,3 +255,46 @@ CREATE TABLE IF NOT EXISTS amazon_sku_watchlist (
 );
 CREATE INDEX IF NOT EXISTS idx_amz_watch_sku ON amazon_sku_watchlist(amazon_sku);
 ALTER TABLE amazon_sku_watchlist DISABLE ROW LEVEL SECURITY;
+
+-- Phase 4b : Audits mensuels inventaire Amazon
+CREATE TABLE IF NOT EXISTS amazon_audits (
+  id BIGSERIAL PRIMARY KEY,
+  mois TEXT NOT NULL,                    -- Format YYYY-MM
+  label TEXT,                             -- Libellé libre (ex: "Audit avril 2026")
+  statut TEXT DEFAULT 'en_cours',         -- en_cours | termine | archive
+  started_at TIMESTAMPTZ DEFAULT NOW(),
+  finished_at TIMESTAMPTZ,
+  started_by TEXT,
+  finished_by TEXT,
+  notes TEXT,
+  snapshot_count INTEGER DEFAULT 0        -- # base products dans ce snapshot
+);
+CREATE INDEX IF NOT EXISTS idx_amz_audit_mois ON amazon_audits(mois);
+CREATE INDEX IF NOT EXISTS idx_amz_audit_statut ON amazon_audits(statut);
+
+CREATE TABLE IF NOT EXISTS amazon_audit_counts (
+  id BIGSERIAL PRIMARY KEY,
+  audit_id BIGINT NOT NULL REFERENCES amazon_audits(id) ON DELETE CASCADE,
+  base_code TEXT NOT NULL,
+  description TEXT,
+  coutant NUMERIC DEFAULT 0,
+  -- Valeurs théoriques au moment du snapshot
+  hub_theorique NUMERIC DEFAULT 0,
+  fbm_theorique NUMERIC DEFAULT 0,
+  sans_prefix_theorique NUMERIC DEFAULT 0,
+  fba_amazon_theorique NUMERIC DEFAULT 0,   -- snapshot Amazon au moment de l'audit
+  fba_traction_theorique NUMERIC DEFAULT 0, -- stock FBA Traction au même moment
+  -- Comptages physiques saisis par l'utilisateur
+  hub_compte NUMERIC,
+  fbm_compte NUMERIC,
+  sans_prefix_compte NUMERIC,
+  counted_at TIMESTAMPTZ,
+  counted_by TEXT,
+  notes TEXT,
+  UNIQUE(audit_id, base_code)
+);
+CREATE INDEX IF NOT EXISTS idx_amz_audit_counts_audit ON amazon_audit_counts(audit_id);
+CREATE INDEX IF NOT EXISTS idx_amz_audit_counts_base ON amazon_audit_counts(base_code);
+
+ALTER TABLE amazon_audits DISABLE ROW LEVEL SECURITY;
+ALTER TABLE amazon_audit_counts DISABLE ROW LEVEL SECURITY;
