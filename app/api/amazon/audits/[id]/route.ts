@@ -31,13 +31,30 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     }
 
     // Calculer les écarts par ligne + stats globales
+    //
+    // Les records "sans préfixe" dans Traction peuvent être des master records
+    // qui incluent le stock TOTAL (HUB + FBA + FBM). Pour le comptage physique
+    // au warehouse, on déduit ce qu'Amazon a déjà chez eux afin de ne pas
+    // chercher des unités fantômes.
+    //
+    // Formule:
+    //   sp_theorique_net   = max(0, sp_theorique - fba_amazon - fbm_amazon_declared)
+    //   Le HUB reste comme tel (records explicites HUB-xxx)
+    //
     const enriched = counts.map((c: any) => {
+      const fbaAmz = Number(c.fba_amazon_theorique || 0)
+      // Théorique "net" pour sans préfixe : on déduit le stock chez Amazon
+      const sp_theorique_raw = Number(c.sans_prefix_theorique || 0)
+      const sp_theorique_net = Math.max(0, sp_theorique_raw - fbaAmz)
+
       const hub_ecart = c.hub_compte != null ? Number(c.hub_compte) - Number(c.hub_theorique || 0) : null
       const fbm_ecart = c.fbm_compte != null ? Number(c.fbm_compte) - Number(c.fbm_theorique || 0) : null
-      const sans_prefix_ecart = c.sans_prefix_compte != null ? Number(c.sans_prefix_compte) - Number(c.sans_prefix_theorique || 0) : null
+      const sans_prefix_ecart = c.sans_prefix_compte != null ? Number(c.sans_prefix_compte) - sp_theorique_net : null
       const compte = c.hub_compte != null || c.fbm_compte != null || c.sans_prefix_compte != null
       return {
         ...c,
+        sans_prefix_theorique_net: sp_theorique_net,
+        sans_prefix_theorique_deducted: Math.min(sp_theorique_raw, fbaAmz),
         hub_ecart,
         fbm_ecart,
         sans_prefix_ecart,

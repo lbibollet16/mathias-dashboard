@@ -6567,7 +6567,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                           <th style={{padding:'8px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>HUB compté</th>
                           <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.yellow,borderBottom:`1px solid ${bdr}`}}>FBM théo</th>
                           <th style={{padding:'8px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>FBM compté</th>
-                          <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.yellow,borderBottom:`1px solid ${bdr}`}}>🏷 SP théo</th>
+                          <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.yellow,borderBottom:`1px solid ${bdr}`}} title="Sans préfixe attendu = théorique − stock chez Amazon">🏷 SP attendu</th>
                           <th style={{padding:'8px 10px',textAlign:'center',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>SP compté</th>
                           <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`1px solid ${bdr}`}}>Écart $</th>
                           <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>FBA Amz</th>
@@ -6601,9 +6601,17 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                   ) : <span style={{color:sub,fontSize:10}}>—</span>}
                                   {c.fbm_ecart!=null && c.fbm_ecart !== 0 && <div style={{fontSize:9,color:C.red,fontWeight:700}}>{c.fbm_ecart>0?'+':''}{c.fbm_ecart}</div>}
                                 </td>
-                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:Number(c.sans_prefix_theorique)>0?C.yellow:sub}}>{Number(c.sans_prefix_theorique)||''}</td>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:Number(c.sans_prefix_theorique_net)>0?C.yellow:sub}}
+                                    title={Number(c.sans_prefix_theorique_deducted)>0 ? `Brut ${c.sans_prefix_theorique}, déduit ${c.sans_prefix_theorique_deducted} (chez Amazon)` : ''}>
+                                  {Number(c.sans_prefix_theorique_net)||''}
+                                  {Number(c.sans_prefix_theorique_deducted)>0 && (
+                                    <div style={{fontSize:9,color:sub,fontWeight:400,marginTop:1}}>
+                                      (−{c.sans_prefix_theorique_deducted} Amz)
+                                    </div>
+                                  )}
+                                </td>
                                 <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                                  {Number(c.sans_prefix_theorique)>0 ? (
+                                  {(Number(c.sans_prefix_theorique_net)>0 || Number(c.sans_prefix_theorique)>0) ? (
                                     <input type="number" disabled={termine} value={input.sp ?? ''}
                                       onChange={e=>setAuditInput(prev=>({...prev,[c.base_code]:{...prev[c.base_code],sp:e.target.value}}))}
                                       onBlur={()=>sauvegarderComptage(c.base_code)}
