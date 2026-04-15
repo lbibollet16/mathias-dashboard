@@ -43,18 +43,35 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     //
     const enriched = counts.map((c: any) => {
       const fbaAmz = Number(c.fba_amazon_theorique || 0)
-      // Théorique "net" pour sans préfixe : on déduit le stock chez Amazon
-      const sp_theorique_raw = Number(c.sans_prefix_theorique || 0)
-      const sp_theorique_net = Math.max(0, sp_theorique_raw - fbaAmz)
+      const hubRaw = Number(c.hub_theorique || 0)
+      const fbmRaw = Number(c.fbm_theorique || 0)
+      const spRaw = Number(c.sans_prefix_theorique || 0)
 
-      const hub_ecart = c.hub_compte != null ? Number(c.hub_compte) - Number(c.hub_theorique || 0) : null
-      const fbm_ecart = c.fbm_compte != null ? Number(c.fbm_compte) - Number(c.fbm_theorique || 0) : null
+      // Déduction Amazon : on applique la déduction progressivement
+      //   - d'abord sur sans_prefix (le plus probable à être un master record)
+      //   - puis sur HUB si le SP ne couvre pas toute la déduction
+      const dedSp = Math.min(spRaw, fbaAmz)
+      const sp_theorique_net = spRaw - dedSp
+      const remainingAmz = fbaAmz - dedSp
+      const dedHub = Math.min(hubRaw, remainingAmz)
+      const hub_theorique_net = hubRaw - dedHub
+
+      // Total physique attendu au warehouse (HUB net + FBM + SP net)
+      const total_warehouse_attendu = hub_theorique_net + fbmRaw + sp_theorique_net
+
+      // Écarts (basés sur les valeurs nettes)
+      const hub_ecart = c.hub_compte != null ? Number(c.hub_compte) - hub_theorique_net : null
+      const fbm_ecart = c.fbm_compte != null ? Number(c.fbm_compte) - fbmRaw : null
       const sans_prefix_ecart = c.sans_prefix_compte != null ? Number(c.sans_prefix_compte) - sp_theorique_net : null
       const compte = c.hub_compte != null || c.fbm_compte != null || c.sans_prefix_compte != null
+
       return {
         ...c,
+        hub_theorique_net,
+        hub_theorique_deducted: dedHub,
         sans_prefix_theorique_net: sp_theorique_net,
-        sans_prefix_theorique_deducted: Math.min(sp_theorique_raw, fbaAmz),
+        sans_prefix_theorique_deducted: dedSp,
+        total_warehouse_attendu,
         hub_ecart,
         fbm_ecart,
         sans_prefix_ecart,

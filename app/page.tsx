@@ -5046,6 +5046,22 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     } catch {}
   }
 
+  async function backfillAudits() {
+    if (!confirm('Créer un audit pour chaque settlement existant qui n\'en a pas encore ? (Sync Traction incluse)')) return
+    setCreatingAudit(true)
+    try {
+      const r = await fetch('/api/amazon/audits/backfill', { method: 'POST' })
+      const j = await r.json()
+      if (j.success) {
+        setImportLog(l => [...l, `🔒 Backfill : ${j.created} audits créés, ${j.skipped} déjà existants (${j.total_settlements} settlements)`])
+        await chargerAudits()
+      } else {
+        alert(j.erreur || 'Erreur backfill')
+      }
+    } catch (e:any) { alert(e.message) }
+    setCreatingAudit(false)
+  }
+
   async function creerAudit() {
     if (!newAuditMois) return
     setCreatingAudit(true)
@@ -5234,6 +5250,11 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           if (j.snapshot_date) msg += ` snapshot=${j.snapshot_date}`
           if (j.unresolved_sku) msg += ` • ${j.unresolved_sku} SKU non résolus`
           if (j.duplicates_deduped) msg += ` • ${j.duplicates_deduped} doublons dédupliqués`
+          if (j.traction_sync?.success) msg += ` • 🔄 ${j.traction_sync.lignes} lignes Traction`
+          if (j.audit?.success) {
+            if (j.audit.skipped) msg += ` • 🔒 Audit conservé (existant pour ce settlement)`
+            else if (j.audit.audit?.id) msg += ` • 🔒 Audit auto créé (id ${j.audit.audit.id}, ${j.audit.total} base products)`
+          }
           setImportLog(l => [...l, msg])
         } else {
           setImportLog(l => [...l, `❌ ${file.name} : ${j.erreur || 'erreur inconnue'}`])
@@ -6405,14 +6426,18 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
             <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'14px 16px',marginBottom:12}}>
               <div style={{fontSize:14,fontWeight:800,marginBottom:4}}>📋 Audit mensuel inventaire</div>
               <div style={{fontSize:11,color:sub,marginBottom:10,lineHeight:1.5}}>
-                Snapshot le stock théorique du jour (HUB + FBM + oublis + FBA), puis saisie des comptages physiques. Écart détecté et archivé pour les comptables.
+                🔒 Un audit est <strong>créé automatiquement</strong> à chaque import de settlement (gel de Traction + Amazon à cet instant). Tu peux aussi en créer un manuellement ou backfiller les settlements existants.
               </div>
               <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
                 <input type="month" value={newAuditMois} onChange={e=>setNewAuditMois(e.target.value)}
                   style={{...S,maxWidth:160,fontSize:12,padding:'8px 12px'}}/>
                 <button onClick={creerAudit} disabled={creatingAudit || !newAuditMois}
                   style={{background:creatingAudit?bdr:C.green,color:'#fff',border:'none',borderRadius:8,padding:'10px 16px',fontWeight:700,cursor:creatingAudit?'default':'pointer',fontSize:12}}>
-                  {creatingAudit?'⏳ Création...':'➕ Démarrer un audit'}
+                  {creatingAudit?'⏳':'➕ Audit manuel'}
+                </button>
+                <button onClick={backfillAudits} disabled={creatingAudit}
+                  style={{background:creatingAudit?bdr:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 16px',fontWeight:700,cursor:creatingAudit?'default':'pointer',fontSize:12,marginLeft:'auto'}}>
+                  🔒 Créer audits pour settlements existants
                 </button>
               </div>
             </div>
@@ -6443,7 +6468,14 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                           return (
                             <tr key={a.id} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
                               <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{a.mois}</td>
-                              <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontSize:12}}>{a.label||'—'}</td>
+                              <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontSize:12}}>
+                                {a.label||'—'}
+                                {a.settlement_id && (
+                                  <div style={{marginTop:3}}>
+                                    <span title={`Settlement ${a.settlement_id}`} style={{background:C.blue+'22',color:C.blue,padding:'2px 6px',borderRadius:6,fontSize:9,fontWeight:700,fontFamily:'monospace'}}>🔗 {a.settlement_id}</span>
+                                  </div>
+                                )}
+                              </td>
                               <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}>
                                 <span style={{background:(a.statut==='termine'?C.green:C.yellow)+'22',color:a.statut==='termine'?C.green:C.yellow,padding:'2px 8px',borderRadius:8,fontSize:10,fontWeight:700}}>
                                   {a.statut==='termine'?'✓ Terminé':'⏳ En cours'}
@@ -6508,6 +6540,37 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 </div>
               </div>
 
+              {/* Résumé "stock physique attendu" */}
+              {(() => {
+                let totalHubNet = 0, totalFbm = 0, totalSpNet = 0, totalAmz = 0
+                for (const c of auditCounts) {
+                  totalHubNet += Number(c.hub_theorique_net||0)
+                  totalFbm    += Number(c.fbm_theorique||0)
+                  totalSpNet  += Number(c.sans_prefix_theorique_net||0)
+                  totalAmz    += Number(c.fba_amazon_theorique||0)
+                }
+                const totalWarehouse = totalHubNet + totalFbm + totalSpNet
+                return (
+                  <div style={{background:card,border:`2px solid ${C.blue}`,borderRadius:10,padding:'12px 16px',marginBottom:10}}>
+                    <div style={{fontSize:11,fontWeight:800,color:C.blue,textTransform:'uppercase',marginBottom:8}}>
+                      🏭 Stock physique attendu au warehouse (déductions appliquées)
+                    </div>
+                    <div style={{display:'flex',gap:16,flexWrap:'wrap',alignItems:'center',fontSize:12}}>
+                      <div><span style={{color:sub}}>HUB net : </span><strong style={{color:C.blue,fontSize:16}}>{totalHubNet}</strong></div>
+                      <div style={{color:sub}}>+</div>
+                      <div><span style={{color:sub}}>FBM : </span><strong style={{color:C.yellow,fontSize:16}}>{totalFbm}</strong></div>
+                      <div style={{color:sub}}>+</div>
+                      <div><span style={{color:sub}}>SP net : </span><strong style={{color:C.yellow,fontSize:16}}>{totalSpNet}</strong></div>
+                      <div style={{color:sub}}>=</div>
+                      <div style={{background:C.green+'22',padding:'4px 12px',borderRadius:8}}>
+                        <span style={{color:sub}}>Total à trouver : </span><strong style={{color:C.green,fontSize:18}}>{totalWarehouse}</strong> unités
+                      </div>
+                      <div style={{color:sub,marginLeft:'auto',fontSize:11}}>(déduit : <strong>{totalAmz}</strong> unités chez Amazon FBA)</div>
+                    </div>
+                  </div>
+                )
+              })()}
+
               {/* Stats */}
               <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(6,1fr)',gap:8,marginBottom:10}}>
                 <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
@@ -6565,7 +6628,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                           const colInfos: Record<string, string> = {
                             base: "Code de base du produit — obtenu en retirant les préfixes/suffixes HUB, FBA, FBM du SKU Traction pour regrouper les variantes d'un même produit physique sous une seule ligne.",
                             description: "Nom du produit tel qu'il est dans Traction (champ DescFra). S'affiche tronqué au milieu, le nom complet apparaît au survol de la cellule.",
-                            hub_theo: "Quantité théorique au HUB (entrepôt) = somme des QTYMINUSRESERVED de tous les records Traction dont le PKCode commence par HUB- ou finit par -HUB. C'est le stock que Traction pense avoir physiquement dans ton entrepôt.",
+                            hub_theo: "HUB attendu = (HUB records brut) − (ce qui reste à déduire d'Amazon FBA après avoir soustrait SP). Formule: d'abord on déduit Amazon FBA du stock sans préfixe (SP), puis ce qui reste est déduit du HUB brut. La note '(−X Amz)' indique combien a été retiré du HUB. Objectif: voir le stock que tu devrais trouver physiquement à l'entrepôt sans compter ce qui est déjà chez Amazon.",
                             hub_compte: "Quantité physique que tu comptes à l'entrepôt pour ce produit. Entre la valeur et elle est sauvegardée automatiquement quand tu sors du champ. L'écart avec le théorique s'affiche en rouge juste en dessous quand il est ≠ 0.",
                             fbm_theo: "Quantité théorique en FBM = somme QTYMINUSRESERVED des records dont le PKCode contient FBM. C'est ton stock FBM chez toi (prêt à être expédié manuellement aux clients Amazon).",
                             fbm_compte: "Quantité physique que tu comptes pour les pièces FBM chez toi. Auto-save au blur, écart rouge/vert calculé.",
@@ -6593,7 +6656,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                               <tr style={{background:thBg}}>
                                 <IHeader id="base" label="Base" />
                                 <IHeader id="description" label="Description" />
-                                <IHeader id="hub_theo" label="HUB théo" align="right" color={C.blue} />
+                                <IHeader id="hub_theo" label="HUB attendu" align="right" color={C.blue} />
                                 <IHeader id="hub_compte" label="HUB compté" align="center" color={C.green} />
                                 <IHeader id="fbm_theo" label="FBM théo" align="right" color={C.yellow} />
                                 <IHeader id="fbm_compte" label="FBM compté" align="center" color={C.green} />
@@ -6630,9 +6693,17 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                               <tr key={c.base_code} style={{background:c.has_ecart?(dark?'#2b1113':'#fce8e6'):c.compte?(dark?'#0d2a18':'#f4faf5'):'transparent'}}>
                                 <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{c.base_code}</td>
                                 <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={c.description}>{c.description||'—'}</td>
-                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:Number(c.hub_theorique)>0?C.blue:sub}}>{Number(c.hub_theorique)||''}</td>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:Number(c.hub_theorique_net)>0?C.blue:sub}}
+                                    title={Number(c.hub_theorique_deducted)>0 ? `Brut HUB ${c.hub_theorique}, déduit ${c.hub_theorique_deducted} (chez Amazon)` : ''}>
+                                  {Number(c.hub_theorique_net)||''}
+                                  {Number(c.hub_theorique_deducted)>0 && (
+                                    <div style={{fontSize:9,color:sub,fontWeight:400,marginTop:1}}>
+                                      (−{c.hub_theorique_deducted} Amz)
+                                    </div>
+                                  )}
+                                </td>
                                 <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                                  {Number(c.hub_theorique)>0 ? (
+                                  {(Number(c.hub_theorique_net)>0 || Number(c.hub_theorique)>0) ? (
                                     <input type="number" disabled={termine} value={input.hub ?? ''}
                                       onChange={e=>setAuditInput(prev=>({...prev,[c.base_code]:{...prev[c.base_code],hub:e.target.value}}))}
                                       onBlur={()=>sauvegarderComptage(c.base_code)}
