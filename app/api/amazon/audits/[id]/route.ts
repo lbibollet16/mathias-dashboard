@@ -56,14 +56,25 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       const dedHub = Math.min(hubRaw, remainingAmz)
       const hub_theorique_net = hubRaw - dedHub
 
-      // Total physique attendu au warehouse (HUB net + FBM + SP net)
-      const total_warehouse_attendu = hub_theorique_net + fbmRaw + sp_theorique_net
+      // ─── Warehouse fusionné : HUB + SP (physiquement au même endroit) ───
+      const warehouse_theorique_net = hub_theorique_net + sp_theorique_net
+      const warehouse_theorique_deducted = dedHub + dedSp
 
-      // Écarts (basés sur les valeurs nettes)
-      const hub_ecart = c.hub_compte != null ? Number(c.hub_compte) - hub_theorique_net : null
+      // Comptage physique warehouse = somme hub_compte + sp_compte (les audits
+      // précédents peuvent avoir les 2, les nouveaux n'utilisent que hub_compte)
+      const hubCompteNum = c.hub_compte != null ? Number(c.hub_compte) : null
+      const spCompteNum = c.sans_prefix_compte != null ? Number(c.sans_prefix_compte) : null
+      const warehouse_compte = (hubCompteNum != null || spCompteNum != null)
+        ? (hubCompteNum || 0) + (spCompteNum || 0)
+        : null
+      const warehouse_ecart = warehouse_compte != null ? warehouse_compte - warehouse_theorique_net : null
+
+      // Total physique attendu au warehouse (warehouse + FBM)
+      const total_warehouse_attendu = warehouse_theorique_net + fbmRaw
+
+      // Écarts FBM inchangés
       const fbm_ecart = c.fbm_compte != null ? Number(c.fbm_compte) - fbmRaw : null
-      const sans_prefix_ecart = c.sans_prefix_compte != null ? Number(c.sans_prefix_compte) - sp_theorique_net : null
-      const compte = c.hub_compte != null || c.fbm_compte != null || c.sans_prefix_compte != null
+      const compte = warehouse_compte != null || c.fbm_compte != null
 
       return {
         ...c,
@@ -71,14 +82,18 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
         hub_theorique_deducted: dedHub,
         sans_prefix_theorique_net: sp_theorique_net,
         sans_prefix_theorique_deducted: dedSp,
+        warehouse_theorique_net,
+        warehouse_theorique_deducted,
+        warehouse_compte,
+        warehouse_ecart,
+        // Flag pour signaler les oublis à tagger (action item, pas un input)
+        has_oubli: spRaw > 0,
         total_warehouse_attendu,
-        hub_ecart,
         fbm_ecart,
-        sans_prefix_ecart,
-        valeur_hub_ecart: hub_ecart != null ? hub_ecart * Number(c.coutant || 0) : 0,
+        valeur_warehouse_ecart: warehouse_ecart != null ? warehouse_ecart * Number(c.coutant || 0) : 0,
         valeur_fbm_ecart: fbm_ecart != null ? fbm_ecart * Number(c.coutant || 0) : 0,
         compte,
-        has_ecart: (hub_ecart !== null && hub_ecart !== 0) || (fbm_ecart !== null && fbm_ecart !== 0) || (sans_prefix_ecart !== null && sans_prefix_ecart !== 0),
+        has_ecart: (warehouse_ecart !== null && warehouse_ecart !== 0) || (fbm_ecart !== null && fbm_ecart !== 0),
       }
     })
 
@@ -87,11 +102,12 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       comptes: enriched.filter(c => c.compte).length,
       restants: enriched.filter(c => !c.compte).length,
       avec_ecart: enriched.filter(c => c.has_ecart).length,
-      valeur_ecart_abs: enriched.reduce((a, c) => a + Math.abs(c.valeur_hub_ecart) + Math.abs(c.valeur_fbm_ecart), 0),
-      total_hub_theorique: enriched.reduce((a, c) => a + Number(c.hub_theorique || 0), 0),
-      total_hub_compte: enriched.reduce((a, c) => a + (c.hub_compte != null ? Number(c.hub_compte) : 0), 0),
+      valeur_ecart_abs: enriched.reduce((a, c) => a + Math.abs(c.valeur_warehouse_ecart) + Math.abs(c.valeur_fbm_ecart), 0),
+      total_warehouse_theorique_net: enriched.reduce((a, c) => a + Number(c.warehouse_theorique_net || 0), 0),
+      total_warehouse_compte: enriched.reduce((a, c) => a + (c.warehouse_compte != null ? Number(c.warehouse_compte) : 0), 0),
       total_fbm_theorique: enriched.reduce((a, c) => a + Number(c.fbm_theorique || 0), 0),
       total_fbm_compte: enriched.reduce((a, c) => a + (c.fbm_compte != null ? Number(c.fbm_compte) : 0), 0),
+      nb_oublis: enriched.filter(c => c.has_oubli).length,
     }
 
     return NextResponse.json({ audit, counts: enriched, stats })
@@ -133,13 +149,20 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     }
 
     // Sinon, c'est un update de ligne de comptage
-    const { base_code, hub_compte, fbm_compte, sans_prefix_compte, counted_by, notes } = body
+    // Nouveau modèle: warehouse_compte (HUB + SP fusionnés) → stocké dans hub_compte
+    const { base_code, hub_compte, warehouse_compte, fbm_compte, counted_by, notes } = body
     if (!base_code) return NextResponse.json({ erreur: 'base_code requis' }, { status: 400 })
 
     const update: any = { counted_at: new Date().toISOString() }
-    if (hub_compte !== undefined)         update.hub_compte = hub_compte
+    // warehouse_compte est le nouveau champ unifié ; écrit dans hub_compte et
+    // clear sp_compte pour migrer le modèle
+    if (warehouse_compte !== undefined) {
+      update.hub_compte = warehouse_compte
+      update.sans_prefix_compte = null
+    } else if (hub_compte !== undefined) {
+      update.hub_compte = hub_compte
+    }
     if (fbm_compte !== undefined)         update.fbm_compte = fbm_compte
-    if (sans_prefix_compte !== undefined) update.sans_prefix_compte = sans_prefix_compte
     if (counted_by !== undefined)         update.counted_by = counted_by || null
     if (notes !== undefined)              update.notes = notes || null
 
