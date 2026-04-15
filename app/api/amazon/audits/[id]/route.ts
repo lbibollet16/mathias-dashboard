@@ -97,6 +97,18 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       }
     })
 
+    // Tri : priorité au stock à compter (warehouse_theorique_net ou FBM > 0),
+    // puis par quantité totale décroissante, base_code ascendant en tiebreak
+    enriched.sort((a: any, b: any) => {
+      const aStock = Number(a.warehouse_theorique_net || 0) + Number(a.fbm_theorique || 0)
+      const bStock = Number(b.warehouse_theorique_net || 0) + Number(b.fbm_theorique || 0)
+      const aHas = aStock > 0 ? 1 : 0
+      const bHas = bStock > 0 ? 1 : 0
+      if (aHas !== bHas) return bHas - aHas
+      if (aStock !== bStock) return bStock - aStock
+      return String(a.base_code).localeCompare(String(b.base_code))
+    })
+
     const stats = {
       total: enriched.length,
       comptes: enriched.filter(c => c.compte).length,
