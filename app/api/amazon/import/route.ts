@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { SkuResolver } from '@/lib/amazon-sku'
+import { syncTractionFeed } from '@/lib/amazon-traction-sync'
+import { createAuditSnapshot } from '@/lib/amazon-audit-create'
 
 // POST multipart/form-data — upload d'un fichier Amazon.
 // Auto-détection du type via les colonnes d'en-tête:
@@ -163,12 +165,42 @@ async function handlePayments(objs: Record<string, string>[], fileName: string, 
     inserted += batch.length
   }
 
+  // ─── AUTO : gel de l'inventaire via création d'un audit lié au settlement ──
+  // 1. Sync le feed Traction pour avoir les données les plus fraîches
+  // 2. Crée un audit lié à ce settlement (skip si déjà existant)
+  let auditResult: any = null
+  let tractionSync: any = null
+  try {
+    tractionSync = await syncTractionFeed()
+  } catch (e: any) {
+    tractionSync = { success: false, erreur: e.message }
+  }
+  try {
+    // Mois = celui du deposit_date (fallback settlement_end)
+    const refDate = settlementRow.deposit_date || settlementRow.settlement_end
+    let mois = new Date().toISOString().slice(0, 7)
+    if (refDate) {
+      const d = new Date(refDate)
+      if (!isNaN(d.getTime())) mois = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+    }
+    auditResult = await createAuditSnapshot({
+      mois,
+      label: `Auto — Settlement ${settlement_id}`,
+      settlement_id,
+      started_by: 'auto-import',
+    })
+  } catch (e: any) {
+    auditResult = { success: false, erreur: e.message }
+  }
+
   return {
     success: true,
     type: 'payments',
     settlement_id,
     transactions_inserted: inserted,
     unresolved_sku: unresolved,
+    traction_sync: tractionSync,
+    audit: auditResult,
   }
 }
 

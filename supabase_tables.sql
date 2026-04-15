@@ -298,3 +298,7 @@ CREATE INDEX IF NOT EXISTS idx_amz_audit_counts_base ON amazon_audit_counts(base
 
 ALTER TABLE amazon_audits DISABLE ROW LEVEL SECURITY;
 ALTER TABLE amazon_audit_counts DISABLE ROW LEVEL SECURITY;
+
+-- Lier chaque audit à un settlement (pour auto-génération à l'import)
+ALTER TABLE amazon_audits ADD COLUMN IF NOT EXISTS settlement_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_amz_audit_settlement ON amazon_audits(settlement_id);

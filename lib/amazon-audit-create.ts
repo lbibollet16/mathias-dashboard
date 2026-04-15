@@ -1,0 +1,158 @@
+// Helper partagé : créer un audit avec son snapshot initial.
+// Utilisé par /api/amazon/audits (création manuelle) et /api/amazon/import
+// (création automatique après import settlement) et /api/amazon/audits/backfill.
+
+import { supabaseAdmin } from './supabase'
+import { detectVariant } from './amazon-inventory'
+
+export interface CreateAuditInput {
+  mois: string              // YYYY-MM
+  label?: string
+  started_by?: string
+  settlement_id?: string | null
+}
+
+export interface CreateAuditResult {
+  success: boolean
+  audit?: any
+  total?: number
+  skipped?: boolean
+  reason?: string
+  erreur?: string
+}
+
+export async function createAuditSnapshot(input: CreateAuditInput): Promise<CreateAuditResult> {
+  try {
+    // Dédoublonnage par settlement_id : si un audit existe déjà pour ce
+    // settlement, on le garde tel quel (préserve les comptages saisis).
+    if (input.settlement_id) {
+      const { data: existing } = await supabaseAdmin
+        .from('amazon_audits')
+        .select('id, label')
+        .eq('settlement_id', input.settlement_id)
+        .limit(1)
+      if (existing && existing.length > 0) {
+        return { success: true, skipped: true, reason: `Audit déjà existant (id=${existing[0].id}) pour ce settlement`, audit: existing[0] }
+      }
+    }
+
+    // Créer l'enregistrement audit
+    const { data: created, error: cErr } = await supabaseAdmin
+      .from('amazon_audits')
+      .insert({
+        mois: input.mois,
+        label: input.label || `Audit ${input.mois}`,
+        started_by: input.started_by || null,
+        statut: 'en_cours',
+        started_at: new Date().toISOString(),
+        settlement_id: input.settlement_id || null,
+      })
+      .select()
+      .single()
+    if (cErr) throw cErr
+    const auditId = created.id
+
+    // Charger toutes les lignes Traction AMA/FBA/FBM
+    const tractionRows: any[] = []
+    let from = 0
+    while (true) {
+      const { data, error } = await supabaseAdmin
+        .from('traction_amazon_lignes')
+        .select('pk_code, qty_minus_reserved, prix_coutant, desc_fra')
+        .in('code_ligne', ['AMA', 'FBA', 'FBM'])
+        .range(from, from + 999)
+      if (error) throw error
+      tractionRows.push(...(data || []))
+      if (!data || data.length < 1000) break
+      from += 1000
+    }
+
+    // Dernier snapshot FBA Amazon
+    const { data: snapDates } = await supabaseAdmin
+      .from('amazon_fba_inventory')
+      .select('snapshot_date')
+      .order('snapshot_date', { ascending: false })
+      .limit(1)
+    const latestSnap = snapDates && snapDates[0]?.snapshot_date
+
+    const fbaByBase = new Map<string, number>()
+    if (latestSnap) {
+      let f = 0
+      while (true) {
+        const { data } = await supabaseAdmin
+          .from('amazon_fba_inventory')
+          .select('sku, afn_fulfillable_quantity, afn_inbound_working_quantity, afn_inbound_shipped_quantity, afn_inbound_receiving_quantity, afn_reserved_quantity, traction_code')
+          .eq('snapshot_date', latestSnap)
+          .range(f, f + 999)
+        if (!data) break
+        for (const row of data) {
+          const base = detectVariant(row.traction_code || row.sku).base
+          const total = Number(row.afn_fulfillable_quantity || 0)
+            + Number(row.afn_inbound_working_quantity || 0)
+            + Number(row.afn_inbound_shipped_quantity || 0)
+            + Number(row.afn_inbound_receiving_quantity || 0)
+            + Number(row.afn_reserved_quantity || 0)
+          fbaByBase.set(base, (fbaByBase.get(base) || 0) + total)
+        }
+        if (data.length < 1000) break
+        f += 1000
+      }
+    }
+
+    // Grouper Traction par base code
+    type BaseAccum = {
+      description: string | null
+      coutant: number
+      hub: number
+      fbm: number
+      sans_prefix: number
+      fba_traction: number
+    }
+    const bases = new Map<string, BaseAccum>()
+    for (const t of tractionRows) {
+      const v = detectVariant(t.pk_code)
+      const qty = Number(t.qty_minus_reserved || 0)
+      const ex = bases.get(v.base) || { description: null, coutant: 0, hub: 0, fbm: 0, sans_prefix: 0, fba_traction: 0 }
+      if (!ex.description && t.desc_fra) ex.description = t.desc_fra
+      if (ex.coutant === 0 && Number(t.prix_coutant || 0) > 0) ex.coutant = Number(t.prix_coutant)
+      if (v.location === 'HUB')       ex.hub += qty
+      else if (v.location === 'FBM')  ex.fbm += qty
+      else if (v.location === 'FBA')  ex.fba_traction += qty
+      else                            ex.sans_prefix += qty
+      bases.set(v.base, ex)
+    }
+
+    // Créer une ligne audit_count pour chaque base qui a du stock quelque part
+    const countRows: any[] = []
+    for (const [base, b] of bases) {
+      const fba_amazon = fbaByBase.get(base) || 0
+      if (b.hub === 0 && b.fbm === 0 && b.sans_prefix === 0 && fba_amazon === 0 && b.fba_traction === 0) continue
+      countRows.push({
+        audit_id: auditId,
+        base_code: base,
+        description: b.description,
+        coutant: b.coutant,
+        hub_theorique: b.hub,
+        fbm_theorique: b.fbm,
+        sans_prefix_theorique: b.sans_prefix,
+        fba_amazon_theorique: fba_amazon,
+        fba_traction_theorique: b.fba_traction,
+      })
+    }
+
+    for (let i = 0; i < countRows.length; i += 500) {
+      const batch = countRows.slice(i, i + 500)
+      const { error } = await supabaseAdmin.from('amazon_audit_counts').insert(batch)
+      if (error) throw error
+    }
+
+    await supabaseAdmin
+      .from('amazon_audits')
+      .update({ snapshot_count: countRows.length })
+      .eq('id', auditId)
+
+    return { success: true, audit: { ...created, snapshot_count: countRows.length }, total: countRows.length }
+  } catch (e: any) {
+    return { success: false, erreur: e.message || String(e) }
+  }
+}
