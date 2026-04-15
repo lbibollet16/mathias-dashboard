@@ -5449,6 +5449,31 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                       </table>
                                     </div>
 
+                                    {/* ─── Balance settlement ≟ dépôt Amazon ─── */}
+                                    {detail.totals && s.total_amount != null && (() => {
+                                      const depotAmazon = Number(s.total_amount || 0)
+                                      const sommeBreakdown = Number(detail.totals.brut || 0)
+                                      const delta = sommeBreakdown - depotAmazon
+                                      const balanced = Math.abs(delta) < 0.01
+                                      return (
+                                        <div style={{background:balanced?(dark?'#0d2a18':'#e6f4ea'):(dark?'#2b1113':'#fce8e6'),border:`2px solid ${balanced?C.green:C.red}`,borderRadius:10,padding:'12px 14px',marginBottom:12,display:'flex',gap:16,flexWrap:'wrap',alignItems:'center',justifyContent:'space-between'}}>
+                                          <div style={{fontWeight:900,color:balanced?C.green:C.red,fontSize:14}}>
+                                            {balanced?'✅ BALANCE SETTLEMENT OK':'⚠️ ÉCART DE BALANCE SETTLEMENT'}
+                                          </div>
+                                          <div style={{display:'flex',gap:16,flexWrap:'wrap',fontSize:12}}>
+                                            <div><span style={{color:sub}}>💰 Dépôt Amazon : </span><strong>{fmt$(depotAmazon)}</strong></div>
+                                            <div><span style={{color:sub}}>Σ Breakdown : </span><strong>{fmt$(sommeBreakdown)}</strong></div>
+                                            <div><span style={{color:sub}}>Delta : </span><strong style={{color:balanced?C.green:C.red}}>{fmt$(delta)}</strong></div>
+                                          </div>
+                                          {!balanced && (
+                                            <div style={{flexBasis:'100%',fontSize:11,color:sub,marginTop:4,lineHeight:1.5}}>
+                                              💡 Causes possibles : {delta>0?'transactions en trop (catégorisation incorrecte)':'transactions manquantes (type/description non reconnu par le parseur)'}. Vérifie les lignes « Non catégorisé » dans le breakdown ci-dessus.
+                                            </div>
+                                          )}
+                                        </div>
+                                      )
+                                    })()}
+
                                     {/* ─── Mouvements d'inventaire (ce qu'il faut rentrer dans LAUTOPAK) ─── */}
                                     {detail.mouvements && detail.mouvements.length > 0 && (
                                       <>
