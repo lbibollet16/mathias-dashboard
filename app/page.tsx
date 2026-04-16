@@ -1907,15 +1907,20 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
         map.set(s.code_piece.toUpperCase(), { stock: s.stock, reserve: s.reserve })
       }
     }
-    // Filtrer les pièces à stock 0 (garder seulement celles avec du stock)
-    // L'API stock ne retourne que les pièces trouvées dans Traction, donc
-    // si une pièce n'est pas dans le map, elle n'existe pas ou est à 0
+    // Filtrer : garder seulement les pièces avec du stock positif
+    // - Exclure LOC_ (placeholders de localisation vide)
+    // - Exclure pièces non trouvées dans Traction (stock 0 ou inexistante)
+    // - Exclure pièces avec stock total ≤ 0 (0 ou négatif)
+    // - Dédupliquer par code_piece (case-insensitive) pour éviter les doublons
+    const seen = new Set<string>()
     const dataFiltered = data.filter((p:any) => {
       if (p.code_piece.startsWith('LOC_')) return false
-      // Chercher dans le map (case-insensitive)
+      const key = p.code_piece.toUpperCase()
+      if (seen.has(key)) return false
+      seen.add(key)
       const si = map.get(p.code_piece) || map.get(p.code_piece.toUpperCase()) || map.get(p.code_piece.toLowerCase())
-      if (!si) return false // pas trouvée dans Traction = stock 0 ou inexistante
-      return (si.stock + si.reserve) !== 0
+      if (!si) return false
+      return (si.stock + si.reserve) > 0
     })
     setStockMap(map); setPiecesLoc(dataFiltered); setLocActive(loc)
 
