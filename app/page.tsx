@@ -2477,26 +2477,38 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
           {pieceDejaComptee && (
             <div style={{background:dark?'#1a233a':'#dbeafe',border:`2px solid ${C.blue}`,borderRadius:12,padding:'16px',marginBottom:12}}>
               <div style={{fontWeight:800,fontSize:isMobile?16:14,color:C.blue,marginBottom:8}}>
-                ✅ Pièce "{pieceDejaComptee.code}" déjà comptée aujourd'hui
+                📍 Pièce "{pieceDejaComptee.code}" — multi-localisation
+              </div>
+              <div style={{fontSize:isMobile?13:12,color:dark?'#ccc':'#333',marginBottom:10,lineHeight:1.6}}>
+                Cette pièce existe dans <strong>{pieceDejaComptee.autresLocs.length + 1} localisations</strong> et a déjà été comptée dans une autre :
               </div>
               <div style={{background:dark?'#111':'#fff',borderRadius:8,padding:'10px 14px',marginBottom:10,border:`1px solid ${bdr}`}}>
-                <div style={{fontSize:13,color:sub}}>
-                  Comptée à <strong style={{color:C.blue}}>{pieceDejaComptee.comptage.localisation}</strong> par <strong>{pieceDejaComptee.comptage.employe}</strong>
+                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                  <span style={{background:C.green+'22',color:C.green,padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:700}}>✅ Déjà compté</span>
+                  <strong style={{color:C.blue}}>{pieceDejaComptee.comptage.localisation}</strong>
                 </div>
-                <div style={{fontSize:13,marginTop:4}}>
-                  Qté comptée: <strong style={{fontSize:16}}>{pieceDejaComptee.comptage.qte_comptee}</strong>
-                  <span style={{color:sub,marginLeft:8}}>({new Date(pieceDejaComptee.comptage.date_comptage).toLocaleTimeString('fr-CA',{hour:'2-digit',minute:'2-digit'})})</span>
+                <div style={{fontSize:12,color:sub}}>
+                  Par <strong>{pieceDejaComptee.comptage.employe}</strong> — Qté : <strong style={{fontSize:15}}>{pieceDejaComptee.comptage.qte_comptee}</strong>
+                  <span style={{marginLeft:6}}>({new Date(pieceDejaComptee.comptage.date_comptage).toLocaleTimeString('fr-CA',{hour:'2-digit',minute:'2-digit'})})</span>
                 </div>
               </div>
-              {pieceDejaComptee.autresLocs.length > 0 && (
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+                <span style={{background:C.yellow+'22',color:C.yellow,padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:700}}>⏳ À compter</span>
+                <strong style={{color:C.blue}}>{locActive}</strong>
+                <span style={{fontSize:11,color:sub}}>(tu es ici)</span>
+              </div>
+              {pieceDejaComptee.autresLocs.filter((l:string)=>l.toUpperCase()!==locActive?.toUpperCase()&&l.toUpperCase()!==pieceDejaComptee.comptage.localisation?.toUpperCase()).length > 0 && (
                 <div style={{fontSize:12,color:sub,marginBottom:10}}>
-                  📍 Autres localisations: <strong>{pieceDejaComptee.autresLocs.join(', ')}</strong>
+                  📍 Encore à compter : <strong>{pieceDejaComptee.autresLocs.filter((l:string)=>l.toUpperCase()!==locActive?.toUpperCase()&&l.toUpperCase()!==pieceDejaComptee.comptage.localisation?.toUpperCase()).join(', ')}</strong>
                 </div>
               )}
+              <div style={{fontSize:11,color:sub,marginBottom:10,background:dark?'#0d2a18':'#e6f4ea',borderRadius:6,padding:'8px 10px'}}>
+                💡 C'est normal de compter la même pièce dans plusieurs localisations. Le système garde chaque comptage séparément par localisation.
+              </div>
               <div style={{display:'flex',gap:10}}>
                 <button onClick={continuerComptageDejaComptee}
-                  style={{flex:1,background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'12px 0',fontSize:isMobile?15:13,fontWeight:700,cursor:'pointer'}}>
-                  🔄 Recompter ici quand même
+                  style={{flex:2,background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'12px 0',fontSize:isMobile?15:13,fontWeight:700,cursor:'pointer'}}>
+                  ✅ Compter ici aussi ({locActive})
                 </button>
                 <button onClick={skipPieceDejaComptee}
                   style={{flex:1,background:dark?'#333':'#e2e8f0',color:dark?'#ccc':'#475569',border:'none',borderRadius:8,padding:'12px 0',fontSize:isMobile?15:13,fontWeight:700,cursor:'pointer'}}>
@@ -2506,17 +2518,29 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
             </div>
           )}
 
-          {/* Rappel autres localisations après comptage */}
-          {multiLocInfo && !pieceDejaComptee && etape === 'piece' && (
-            <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`2px solid ${C.green}`,borderRadius:12,padding:'14px 16px',marginBottom:12}}>
-              <div style={{fontWeight:700,fontSize:isMobile?14:13,color:C.green,marginBottom:6}}>
-                📍 N'oublie pas d'aller compter cette pièce aux autres localisations :
+          {/* Alerte multi-localisation (visible pendant ET après le comptage) */}
+          {multiLocInfo && !pieceDejaComptee && (etape === 'piece' || etape === 'quantite' || etape === 'photo') && (
+            <div style={{background:dark?'#1a233a':'#e8f0fe',border:`2px solid ${C.blue}`,borderRadius:12,padding:'14px 16px',marginBottom:12}}>
+              <div style={{fontWeight:800,fontSize:isMobile?15:14,color:C.blue,marginBottom:8}}>
+                ⚠️ Cette pièce existe dans {multiLocInfo.locs.length + 1} localisations !
               </div>
-              <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                {multiLocInfo.locs.map((l,i) => (
-                  <span key={i} style={{background:C.blue,color:'#fff',padding:'6px 14px',borderRadius:8,fontSize:isMobile?15:13,fontWeight:700}}>
-                    📍 {l}
+              <div style={{fontSize:isMobile?13:12,color:dark?'#ccc':'#333',marginBottom:10,lineHeight:1.5}}>
+                Tu dois compter cette pièce <strong>à chaque localisation séparément</strong>. Le système garde en mémoire chaque comptage.
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{background:C.green,color:'#fff',padding:'4px 12px',borderRadius:8,fontSize:isMobile?14:12,fontWeight:700}}>
+                    ✅ {locActive} (ici)
                   </span>
+                  <span style={{fontSize:11,color:sub}}>— en cours de comptage</span>
+                </div>
+                {multiLocInfo.locs.map((l: string, i: number) => (
+                  <div key={i} style={{display:'flex',alignItems:'center',gap:8}}>
+                    <span style={{background:C.yellow,color:'#fff',padding:'4px 12px',borderRadius:8,fontSize:isMobile?14:12,fontWeight:700}}>
+                      ⏳ {l}
+                    </span>
+                    <span style={{fontSize:11,color:sub}}>— à compter aussi (va scanner cette localisation ensuite)</span>
+                  </div>
                 ))}
               </div>
             </div>
