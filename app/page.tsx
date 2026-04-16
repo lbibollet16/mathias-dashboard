@@ -3655,16 +3655,32 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
 
   const CAUSES = [
     'Pièce non réceptionnée mais facturée (logiciel/service)',
+    'Réservation (pièce mal importée dans facture)',
     'Stock vendu non reçu en inventaire',
     "Erreur de comptage lors d'un inventaire antérieur",
     'Ajustement incorrect (Déc. physique ou Autre)',
     'Pièce alternative utilisée sous ce SKU',
     'Retour fournisseur non traité',
     'Double facturation',
-    'Autre raison',
   ]
 
-  const CAUSES_SANS_PHOTO = ['Pièce non réceptionnée mais facturée (logiciel/service)']
+  const CAUSES_SANS_PHOTO = [
+    'Pièce non réceptionnée mais facturée (logiciel/service)',
+    'Réservation (pièce mal importée dans facture)',
+  ]
+
+  // Ces causes ne doivent PAS apparaître dans l'onglet Comptabilité
+  // (ce sont des corrections internes, pas des écritures comptables)
+  const CAUSES_HORS_COMPTA = [
+    'Pièce non réceptionnée mais facturée (logiciel/service)',
+    'Réservation (pièce mal importée dans facture)',
+  ]
+
+  // Messages d'action spécifiques par cause
+  const CAUSES_MESSAGES: Record<string, string> = {
+    'Pièce non réceptionnée mais facturée (logiciel/service)': '📋 Valider avec la réception/expédition pour réceptionner le stock',
+    'Réservation (pièce mal importée dans facture)': '📋 Corriger la réservation dans Lautopak menu 251',
+  }
 
   const emptyForm = () => ({
     serv_detail:'', serv_interne:'', serv_gar:'', pce_detail:'',
@@ -4360,6 +4376,11 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                         </div>
                       </div>
                       {v.cause&&<div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:8,padding:'10px 12px',fontSize:13,whiteSpace:'pre-wrap',wordBreak:'break-word',color:C.blue,marginBottom:8,fontWeight:600}}>📋 {v.cause}</div>}
+                      {v.cause && CAUSES_MESSAGES[v.cause] && (
+                        <div style={{background:dark?'#2b2413':'#fef3cd',border:`1px solid ${C.yellow}`,borderRadius:8,padding:'10px 12px',fontSize:13,color:dark?'#ffc107':'#856404',marginBottom:8,fontWeight:700}}>
+                          {CAUSES_MESSAGES[v.cause]}
+                        </div>
+                      )}
                       {v.commentaire&&<div style={{background:dark?'#1a1a1a':'#f8f9fa',borderRadius:8,padding:'10px 12px',fontSize:12,color:sub,marginBottom:8,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>💬 {v.commentaire}</div>}
                       {v.alt_code_piece&&(
                         <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:10,padding:'10px 12px',marginBottom:8,border:`1px solid ${C.green}33`}}>
@@ -4508,8 +4529,14 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     hasPhoto: boolean; hasComment: boolean; hasAlt: boolean; raw: any;
   }
   const items: Item[] = []
+  // Causes à exclure de la Comptabilité (corrections internes, pas d'écriture comptable)
+  const CAUSES_HORS_COMPTA = [
+    'Pièce non réceptionnée mais facturée (logiciel/service)',
+    'Réservation (pièce mal importée dans facture)',
+  ]
   for (const n of (negsVerifies||[])) {
     if (estValide('negatif', n.id)) continue
+    if (n.cause && CAUSES_HORS_COMPTA.includes(n.cause)) continue
     items.push({
       key: `negatif:${n.id}`, source: 'negatif', id: n.id, code_piece: n.code_piece,
       date: n.date_verification, ecart: Number(n.ajustement||0),
