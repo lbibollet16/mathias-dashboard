@@ -2030,8 +2030,27 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
       if (!fromCamera) setTimeout(() => pieceRef.current?.focus(), 100); return
     }
     // Vérifier les autres localisations de cette pièce
-    const autresLocs = [pieceDansLoc.localisation1, pieceDansLoc.localisation2, pieceDansLoc.localisation3, pieceDansLoc.localisation4]
-      .filter(Boolean).filter((l:string) => l.toUpperCase() !== locActive?.toUpperCase())
+    // On query TOUTES les lignes de la table localisations pour cette pièce
+    // (pas juste le row courant) car la même pièce peut avoir plusieurs rows
+    let autresLocs: string[] = []
+    try {
+      const rAllLocs = await fetch('/api/inventaire/localisations?code=' + encodeURIComponent(code))
+      const allLocData = await rAllLocs.json()
+      if (Array.isArray(allLocData)) {
+        const allLocs = new Set<string>()
+        for (const row of allLocData) {
+          for (const l of [row.localisation1, row.localisation2, row.localisation3, row.localisation4]) {
+            if (l) allLocs.add(l.toUpperCase())
+          }
+        }
+        allLocs.delete(locActive?.toUpperCase() || '')
+        autresLocs = Array.from(allLocs)
+      }
+    } catch {
+      // Fallback: utiliser les colonnes du row courant
+      autresLocs = [pieceDansLoc.localisation1, pieceDansLoc.localisation2, pieceDansLoc.localisation3, pieceDansLoc.localisation4]
+        .filter(Boolean).filter((l:string) => l.toUpperCase() !== locActive?.toUpperCase())
+    }
 
     // Si multi-loc, vérifier si déjà comptée aujourd'hui à une autre localisation
     if (autresLocs.length > 0) {
