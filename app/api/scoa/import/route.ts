@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { parseScoaPdf } from '@/lib/scoa-parser'
 
+export const runtime = 'nodejs'
+export const maxDuration = 60
+
 // POST multipart/form-data — upload d'un PDF SCOA.
 // Form fields :
 //   file : PDF

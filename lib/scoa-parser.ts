@@ -205,9 +205,11 @@ function buildLines(pageItems: any[]): string[] {
 export async function parseScoaPdf(buffer: Buffer | Uint8Array): Promise<ParseResult> {
   try {
     // unpdf refuse Buffer directement ; on doit passer un Uint8Array "pur"
-    const data = new Uint8Array(buffer.buffer
-      ? buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
-      : buffer)
+    // dont le .buffer est un ArrayBuffer (pas SharedArrayBuffer ni Buffer Node)
+    const src = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer as any)
+    const ab = new ArrayBuffer(src.byteLength)
+    const data = new Uint8Array(ab)
+    data.set(src)
     const r = await extractTextItems(data)
     const warnings: string[] = []
     const ventes: ParsedSale[] = []

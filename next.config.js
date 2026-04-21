@@ -1,5 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ['xlsx']
+  serverExternalPackages: ['xlsx', 'unpdf']
 }
 module.exports = nextConfig
