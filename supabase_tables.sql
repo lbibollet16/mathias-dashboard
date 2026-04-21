@@ -301,4 +301,41 @@ ALTER TABLE amazon_audit_counts DISABLE ROW LEVEL SECURITY;
 
 -- Lier chaque audit à un settlement (pour auto-génération à l'import)
 ALTER TABLE amazon_audits ADD COLUMN IF NOT EXISTS settlement_id TEXT;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- SCOA : import des rapports d'analyse des ventes véhicules (PDF)
+-- 4 types: ps_neuf, ps_usage, bateau_neuf, bateau_usage
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS scoa_ventes (
+  id BIGSERIAL PRIMARY KEY,
+  type TEXT NOT NULL CHECK (type IN ('ps_neuf','ps_usage','bateau_neuf','bateau_usage')),
+  date_vente DATE NOT NULL,
+  client TEXT,
+  stock_num TEXT NOT NULL,
+  marque TEXT,
+  modele TEXT,
+  annee INT,
+  num_contrat TEXT,
+  vendeur_id TEXT,
+  vendeur_nom TEXT,
+  prix_vente NUMERIC(12,2) DEFAULT 0,
+  profit_vehicule NUMERIC(12,2) DEFAULT 0,
+  pct_brut_vehicule NUMERIC(7,2),
+  ventes_fni NUMERIC(12,2) DEFAULT 0,
+  profit_fni NUMERIC(12,2) DEFAULT 0,
+  pct_brut_fni NUMERIC(7,2),
+  ventes_totales NUMERIC(12,2) DEFAULT 0,
+  profit_net_total NUMERIC(12,2) DEFAULT 0,
+  pct_profit NUMERIC(7,2),
+  nb_jours INT,
+  periode_debut DATE,
+  periode_fin DATE,
+  imported_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (type, stock_num, num_contrat, date_vente)
+);
+CREATE INDEX IF NOT EXISTS idx_scoa_ventes_type ON scoa_ventes(type);
+CREATE INDEX IF NOT EXISTS idx_scoa_ventes_marque ON scoa_ventes(marque);
+CREATE INDEX IF NOT EXISTS idx_scoa_ventes_vendeur ON scoa_ventes(vendeur_id);
+CREATE INDEX IF NOT EXISTS idx_scoa_ventes_date ON scoa_ventes(date_vente);
+ALTER TABLE scoa_ventes DISABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS idx_amz_audit_settlement ON amazon_audits(settlement_id);

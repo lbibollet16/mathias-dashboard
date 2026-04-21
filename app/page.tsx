@@ -8,8 +8,8 @@ const supabaseCli = createClient(
 )
 
 const ROLES_ONGLETS: Record<string, string[]> = {
-  admin:        ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon','utilisateurs'],
-  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon'],
+  admin:        ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon','scoa','utilisateurs'],
+  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon','scoa'],
   commis:       ['commandes','fournitures','retours'],
   employe_piece: ['fournitures','negatifs','inventaire','retours'],
 }
@@ -348,7 +348,7 @@ export default function Dashboard() {
 
       {/* TABS */}
       <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,overflowX:'auto',display:'flex',WebkitOverflowScrolling:'touch',scrollbarWidth:'none',gap:isMobile?2:0}}>
-        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>(profil?.onglets_custom && Array.isArray(profil.onglets_custom) && profil.onglets_custom.length>0 ? profil.onglets_custom : (ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis'])).includes(t.id)).map(t=>(
+        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},{id:'scoa',l:isMobile?'🏍 SCOA':'🏍 SCOA'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>(profil?.onglets_custom && Array.isArray(profil.onglets_custom) && profil.onglets_custom.length>0 ? profil.onglets_custom : (ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis'])).includes(t.id)).map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:isMobile?'12px 14px':'12px 16px',border:'none',background:tab===t.id?(dark?'#1a233a':'#dbeafe'):'transparent',cursor:'pointer',fontSize:isMobile?14:13,fontWeight:tab===t.id?800:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',borderRadius:isMobile?'8px 8px 0 0':0,transition:'all .15s',whiteSpace:'nowrap',flexShrink:0}}>
             {t.l}
           </button>
@@ -688,6 +688,7 @@ export default function Dashboard() {
         {tab==='inventaire' && <InventaireTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} validationsCompta={validationsCompta}/>}
         {tab==='comptabilite' && <ComptabiliteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} validationsCompta={validationsCompta} setValidationsCompta={setValidationsCompta}/>}
         {tab==='amazon' && <AmazonTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
+        {tab==='scoa' && <ScoaTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
         {tab==='utilisateurs' && <UtilisateursTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
         {tab==='fournitures' && <FournituresTab fournituresData={fournituresData} setFournituresData={setFournituresData} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} data={data} profil={profil}/>}
       </div>
@@ -3193,12 +3194,13 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
     { id: 'inventaire',  label: '📦 Inventaire',          desc: 'Inventaire cyclique et comptage' },
     { id: 'comptabilite',label: '💰 Comptabilité',        desc: 'Validation comptable et historique' },
     { id: 'amazon',      label: '📦 Amazon',              desc: 'Réconciliation FBA/FBM et LAUTOPAK' },
+    { id: 'scoa',        label: '🏍 SCOA',                desc: 'Analyse ventes PS / Bateau neuf & usagé' },
     { id: 'utilisateurs',label: '👥 Utilisateurs',        desc: 'Gestion des accès et utilisateurs' },
   ]
 
   const ROLES_LEGACY: Record<string, string[]> = {
-    admin:         ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon','utilisateurs'],
-    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon'],
+    admin:         ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon','scoa','utilisateurs'],
+    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon','scoa'],
     commis:        ['commandes','fournitures','retours'],
     employe_piece: ['fournitures','negatifs','inventaire','retours'],
   }
@@ -6943,3 +6945,502 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     </div>
   )
 }
+
+// ── SCOA (Analyse des Ventes véhicules) ──────────────────────────────────────
+function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+
+  const TYPES = [
+    {id:'ps_neuf',     label:'🆕 Vente PS',            color:C.green},
+    {id:'ps_usage',    label:'♻️ Vente PS Occasion',   color:C.yellow},
+    {id:'bateau_neuf', label:'⛵ Vente Bateau Neuf',    color:C.blue},
+    {id:'bateau_usage',label:'🛥 Vente Bateau Usagé',   color:sub},
+  ] as const
+
+  const [vue, setVue] = useState<'import'|'dashboard'|'ventes'>('dashboard')
+  const [dashboard, setDashboard] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
+  const [importing, setImporting] = useState<string | null>(null)
+  const [importLog, setImportLog] = useState<string[]>([])
+  const [filtTypes, setFiltTypes] = useState<string[]>(['ps_neuf','ps_usage','bateau_neuf','bateau_usage'])
+  const [filtDebut, setFiltDebut] = useState<string>('')
+  const [filtFin, setFiltFin] = useState<string>('')
+  const [tabMarqueTri, setTabMarqueTri] = useState<'profit'|'volume'|'attach'|'marge'>('profit')
+  const [ventes, setVentes] = useState<any[]>([])
+  const [counts, setCounts] = useState<Record<string, number>>({})
+
+  const fileRefPsNeuf = useRef<HTMLInputElement | null>(null)
+  const fileRefPsUsage = useRef<HTMLInputElement | null>(null)
+  const fileRefBateauNeuf = useRef<HTMLInputElement | null>(null)
+  const fileRefBateauUsage = useRef<HTMLInputElement | null>(null)
+  const filesRef: Record<string, React.MutableRefObject<HTMLInputElement | null>> = {
+    ps_neuf: fileRefPsNeuf,
+    ps_usage: fileRefPsUsage,
+    bateau_neuf: fileRefBateauNeuf,
+    bateau_usage: fileRefBateauUsage,
+  }
+
+  async function charger() {
+    setLoading(true)
+    try {
+      const params = new URLSearchParams()
+      filtTypes.forEach(t => params.append('type', t))
+      if (filtDebut) params.set('date_debut', filtDebut)
+      if (filtFin) params.set('date_fin', filtFin)
+      const r = await fetch('/api/scoa/dashboard?' + params.toString())
+      const j = await r.json()
+      if (!j.erreur) setDashboard(j)
+      const r2 = await fetch('/api/scoa/ventes?' + params.toString())
+      const j2 = await r2.json()
+      if (!j2.erreur) {
+        setVentes(j2.ventes || [])
+        setCounts(j2.counts || {})
+      }
+    } catch {}
+    setLoading(false)
+  }
+
+  useEffect(() => { charger() }, [filtTypes.join(','), filtDebut, filtFin])
+
+  async function uploader(type: string, file: File) {
+    setImporting(type)
+    setImportLog(l => [...l, `📤 Import ${type} : ${file.name}...`])
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('type', type)
+      const r = await fetch('/api/scoa/import', { method: 'POST', body: fd })
+      const j = await r.json()
+      if (j.success) {
+        setImportLog(l => [...l, `✅ ${file.name} : ${j.inserted} ventes (${j.periode_debut} → ${j.periode_fin})`])
+        if (j.warnings?.length) setImportLog(l => [...l, `⚠️ ${j.warnings.length} lignes non parsées`])
+        await charger()
+      } else {
+        setImportLog(l => [...l, `❌ ${file.name} : ${j.erreur}`])
+      }
+    } catch (e: any) {
+      setImportLog(l => [...l, `❌ Exception : ${e.message}`])
+    }
+    setImporting(null)
+  }
+
+  function toggleType(t: string) {
+    setFiltTypes(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])
+  }
+
+  const fmt$ = (n: number) => `${n < 0 ? '−' : ''}${Math.abs(Number(n || 0)).toLocaleString('fr-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`
+  const fmtPct = (n: number) => `${(Number(n || 0) * 100).toFixed(1)} %`
+  const fmtInt = (n: number) => Number(n || 0).toLocaleString('fr-CA')
+  const typeLabel = (t: string) => TYPES.find(x => x.id === t)?.label || t
+
+  const g = dashboard?.global
+  const parMarque = dashboard?.par_marque || []
+  const parVendeur = dashboard?.par_vendeur || []
+  const parModele = dashboard?.par_modele || []
+  const parType = dashboard?.par_type || []
+  const signaux = dashboard?.signaux || {}
+
+  const marqueTriee = [...parMarque].sort((a:any, b:any) => {
+    if (tabMarqueTri === 'volume') return b.nb - a.nb
+    if (tabMarqueTri === 'attach') return b.attach_fni - a.attach_fni
+    if (tabMarqueTri === 'marge') return b.marge_brute_pct - a.marge_brute_pct
+    return b.total_profit_net - a.total_profit_net
+  })
+
+  return (
+    <div>
+      {/* Tabs internes */}
+      <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:14,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+        {[
+          {id:'dashboard', label:'📊 Dashboard', color:C.blue},
+          {id:'ventes', label:`📋 Ventes (${ventes.length})`, color:sub},
+          {id:'import', label:'📥 Import', color:C.green},
+        ].map(v => (
+          <button key={v.id} onClick={()=>setVue(v.id as any)}
+            style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue===v.id?v.color:bdr}`,background:vue===v.id?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue===v.id?v.color:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+            {v.label}
+          </button>
+        ))}
+        <div style={{marginLeft:'auto',fontSize:11,color:sub}}>
+          {Object.entries(counts).map(([t,n]) => (
+            <span key={t} style={{marginLeft:10}}>{typeLabel(t)} : <strong>{n}</strong></span>
+          ))}
+        </div>
+      </div>
+
+      {/* ─── Vue IMPORT ─── */}
+      {vue === 'import' && (
+        <div>
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:12,padding:'14px 16px',marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:800,marginBottom:4}}>📥 Importer un rapport SCOA (PDF)</div>
+            <div style={{fontSize:11,color:sub,marginBottom:12,lineHeight:1.5}}>
+              Charge directement le PDF "Analyse des Ventes" exporté de SCOA. Le format est détecté automatiquement (date, client, stock, marque, modèle, prix, profit véhicule, FNI, profit net).
+              Un ré-import pour la même période remplace les lignes existantes.
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:10}}>
+              {TYPES.map(t => (
+                <div key={t.id} style={{background:dark?'#0f0f0f':'#fafbfc',border:`1px solid ${bdr}`,borderRadius:10,padding:'14px 16px'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+                    <span style={{fontSize:14,fontWeight:800,color:t.color}}>{t.label}</span>
+                    <span style={{marginLeft:'auto',fontSize:11,color:sub}}>
+                      {counts[t.id]||0} vente{(counts[t.id]||0)>1?'s':''}
+                    </span>
+                  </div>
+                  <input ref={filesRef[t.id]} type="file" accept=".pdf" hidden
+                    onChange={e => { const f = e.target.files?.[0]; if (f) uploader(t.id, f); e.target.value = '' }}/>
+                  <button onClick={()=>filesRef[t.id].current?.click()} disabled={importing !== null}
+                    style={{background:importing===t.id?bdr:t.color,color:'#fff',border:'none',borderRadius:8,padding:'10px 16px',fontWeight:700,cursor:importing?'default':'pointer',fontSize:12,width:'100%'}}>
+                    {importing===t.id?'⏳ Import en cours...':`📄 Sélectionner un PDF ${t.label}`}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {importLog.length > 0 && (
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:10}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+                <div style={{fontSize:11,fontWeight:700,color:sub,textTransform:'uppercase'}}>Log d'import</div>
+                <button onClick={()=>setImportLog([])} style={{background:'transparent',border:'none',color:sub,cursor:'pointer',fontSize:11}}>✕ Effacer</button>
+              </div>
+              <div style={{fontFamily:'monospace',fontSize:11,maxHeight:300,overflowY:'auto',whiteSpace:'pre-wrap'}}>
+                {importLog.map((l, i) => <div key={i} style={{padding:'2px 0',borderBottom:i<importLog.length-1?`1px solid ${bdr}`:'none'}}>{l}</div>)}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── Vue DASHBOARD ─── */}
+      {vue === 'dashboard' && (
+        <div>
+          {/* Filtres */}
+          <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:12,display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+            <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+              {TYPES.map(t => (
+                <button key={t.id} onClick={()=>toggleType(t.id)}
+                  style={{padding:'6px 11px',borderRadius:14,border:`1px solid ${filtTypes.includes(t.id)?t.color:bdr}`,background:filtTypes.includes(t.id)?t.color+'22':'transparent',color:filtTypes.includes(t.id)?t.color:sub,fontWeight:700,cursor:'pointer',fontSize:11}}>
+                  {t.label} ({counts[t.id]||0})
+                </button>
+              ))}
+            </div>
+            <div style={{display:'flex',gap:6,alignItems:'center',marginLeft:'auto'}}>
+              <label style={{fontSize:11,color:sub}}>Du</label>
+              <input type="date" value={filtDebut} onChange={e=>setFiltDebut(e.target.value)} style={{...S,fontSize:11,padding:'6px 8px'}}/>
+              <label style={{fontSize:11,color:sub}}>au</label>
+              <input type="date" value={filtFin} onChange={e=>setFiltFin(e.target.value)} style={{...S,fontSize:11,padding:'6px 8px'}}/>
+              {(filtDebut || filtFin) && (
+                <button onClick={()=>{setFiltDebut(''); setFiltFin('')}} style={{background:'transparent',border:'none',color:sub,cursor:'pointer',fontSize:11}}>✕</button>
+              )}
+            </div>
+          </div>
+
+          {loading && <div style={{textAlign:'center',padding:40,color:sub,fontSize:13}}>⏳ Chargement...</div>}
+
+          {!loading && (!dashboard || dashboard.nb_total === 0) && (
+            <div style={{background:card,border:`1px dashed ${bdr}`,borderRadius:10,textAlign:'center',padding:40,color:sub}}>
+              Aucune vente. Importe un rapport SCOA depuis l'onglet Import.
+            </div>
+          )}
+
+          {!loading && dashboard && dashboard.nb_total > 0 && (
+            <>
+              {/* Stats globales */}
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(6,1fr)',gap:8,marginBottom:12}}>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Unités</div>
+                  <div style={{fontSize:20,fontWeight:900}}>{fmtInt(g.nb)}</div>
+                </div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Ventes totales</div>
+                  <div style={{fontSize:16,fontWeight:900,color:C.blue}}>{fmt$(g.total_prix + g.total_ventes_fni)}</div>
+                  <div style={{fontSize:10,color:sub}}>Véh : {fmt$(g.total_prix)}</div>
+                </div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${g.total_profit_net>=0?C.green:C.red}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Profit net</div>
+                  <div style={{fontSize:16,fontWeight:900,color:g.total_profit_net>=0?C.green:C.red}}>{fmt$(g.total_profit_net)}</div>
+                  <div style={{fontSize:10,color:sub}}>Moy : {fmt$(g.moy_profit_net)}</div>
+                </div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.yellow}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Attach FNI</div>
+                  <div style={{fontSize:16,fontWeight:900,color:C.yellow}}>{fmtPct(g.attach_fni)}</div>
+                  <div style={{fontSize:10,color:sub}}>{g.nb_avec_fni}/{g.nb} ventes</div>
+                </div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.green}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Profit FNI moy.</div>
+                  <div style={{fontSize:16,fontWeight:900,color:C.green}}>{fmt$(g.moy_profit_fni_si_present)}</div>
+                  <div style={{fontSize:10,color:sub}}>quand FNI vendu</div>
+                </div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Marge brute</div>
+                  <div style={{fontSize:16,fontWeight:900}}>{fmtPct(g.marge_brute_pct)}</div>
+                  <div style={{fontSize:10,color:sub}}>Jours moy : {Math.round(g.moy_jours)}</div>
+                </div>
+              </div>
+
+              {/* Par type */}
+              {parType.length > 1 && (
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
+                  <div style={{fontSize:12,fontWeight:800,marginBottom:8}}>📂 Répartition par type</div>
+                  <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(4,1fr)',gap:8}}>
+                    {parType.map((t:any) => (
+                      <div key={t.type} style={{background:dark?'#0f0f0f':'#fafbfc',border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 10px'}}>
+                        <div style={{fontSize:10,fontWeight:700,color:sub}}>{typeLabel(t.type)}</div>
+                        <div style={{fontSize:14,fontWeight:900,marginTop:2}}>{t.nb} unités</div>
+                        <div style={{fontSize:11,color:sub}}>Profit net : <strong style={{color:t.total_profit_net>=0?C.green:C.red}}>{fmt$(t.total_profit_net)}</strong></div>
+                        <div style={{fontSize:10,color:sub}}>Attach FNI : {fmtPct(t.attach_fni)} • Marge : {fmtPct(t.marge_brute_pct)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Par MARQUE */}
+              <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,overflow:'hidden',marginBottom:12}}>
+                <div style={{padding:'10px 14px',borderBottom:`1px solid ${bdr}`,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
+                  <div style={{fontSize:12,fontWeight:800}}>🏷 Performance par MARQUE ({parMarque.length})</div>
+                  <div style={{display:'flex',gap:4}}>
+                    {[{k:'profit',l:'Profit net'},{k:'volume',l:'Volume'},{k:'attach',l:'Attach FNI'},{k:'marge',l:'Marge %'}].map(o => (
+                      <button key={o.k} onClick={()=>setTabMarqueTri(o.k as any)}
+                        style={{padding:'4px 10px',borderRadius:12,border:`1px solid ${tabMarqueTri===o.k?C.blue:bdr}`,background:tabMarqueTri===o.k?C.blue+'22':'transparent',color:tabMarqueTri===o.k?C.blue:sub,cursor:'pointer',fontSize:10,fontWeight:700}}>
+                        Tri: {o.l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                    <thead><tr style={{background:thBg}}>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Marque</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Unités</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Prix moy.</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Profit véh moy.</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.yellow}}>Attach FNI</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green}}>Profit FNI moy.</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Marge %</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Jours moy.</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue}}>Profit net total</th>
+                    </tr></thead>
+                    <tbody>
+                      {marqueTriee.map((m:any) => (
+                        <tr key={m.marque} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{m.marque}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{m.nb}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{fmt$(m.moy_prix)}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:m.moy_profit_veh>=0?C.green:C.red,fontWeight:700}}>{fmt$(m.moy_profit_veh)}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:m.attach_fni>=0.5?C.green:m.attach_fni>=0.3?C.yellow:C.red,fontWeight:700}}>{fmtPct(m.attach_fni)}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{m.nb_avec_fni>0?fmt$(m.moy_profit_fni_si_present):'—'}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:m.marge_brute_pct>=0.10?C.green:m.marge_brute_pct>=0?C.yellow:C.red}}>{fmtPct(m.marge_brute_pct)}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{Math.round(m.moy_jours)}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:900,color:m.total_profit_net>=0?C.blue:C.red}}>{fmt$(m.total_profit_net)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Par VENDEUR */}
+              <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,overflow:'hidden',marginBottom:12}}>
+                <div style={{padding:'10px 14px',borderBottom:`1px solid ${bdr}`,fontSize:12,fontWeight:800}}>
+                  👤 Performance par VENDEUR ({parVendeur.length})
+                </div>
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                    <thead><tr style={{background:thBg}}>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Vendeur</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Unités</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Ventes véh</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Profit véh moy.</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.yellow}}>Attach FNI</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green}}>FNI vendu</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Marge %</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Jours moy.</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue}}>Profit net</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue}}>Profit net moy.</th>
+                    </tr></thead>
+                    <tbody>
+                      {parVendeur.map((v:any) => (
+                        <tr key={v.vendeur_nom} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{v.vendeur_nom}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{v.nb}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{fmt$(v.total_prix)}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:v.moy_profit_veh>=0?C.green:C.red,fontWeight:700}}>{fmt$(v.moy_profit_veh)}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:v.attach_fni>=0.5?C.green:v.attach_fni>=0.3?C.yellow:C.red,fontWeight:700}}>{fmtPct(v.attach_fni)}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{fmt$(v.total_profit_fni)}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:v.marge_brute_pct>=0.10?C.green:v.marge_brute_pct>=0?C.yellow:C.red}}>{fmtPct(v.marge_brute_pct)}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{Math.round(v.moy_jours)}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:900,color:v.total_profit_net>=0?C.blue:C.red}}>{fmt$(v.total_profit_net)}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:v.moy_profit_net>=0?C.blue:C.red}}>{fmt$(v.moy_profit_net)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Signaux perf */}
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:10,marginBottom:12}}>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,overflow:'hidden'}}>
+                  <div style={{padding:'10px 14px',borderBottom:`1px solid ${bdr}`,fontSize:12,fontWeight:800,color:C.green}}>⬆️ Top 10 Profits Nets</div>
+                  {(signaux.top_profits||[]).length === 0 ? <div style={{padding:20,color:sub,textAlign:'center',fontSize:12}}>—</div> : (
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                      <tbody>
+                        {signaux.top_profits.map((t:any, i:number) => (
+                          <tr key={i}>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{t.stock}</td>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,color:sub}}>{t.marque} {t.modele}</td>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:C.green}}>{fmt$(t.profit_net)}</td>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:10}}>{Number(t.pct_profit).toFixed(1)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,overflow:'hidden'}}>
+                  <div style={{padding:'10px 14px',borderBottom:`1px solid ${bdr}`,fontSize:12,fontWeight:800,color:C.red}}>⬇️ Top 10 Flops (profit négatif)</div>
+                  {(signaux.flops||[]).length === 0 ? <div style={{padding:20,color:sub,textAlign:'center',fontSize:12}}>Aucun flop 🎉</div> : (
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                      <tbody>
+                        {signaux.flops.map((t:any, i:number) => (
+                          <tr key={i}>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{t.stock}</td>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,color:sub}}>{t.marque} {t.modele}</td>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:C.red}}>{fmt$(t.profit_net)}</td>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:10}}>{t.vendeur||'—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,overflow:'hidden'}}>
+                  <div style={{padding:'10px 14px',borderBottom:`1px solid ${bdr}`,fontSize:12,fontWeight:800,color:C.yellow}}>⏳ Rotation lente (&gt; 365 jours)</div>
+                  {(signaux.rotation_lente||[]).length === 0 ? <div style={{padding:20,color:sub,textAlign:'center',fontSize:12}}>—</div> : (
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                      <tbody>
+                        {signaux.rotation_lente.map((t:any, i:number) => (
+                          <tr key={i}>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{t.stock}</td>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,color:sub}}>{t.marque} {t.modele}</td>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:C.yellow}}>{t.jours} j</td>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:t.profit_net>=0?C.green:C.red,fontSize:10}}>{fmt$(t.profit_net)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,overflow:'hidden'}}>
+                  <div style={{padding:'10px 14px',borderBottom:`1px solid ${bdr}`,fontSize:12,fontWeight:800,color:C.red}}>🎯 FNI attach faible (&lt; 30%)</div>
+                  {(signaux.fni_attach_faible||[]).length === 0 ? <div style={{padding:20,color:sub,textAlign:'center',fontSize:12}}>Tous vendeurs &gt; 30% ✓</div> : (
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                      <tbody>
+                        {signaux.fni_attach_faible.map((t:any, i:number) => (
+                          <tr key={i}>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{t.vendeur_nom}</td>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:C.red,fontWeight:700}}>{fmtPct(t.attach_fni)}</td>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:10}}>{t.nb} ventes</td>
+                            <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:C.red,fontSize:10}} title="Estimation : manque à gagner si l'attach atteignait 50%">~{fmt$(t.manque_a_gagner_estime)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+
+              {/* Top modèles */}
+              <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,overflow:'hidden'}}>
+                <div style={{padding:'10px 14px',borderBottom:`1px solid ${bdr}`,fontSize:12,fontWeight:800}}>🚀 Top modèles vendus</div>
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                    <thead><tr style={{background:thBg}}>
+                      <th style={{padding:'7px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Marque</th>
+                      <th style={{padding:'7px 10px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Modèle</th>
+                      <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Unités</th>
+                      <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Prix moy.</th>
+                      <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Profit net moy.</th>
+                      <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Jours moy.</th>
+                      <th style={{padding:'7px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue}}>Profit net total</th>
+                    </tr></thead>
+                    <tbody>
+                      {parModele.slice(0, 30).map((m:any, i:number) => (
+                        <tr key={i}>
+                          <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{m.marque}</td>
+                          <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,color:sub}}>{m.modele}</td>
+                          <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700}}>{m.nb}</td>
+                          <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{fmt$(m.moy_prix)}</td>
+                          <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:m.moy_profit_net>=0?C.green:C.red}}>{fmt$(m.moy_profit_net)}</td>
+                          <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{Math.round(m.moy_jours)}</td>
+                          <td style={{padding:'5px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:m.total_profit_net>=0?C.blue:C.red}}>{fmt$(m.total_profit_net)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ─── Vue VENTES (liste brute) ─── */}
+      {vue === 'ventes' && (
+        <div>
+          <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:10,display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+            <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+              {TYPES.map(t => (
+                <button key={t.id} onClick={()=>toggleType(t.id)}
+                  style={{padding:'6px 11px',borderRadius:14,border:`1px solid ${filtTypes.includes(t.id)?t.color:bdr}`,background:filtTypes.includes(t.id)?t.color+'22':'transparent',color:filtTypes.includes(t.id)?t.color:sub,fontWeight:700,cursor:'pointer',fontSize:11}}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div style={{marginLeft:'auto',fontSize:11,color:sub}}>{ventes.length} ventes</div>
+          </div>
+          <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+            <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                <thead><tr style={{background:thBg}}>
+                  <th style={{padding:'7px 8px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Date</th>
+                  <th style={{padding:'7px 8px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Type</th>
+                  <th style={{padding:'7px 8px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Stock</th>
+                  <th style={{padding:'7px 8px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Marque / Modèle</th>
+                  <th style={{padding:'7px 8px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Client</th>
+                  <th style={{padding:'7px 8px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Vendeur</th>
+                  <th style={{padding:'7px 8px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Prix</th>
+                  <th style={{padding:'7px 8px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Profit véh</th>
+                  <th style={{padding:'7px 8px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.yellow}}>FNI</th>
+                  <th style={{padding:'7px 8px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue}}>Profit net</th>
+                  <th style={{padding:'7px 8px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Jours</th>
+                </tr></thead>
+                <tbody>
+                  {ventes.map(v => (
+                    <tr key={v.id} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
+                      <td style={{padding:'5px 8px',borderBottom:`1px solid ${bdr}`,color:sub}}>{v.date_vente}</td>
+                      <td style={{padding:'5px 8px',borderBottom:`1px solid ${bdr}`}}>
+                        <span style={{background:(TYPES.find(t=>t.id===v.type)?.color||sub)+'22',color:TYPES.find(t=>t.id===v.type)?.color||sub,padding:'1px 6px',borderRadius:6,fontSize:9,fontWeight:700}}>{(TYPES.find(t=>t.id===v.type)?.label||v.type).replace(/^[^\s]+\s/, '')}</span>
+                      </td>
+                      <td style={{padding:'5px 8px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{v.stock_num}</td>
+                      <td style={{padding:'5px 8px',borderBottom:`1px solid ${bdr}`}}><strong>{v.marque}</strong> <span style={{color:sub}}>{v.modele} {v.annee}</span></td>
+                      <td style={{padding:'5px 8px',borderBottom:`1px solid ${bdr}`,color:sub,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={v.client}>{v.client||'—'}</td>
+                      <td style={{padding:'5px 8px',borderBottom:`1px solid ${bdr}`,color:sub}}>{v.vendeur_nom||'—'}</td>
+                      <td style={{padding:'5px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{fmt$(v.prix_vente)}</td>
+                      <td style={{padding:'5px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:Number(v.profit_vehicule)>=0?C.green:C.red,fontWeight:700}}>{fmt$(v.profit_vehicule)}</td>
+                      <td style={{padding:'5px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:Number(v.ventes_fni)>0?C.yellow:sub}}>{Number(v.ventes_fni)>0?fmt$(v.ventes_fni):'—'}</td>
+                      <td style={{padding:'5px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:Number(v.profit_net_total)>=0?C.blue:C.red,fontWeight:800}}>{fmt$(v.profit_net_total)}</td>
+                      <td style={{padding:'5px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{v.nb_jours}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
