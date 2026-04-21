@@ -44,6 +44,8 @@ type Acc = {
   sum_profit_fni: number
   sum_profit_net: number
   sum_jours: number
+  sum_pct_brut_veh: number
+  sum_pct_brut_veh_count: number
   nb_avec_fni: number
   nb_profit_negatif: number
   sum_jours_count: number
@@ -51,7 +53,8 @@ type Acc = {
 function emptyAcc(): Acc {
   return {
     nb: 0, sum_prix: 0, sum_profit_veh: 0, sum_ventes_fni: 0, sum_profit_fni: 0,
-    sum_profit_net: 0, sum_jours: 0, nb_avec_fni: 0, nb_profit_negatif: 0, sum_jours_count: 0,
+    sum_profit_net: 0, sum_jours: 0, sum_pct_brut_veh: 0, sum_pct_brut_veh_count: 0,
+    nb_avec_fni: 0, nb_profit_negatif: 0, sum_jours_count: 0,
   }
 }
 function addToAcc(a: Acc, v: Vente) {
@@ -62,6 +65,7 @@ function addToAcc(a: Acc, v: Vente) {
   a.sum_profit_fni += Number(v.profit_fni || 0)
   a.sum_profit_net += Number(v.profit_net_total || 0)
   if (v.nb_jours != null) { a.sum_jours += Number(v.nb_jours); a.sum_jours_count++ }
+  if (v.pct_brut_vehicule != null) { a.sum_pct_brut_veh += Number(v.pct_brut_vehicule); a.sum_pct_brut_veh_count++ }
   if (Number(v.ventes_fni || 0) > 0) a.nb_avec_fni++
   if (Number(v.profit_net_total || 0) < 0) a.nb_profit_negatif++
 }
@@ -73,6 +77,7 @@ function finalizeAcc(a: Acc) {
   const moy_jours = a.sum_jours_count ? a.sum_jours / a.sum_jours_count : 0
   const attach_fni = a.nb ? a.nb_avec_fni / a.nb : 0
   const marge_brute_pct = a.sum_prix > 0 ? a.sum_profit_veh / a.sum_prix : 0
+  const moy_pct_brut_veh = a.sum_pct_brut_veh_count ? (a.sum_pct_brut_veh / a.sum_pct_brut_veh_count) / 100 : 0
   return {
     nb: a.nb,
     total_prix: a.sum_prix,
@@ -87,6 +92,7 @@ function finalizeAcc(a: Acc) {
     moy_jours,
     attach_fni,
     marge_brute_pct,
+    moy_pct_brut_veh,
     nb_avec_fni: a.nb_avec_fni,
     nb_profit_negatif: a.nb_profit_negatif,
   }
@@ -198,6 +204,36 @@ export async function GET(req: NextRequest) {
       }))
       .sort((a, b) => b.manque_a_gagner_estime - a.manque_a_gagner_estime)
 
+    // Top vendeurs FNI par marque : pour chaque marque, quels vendeurs
+    // génèrent le plus de profit FNI (avec attach rate et % profit moy véhicule)
+    const byMarqueVendeur = new Map<string, Map<string, Acc>>()
+    for (const v of ventes) {
+      const km = (v.marque || 'Inconnue').trim() || 'Inconnue'
+      const kv = (v.vendeur_nom || 'Inconnu').trim() || 'Inconnu'
+      if (!byMarqueVendeur.has(km)) byMarqueVendeur.set(km, new Map())
+      const mv = byMarqueVendeur.get(km)!
+      if (!mv.has(kv)) mv.set(kv, emptyAcc())
+      addToAcc(mv.get(kv)!, v)
+    }
+    const top_fni_par_marque = [...byMarqueVendeur.entries()].map(([marque, mv]) => {
+      const vendeurs = [...mv.entries()].map(([nom, acc]) => ({
+        vendeur_nom: nom,
+        ...finalizeAcc(acc),
+      }))
+      // Tri : profit FNI total desc, tiebreak attach rate
+      vendeurs.sort((a, b) => b.total_profit_fni - a.total_profit_fni || b.attach_fni - a.attach_fni)
+      const brandAcc = byMarque.get(marque)!
+      return {
+        marque,
+        nb_total: brandAcc.nb,
+        brand_profit_fni_total: brandAcc.sum_profit_fni,
+        brand_attach: brandAcc.nb ? brandAcc.nb_avec_fni / brandAcc.nb : 0,
+        brand_moy_pct_brut_veh: brandAcc.sum_pct_brut_veh_count ? (brandAcc.sum_pct_brut_veh / brandAcc.sum_pct_brut_veh_count) / 100 : 0,
+        top_vendeurs: vendeurs.slice(0, 3),
+      }
+    }).filter(m => m.top_vendeurs.some(v => v.total_profit_fni > 0))
+      .sort((a, b) => b.brand_profit_fni_total - a.brand_profit_fni_total)
+
     return NextResponse.json({
       nb_total: ventes.length,
       filtres: { types, date_debut: dateDebut, date_fin: dateFin },
@@ -206,6 +242,7 @@ export async function GET(req: NextRequest) {
       par_vendeur: parVendeur,
       par_modele: parModele,
       par_type: parType,
+      top_fni_par_marque,
       signaux: { top_profits, flops, rotation_lente, fni_attach_faible },
     })
   } catch (e: any) {

@@ -7215,6 +7215,7 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                       <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Unités</th>
                       <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Prix moy.</th>
                       <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Profit véh moy.</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}} title="Moyenne du %Brut véhicule par vente (non pondérée)">% profit moy véh</th>
                       <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.yellow}}>Attach FNI</th>
                       <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.green}}>Profit FNI moy.</th>
                       <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Marge %</th>
@@ -7228,6 +7229,7 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{m.nb}</td>
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{fmt$(m.moy_prix)}</td>
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:m.moy_profit_veh>=0?C.green:C.red,fontWeight:700}}>{fmt$(m.moy_profit_veh)}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:m.moy_pct_brut_veh>=0.10?C.green:m.moy_pct_brut_veh>=0?C.yellow:C.red,fontWeight:700}}>{fmtPct(m.moy_pct_brut_veh)}</td>
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:m.attach_fni>=0.5?C.green:m.attach_fni>=0.3?C.yellow:C.red,fontWeight:700}}>{fmtPct(m.attach_fni)}</td>
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{m.nb_avec_fni>0?fmt$(m.moy_profit_fni_si_present):'—'}</td>
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:m.marge_brute_pct>=0.10?C.green:m.marge_brute_pct>=0?C.yellow:C.red}}>{fmtPct(m.marge_brute_pct)}</td>
@@ -7239,6 +7241,51 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   </table>
                 </div>
               </div>
+
+              {/* Top FNI par marque : meilleur vendeur FNI pour chaque marque */}
+              {(dashboard.top_fni_par_marque||[]).length > 0 && (
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,overflow:'hidden',marginBottom:12}}>
+                  <div style={{padding:'10px 14px',borderBottom:`1px solid ${bdr}`,fontSize:12,fontWeight:800}}>
+                    🥇 Top vendeurs FNI par marque
+                    <span style={{fontSize:10,color:sub,fontWeight:400,marginLeft:8}}>(qui pousse le plus de FNI sur chaque marque + % profit moy véhicule associé)</span>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:1,background:bdr}}>
+                    {dashboard.top_fni_par_marque.map((m:any) => (
+                      <div key={m.marque} style={{background:card,padding:'10px 14px'}}>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:6,flexWrap:'wrap',gap:6}}>
+                          <div style={{fontSize:13,fontWeight:800}}>{m.marque}</div>
+                          <div style={{fontSize:10,color:sub}}>
+                            {m.nb_total} ventes • Attach global : <strong style={{color:m.brand_attach>=0.5?C.green:m.brand_attach>=0.3?C.yellow:C.red}}>{fmtPct(m.brand_attach)}</strong>
+                            {' • '}% profit moy véh : <strong style={{color:m.brand_moy_pct_brut_veh>=0.10?C.green:m.brand_moy_pct_brut_veh>=0?C.yellow:C.red}}>{fmtPct(m.brand_moy_pct_brut_veh)}</strong>
+                          </div>
+                        </div>
+                        <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
+                          <thead><tr>
+                            <th style={{padding:'3px 6px',textAlign:'left',fontSize:9,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>#</th>
+                            <th style={{padding:'3px 6px',textAlign:'left',fontSize:9,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Vendeur</th>
+                            <th style={{padding:'3px 6px',textAlign:'right',fontSize:9,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Ventes</th>
+                            <th style={{padding:'3px 6px',textAlign:'right',fontSize:9,fontWeight:700,color:C.green,borderBottom:`1px solid ${bdr}`}}>Profit FNI</th>
+                            <th style={{padding:'3px 6px',textAlign:'right',fontSize:9,fontWeight:700,color:C.yellow,borderBottom:`1px solid ${bdr}`}}>Attach</th>
+                            <th style={{padding:'3px 6px',textAlign:'right',fontSize:9,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>%Pr.véh</th>
+                          </tr></thead>
+                          <tbody>
+                            {m.top_vendeurs.map((v:any, i:number) => (
+                              <tr key={v.vendeur_nom}>
+                                <td style={{padding:'4px 6px',color:i===0?C.yellow:sub,fontWeight:i===0?800:400,fontSize:12}}>{i===0?'🥇':i===1?'🥈':'🥉'}</td>
+                                <td style={{padding:'4px 6px',fontWeight:i===0?800:600}}>{v.vendeur_nom}</td>
+                                <td style={{padding:'4px 6px',textAlign:'right',color:sub}}>{v.nb_avec_fni}/{v.nb}</td>
+                                <td style={{padding:'4px 6px',textAlign:'right',fontWeight:700,color:v.total_profit_fni>0?C.green:sub}}>{fmt$(v.total_profit_fni)}</td>
+                                <td style={{padding:'4px 6px',textAlign:'right',color:v.attach_fni>=0.5?C.green:v.attach_fni>=0.3?C.yellow:C.red,fontWeight:700}}>{fmtPct(v.attach_fni)}</td>
+                                <td style={{padding:'4px 6px',textAlign:'right',color:v.moy_pct_brut_veh>=0.10?C.green:v.moy_pct_brut_veh>=0?sub:C.red}}>{fmtPct(v.moy_pct_brut_veh)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Par VENDEUR */}
               <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,overflow:'hidden',marginBottom:12}}>
