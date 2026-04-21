@@ -1,14 +1,11 @@
-// Parser des rapports SCOA (Analyse des Ventes) en PDF.
-//
-// Quirk de pdf-parse : pour chaque ligne de vente, le texte est extrait en
-// deux morceaux séparés par \t. La section principale contient la plupart
-// des colonnes, mais #Contrat, Profit Véhicule et Profit FNI sont tab-séparés
-// et apparaissent APRES le reste. Le parser recolle les morceaux.
+// Parser des rapports SCOA (Analyse des Ventes) en PDF, via unpdf.
+// On reconstruit les lignes en groupant les text items par coordonnée Y,
+// puis on les trie par X pour avoir les colonnes dans l'ordre naturel.
 
-import { PDFParse } from 'pdf-parse'
+import { extractTextItems } from 'unpdf'
 
 export interface ParsedSale {
-  date_vente: string        // YYYY-MM-DD
+  date_vente: string
   client: string | null
   stock_num: string
   marque: string
@@ -32,7 +29,7 @@ export interface ParsedSale {
 export interface ParseResult {
   success: boolean
   ventes: ParsedSale[]
-  periode_debut: string | null   // YYYY-MM-DD
+  periode_debut: string | null
   periode_fin: string | null
   erreur?: string
   warnings: string[]
@@ -55,7 +52,7 @@ function parseNum(t: string): number {
 function isNum(t: string): boolean { return NUM_RE.test(t) }
 
 function parsePeriode(line: string): { debut: string | null, fin: string | null } {
-  const m = /^Du\s+(\d+)\s+(\w+)\s+(\d{4})\s+au\s+(\d+)\s+(\w+)\s+(\d{4})/i.exec(line.trim())
+  const m = /Du\s+(\d+)\s+(\w+)\s+(\d{4})\s+au\s+(\d+)\s+(\w+)\s+(\d{4})/i.exec(line.trim())
   if (!m) return { debut: null, fin: null }
   const moisDebut = MOIS_FR[m[2].toLowerCase()]
   const moisFin = MOIS_FR[m[5].toLowerCase()]
@@ -69,62 +66,50 @@ function parseSaleLine(line: string, vendeur: { id: string, nom: string } | null
   const dm = /^(\d{4}-\d{2}-\d{2})\s+(.+)$/.exec(line)
   if (!dm) return null
   const date = dm[1]
-  const rest = dm[2]
+  const rest = dm[2].trim()
 
-  const parts = rest.split('\t')
-  const mainPart = parts[0].trim()
-  const extrasStr = parts.slice(1).join(' ').trim()
-  const extras = extrasStr.split(/\s+/).filter(Boolean)
+  const tokens = rest.split(/\s+/)
+  if (tokens.length < 10) return null
 
-  // Extras attendus : [#Contrat, ProfitVeh, (ProfitFNI si FNI)]
-  if (extras.length < 2) return null
-  const numContrat = extras[0]
-  if (!isNum(extras[1])) return null
-  const profitVeh = parseNum(extras[1])
-  const hasFni = extras.length >= 3 && isNum(extras[2])
-  const profitFni = hasFni ? parseNum(extras[2]) : 0
-
-  const tokens = mainPart.split(/\s+/)
-  if (tokens.length < 8) return null
-
-  // Pop NbJours
+  // Pop NbJours (entier)
   const nbJoursTok = tokens.pop()!
   if (!/^\d+$/.test(nbJoursTok)) return null
   const nbJours = parseInt(nbJoursTok, 10)
 
-  // Pop %Profit, ProfitNet, Totales
-  if (!isNum(tokens[tokens.length - 1])) return null
+  // Pop %Profit, ProfitNet, Totales (3 numériques)
+  const peekNum = (off: number) => tokens.length >= off && isNum(tokens[tokens.length - off])
+  if (!peekNum(1) || !peekNum(2) || !peekNum(3)) return null
   const pctProfit = parseNum(tokens.pop()!)
-  if (!isNum(tokens[tokens.length - 1])) return null
   const profitNetTotal = parseNum(tokens.pop()!)
-  if (!isNum(tokens[tokens.length - 1])) return null
   const ventesTotales = parseNum(tokens.pop()!)
 
-  // Pop FNI (%BrutFNI, VentesFNI) si présent
-  let ventesFni = 0, pctBrutFni = 0
-  if (hasFni) {
-    if (!isNum(tokens[tokens.length - 1])) return null
+  // Détection FNI : si on a encore 6 numériques consécutifs (3 FNI + 3 Véh)
+  // alors que sans FNI on n'en a que 3. On regarde si le 4e à partir de la
+  // fin est numérique → indique FNI présent.
+  let ventesFni = 0, profitFni = 0, pctBrutFni = 0
+  if (peekNum(1) && peekNum(2) && peekNum(3) && peekNum(4) && peekNum(5) && peekNum(6)) {
     pctBrutFni = parseNum(tokens.pop()!)
-    if (!isNum(tokens[tokens.length - 1])) return null
+    profitFni = parseNum(tokens.pop()!)
     ventesFni = parseNum(tokens.pop()!)
   }
 
-  // Pop %Brut, Prix
-  if (!isNum(tokens[tokens.length - 1])) return null
+  // Pop %Brut véhicule, Profit véhicule, Prix
+  if (!peekNum(1) || !peekNum(2) || !peekNum(3)) return null
   const pctBrut = parseNum(tokens.pop()!)
-  if (!isNum(tokens[tokens.length - 1])) return null
+  const profitVeh = parseNum(tokens.pop()!)
   const prixVente = parseNum(tokens.pop()!)
 
-  // Année : soit token pur '2024', soit collé au modèle 'Premium2026'
+  // Pop #Contrat (toujours présent)
+  if (tokens.length === 0) return null
+  const numContrat = tokens.pop()!
+
+  // Pop année (token pur "2024" ou collé au modèle "Premium2026")
   let annee: number | null = null
-  const lastTok = tokens[tokens.length - 1]
+  const lastTok = tokens[tokens.length - 1] || ''
   const pureYear = /^(\d{4})$/.exec(lastTok)
   if (pureYear) {
     const y = parseInt(pureYear[1], 10)
-    if (y >= 1990 && y <= 2100) {
-      annee = y
-      tokens.pop()
-    }
+    if (y >= 1990 && y <= 2100) { annee = y; tokens.pop() }
   }
   if (annee === null) {
     const stuck = /^(.+?)(\d{4})$/.exec(lastTok)
@@ -181,47 +166,83 @@ function parseSaleLine(line: string, vendeur: { id: string, nom: string } | null
   }
 }
 
+// Reconstruit les lignes du PDF en groupant les text items par coordonnée Y
+// (tolérance 2pt), puis en triant chaque ligne par X ascendant.
+function buildLines(pageItems: any[]): string[] {
+  const rowsByY = new Map<number, any[]>()
+  for (const it of pageItems) {
+    if (!it || typeof it.str !== 'string') continue
+    const y = Math.round(it.y)
+    // Essaye d'agréger avec une ligne existante proche (tolérance ±2)
+    let bucket: number | null = null
+    for (const ky of rowsByY.keys()) {
+      if (Math.abs(ky - y) <= 2) { bucket = ky; break }
+    }
+    const key = bucket ?? y
+    if (!rowsByY.has(key)) rowsByY.set(key, [])
+    rowsByY.get(key)!.push(it)
+  }
+  const sortedYs = [...rowsByY.keys()].sort((a, b) => b - a) // haut → bas
+  const lines: string[] = []
+  for (const y of sortedYs) {
+    const row = rowsByY.get(y)!.sort((a, b) => a.x - b.x)
+    const parts: string[] = []
+    let lastEnd = -Infinity
+    for (const it of row) {
+      const s = String(it.str).trim()
+      if (!s) continue
+      // Séparateur simple (un espace) entre tokens successifs
+      if (parts.length > 0 && it.x - lastEnd > 0.5) parts.push(s)
+      else parts.push(s)
+      lastEnd = it.x + (it.width || 0)
+    }
+    const line = parts.join(' ').replace(/\s+/g, ' ').trim()
+    if (line) lines.push(line)
+  }
+  return lines
+}
+
 export async function parseScoaPdf(buffer: Buffer | Uint8Array): Promise<ParseResult> {
   try {
-    const parser = new PDFParse({ data: buffer })
-    const result = await parser.getText()
-    const text = result.text || ''
-    const lines = text.split(/\r?\n/)
-
+    // unpdf refuse Buffer directement ; on doit passer un Uint8Array "pur"
+    const data = new Uint8Array(buffer.buffer
+      ? buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+      : buffer)
+    const r = await extractTextItems(data)
+    const warnings: string[] = []
+    const ventes: ParsedSale[] = []
     let periode_debut: string | null = null
     let periode_fin: string | null = null
     let currentVendeur: { id: string, nom: string } | null = null
     let inExceptions = false
-    const ventes: ParsedSale[] = []
-    const warnings: string[] = []
 
-    for (const raw of lines) {
-      const line = raw.trimEnd()
-      if (!line) continue
+    for (let p = 0; p < r.items.length; p++) {
+      const lines = buildLines(r.items[p] as any[])
 
-      // On s'arrête aux Exceptions (format différent, lignes quasi vides)
-      if (/^Liste des Exceptions/i.test(line)) { inExceptions = true; continue }
-      if (inExceptions) continue
+      for (const raw of lines) {
+        const line = raw.trim()
+        if (!line) continue
 
-      // Période
-      if (!periode_debut) {
-        const p = parsePeriode(line)
-        if (p.debut) { periode_debut = p.debut; periode_fin = p.fin }
-      }
+        if (/Liste\s+des\s+Exceptions/i.test(line)) { inExceptions = true; continue }
+        if (inExceptions) continue
 
-      // Vendeur
-      const vMatch = /^Vendeur\s*:\s*(\d+)\s+(.+)$/.exec(line)
-      if (vMatch) {
-        currentVendeur = { id: vMatch[1].trim(), nom: vMatch[2].trim() }
-        continue
-      }
+        if (!periode_debut) {
+          const p = parsePeriode(line)
+          if (p.debut) { periode_debut = p.debut; periode_fin = p.fin }
+        }
 
-      // Ligne de vente (ignore le header daté "YYYY-MM-DD HH:MM (52912)")
-      if (/^\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}/.test(line)) continue
-      if (/^\d{4}-\d{2}-\d{2}\s/.test(line)) {
-        const sale = parseSaleLine(line, currentVendeur)
-        if (sale) ventes.push(sale)
-        else warnings.push(`Ligne non parsée : ${line.slice(0, 100)}`)
+        const vMatch = /Vendeur\s*:\s*(\d+)\s+(.+?)(?:\s{2,}|\s*$)/.exec(line)
+        if (vMatch && !/^\d{4}-\d{2}-\d{2}/.test(line)) {
+          currentVendeur = { id: vMatch[1].trim(), nom: vMatch[2].trim() }
+          continue
+        }
+
+        if (/^\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}/.test(line)) continue
+        if (/^\d{4}-\d{2}-\d{2}\s/.test(line)) {
+          const sale = parseSaleLine(line, currentVendeur)
+          if (sale) ventes.push(sale)
+          else warnings.push(`Ligne non parsée : ${line.slice(0, 120)}`)
+        }
       }
     }
 
