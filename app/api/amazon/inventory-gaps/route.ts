@@ -1,5 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { detectVariant } from '@/lib/amazon-inventory'
+
+// Retourne un "wide base" qui regroupe A2883424 + 2883424 + FBA-2883424 + HUB-2883424
+// sous la même clé logique "2883424". Utilisé pour la somme Traction par produit.
+function wideBase(code: string | null | undefined): string {
+  if (!code) return ''
+  const narrow = detectVariant(code).base
+  // Strip un "A" ou "a" en tête uniquement si suivi de chiffres (convention master Amazon)
+  const m = /^[Aa](\d.*)$/.exec(narrow)
+  return m ? m[1] : narrow
+}
 
 // GET — dashboard complet des écarts d'inventaire FBA ↔ Traction
 //
@@ -64,35 +75,42 @@ export async function GET(_req: NextRequest) {
       from += 1000
     }
 
-    // 3) Stock Traction agrégé par PKCode (toutes lignes Amazon confondues)
-    //    + stock par code_ligne séparé pour le cross-check FBM
-    const tractionCodes = Array.from(new Set(fbaRows.map(r => r.traction_code).filter(Boolean)))
-    const tractionStock = new Map<string, {
-      qty_total: number; qty_dispo: number; coutant: number; desc: string | null;
-      qty_fbm: number; qty_fba: number; qty_ama: number;
+    // 3) Stock Traction agrégé par WIDE BASE (regroupe toutes les variantes
+    //    d'un même produit: A2883424 + 2883424 + FBA-2883424 + HUB-2883424).
+    //    On charge TOUTES les lignes AMA pour construire l'index base → somme.
+    const tractionBaseStock = new Map<string, {
+      qty_dispo_ama: number; qty_fbm: number; qty_fba: number;
+      coutant: number; desc: string | null;
+      variants: { pk_code: string; code_ligne: string; qty_dispo: number }[];
     }>()
-    if (tractionCodes.length > 0) {
-      const BATCH = 500
-      for (let i = 0; i < tractionCodes.length; i += BATCH) {
-        const batch = tractionCodes.slice(i, i + BATCH)
-        const { data: tData } = await supabaseAdmin
+    {
+      let from = 0
+      while (true) {
+        const { data, error } = await supabaseAdmin
           .from('traction_amazon_lignes')
           .select('pk_code, qty, qty_minus_reserved, prix_coutant, desc_fra, code_ligne')
-          .in('pk_code', batch)
-        for (const t of tData || []) {
-          const ex = tractionStock.get(t.pk_code) || {
-            qty_total: 0, qty_dispo: 0, coutant: 0, desc: null,
-            qty_fbm: 0, qty_fba: 0, qty_ama: 0,
+          .in('code_ligne', ['AMA', 'FBA', 'FBM'])
+          .range(from, from + 999)
+        if (error) throw error
+        for (const t of data || []) {
+          const base = wideBase(t.pk_code)
+          if (!base) continue
+          const ex = tractionBaseStock.get(base) || {
+            qty_dispo_ama: 0, qty_fbm: 0, qty_fba: 0,
+            coutant: 0, desc: null, variants: [],
           }
-          ex.qty_total += Number(t.qty || 0)
-          ex.qty_dispo += Number(t.qty_minus_reserved || 0)
-          if (t.code_ligne === 'FBM') ex.qty_fbm += Number(t.qty_minus_reserved || 0)
-          if (t.code_ligne === 'FBA') ex.qty_fba += Number(t.qty_minus_reserved || 0)
-          if (t.code_ligne === 'AMA') ex.qty_ama += Number(t.qty_minus_reserved || 0)
+          const qd = Number(t.qty_minus_reserved || 0)
+          // User demande explicitement : stock Traction sur CodeLigne AMA
+          if (t.code_ligne === 'AMA') ex.qty_dispo_ama += qd
+          if (t.code_ligne === 'FBM') ex.qty_fbm += qd
+          if (t.code_ligne === 'FBA') ex.qty_fba += qd
           if (ex.coutant === 0 && Number(t.prix_coutant || 0) > 0) ex.coutant = Number(t.prix_coutant)
           if (!ex.desc && t.desc_fra) ex.desc = t.desc_fra
-          tractionStock.set(t.pk_code, ex)
+          ex.variants.push({ pk_code: t.pk_code, code_ligne: t.code_ligne, qty_dispo: qd })
+          tractionBaseStock.set(base, ex)
         }
+        if (!data || data.length < 1000) break
+        from += 1000
       }
     }
 
@@ -114,10 +132,16 @@ export async function GET(_req: NextRequest) {
       const mfnFulfillable = Number(f.mfn_fulfillable_quantity || 0)
       // afn-researching non stocké en DB actuellement (sera 0), ignoré pour l'instant
 
-      const traction = f.traction_code ? tractionStock.get(f.traction_code) : null
-      const tractionQty = traction?.qty_dispo || 0
-      const tractionTotal = traction?.qty_total || 0
+      // Lookup par BASE WIDE : on regroupe toutes les variantes Amazon du
+      // même produit (ex. pour SKU A2883424 on somme A2883424 + FBA-2883424
+      // + HUB-2883424 + 2883424), strictement sur code_ligne = 'AMA'.
+      const lookupCode = f.traction_code || f.sku
+      const base = wideBase(lookupCode)
+      const traction = base ? tractionBaseStock.get(base) : null
+      const tractionQty = traction?.qty_dispo_ama || 0   // somme CodeLigne AMA uniquement
+      const tractionTotal = tractionQty
       const tractionFbm = traction?.qty_fbm || 0
+      const tractionVariants = traction?.variants || []
       const coutant = traction?.coutant || Number(f.your_price || 0)
       const desc = traction?.desc || f.product_name || null
 
@@ -163,6 +187,7 @@ export async function GET(_req: NextRequest) {
         traction_qty: tractionQty,
         traction_total: tractionTotal,
         traction_fbm: tractionFbm,
+        traction_variants: tractionVariants,   // détail des pk_codes sommés sur AMA
         coutant,
         your_price: Number(f.your_price || 0),
         ecart,
@@ -288,9 +313,18 @@ export async function GET(_req: NextRequest) {
       }
     }
 
+    // Date de la dernière sync Traction (pour afficher la fraîcheur côté client)
+    const { data: lastSyncRow } = await supabaseAdmin
+      .from('traction_amazon_lignes')
+      .select('synced_at')
+      .order('synced_at', { ascending: false })
+      .limit(1)
+    const tractionSyncedAt = lastSyncRow && lastSyncRow[0]?.synced_at || null
+
     return NextResponse.json({
       snapshot_date: latestDate,
       previous_snapshot_date: previousDate,
+      traction_synced_at: tractionSyncedAt,
       rows,
       totals,
       dashboard,

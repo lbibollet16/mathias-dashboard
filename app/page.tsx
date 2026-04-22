@@ -6020,12 +6020,13 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
             <div>
               <div style={{fontSize:13,fontWeight:800}}>📊 Comparaison Amazon FBA ↔ Traction</div>
               <div style={{fontSize:11,color:sub,marginTop:2}}>
-                Compare le dernier snapshot FBA (afn fulfillable + inbound + reserved) au stock Traction disponible (QTYMINUSRESERVED) sur toutes les lignes AMA/FBA/FBM confondues.
+                Compare le dernier snapshot FBA (afn fulfillable + inbound + reserved) au stock Traction <strong>CodeLigne AMA</strong> (QTYMINUSRESERVED), regroupé par base produit (A2883424 = A2883424 + FBA-2883424 + HUB-2883424 + 2883424). Survole la colonne Traction pour voir le détail des variantes sommées.
               </div>
             </div>
-            {inventaireGaps.snapshot_date && (
-              <div style={{fontSize:11,color:sub}}>📅 Snapshot : <strong>{inventaireGaps.snapshot_date}</strong></div>
-            )}
+            <div style={{fontSize:11,color:sub,textAlign:'right',lineHeight:1.5}}>
+              {inventaireGaps.snapshot_date && <>📅 Snapshot FBA : <strong>{inventaireGaps.snapshot_date}</strong><br/></>}
+              {inventaireGaps.traction_synced_at && <>🔄 Sync Traction : <strong>{new Date(inventaireGaps.traction_synced_at).toLocaleString('fr-CA',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</strong></>}
+            </div>
           </div>
 
           {/* ─── DASHBOARD SANTÉ FBA ─── */}
@@ -6251,7 +6252,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:C.blue}}>{r.amazon_dispo}</td>
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:r.amazon_inbound>0?C.blue:sub,fontSize:11}}>{r.amazon_inbound||''}</td>
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:r.amazon_unsellable>0?C.red:sub,fontSize:11,fontWeight:r.amazon_unsellable>0?800:400}}>{r.amazon_unsellable||''}</td>
-                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:r.traction_code?C.green:sub}}>{r.traction_code?r.traction_qty:'?'}</td>
+                          <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:r.traction_code?C.green:sub,cursor:(r.traction_variants||[]).length?'help':'default'}}
+                              title={(r.traction_variants||[]).filter((v:any)=>v.code_ligne==='AMA').map((v:any)=>`${v.pk_code} (${v.code_ligne}) : ${v.qty_dispo}`).join('\n') || 'Aucune variante AMA trouvée'}>
+                            {r.traction_code?r.traction_qty:'?'}
+                          </td>
                           <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontSize:14,fontWeight:900,color:r.ecart===0?C.green:r.ecart>0?C.blue:C.red}}>
                             {r.ecart>0?'+':''}{r.ecart}
                           </td>
