@@ -5884,13 +5884,41 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     </div>
                   </div>
 
-                  {/* Info */}
+                  {/* Info + Breakdown par amount_description */}
                   <div style={{padding:'8px 18px',fontSize:11,color:sub,background:dark?'#0f0f0f':'#fafbfc',borderBottom:`1px solid ${bdr}`,lineHeight:1.5}}>
-                    La somme de ces <strong>{lautopakLines.nb_lignes} lignes</strong> doit être égale au <strong>Frais produit</strong> du settlement
-                    ({fmt$(lautopakLines.frais_produit_settlement)}). Tout le reste (shipping, tax, commission, FBA fees, ads, promo, reimbursements)
-                    va dans le compte <strong>Coût de ventes Amazon</strong>.
-                    Les refunds sont déjà déduits dans la colonne "Qté nette" et "Montant net".
+                    La somme de ces <strong>{lautopakLines.nb_lignes} lignes</strong> (Principal uniquement) doit normalement égaler le <strong>Frais produit</strong> du settlement.
+                    Si ton relevé papier Amazon montre un autre montant, vérifie le tableau ci-dessous — le "Frais de produits" selon Amazon peut inclure Shipping + GiftWrap + Promotion.
                   </div>
+                  {lautopakLines.breakdown && lautopakLines.breakdown.length > 0 && (
+                    <details style={{borderBottom:`1px solid ${bdr}`,background:dark?'#0d0d0d':'#fafbfc'}}>
+                      <summary style={{padding:'8px 18px',cursor:'pointer',fontSize:11,color:sub,fontWeight:700}}>
+                        ▾ Décomposition par catégorie (amount_description) — utile pour matcher le relevé imprimé Amazon
+                      </summary>
+                      <div style={{padding:'4px 18px 12px'}}>
+                        <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                          <thead><tr style={{background:thBg}}>
+                            <th style={{padding:'6px 10px',textAlign:'left',fontSize:10,color:sub}}>amount_description</th>
+                            <th style={{padding:'6px 10px',textAlign:'right',fontSize:10,color:sub}}>Nb lignes</th>
+                            <th style={{padding:'6px 10px',textAlign:'right',fontSize:10,color:sub}}>Total</th>
+                          </tr></thead>
+                          <tbody>
+                            {lautopakLines.breakdown.map((b:any) => (
+                              <tr key={b.amount_description} style={{background:b.amount_description==='Principal'?(dark?'#0d2a18':'#e6f4ea'):'transparent'}}>
+                                <td style={{padding:'4px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:b.amount_description==='Principal'?700:400}}>
+                                  {b.amount_description==='Principal' && '✓ '}{b.amount_description}
+                                </td>
+                                <td style={{padding:'4px 10px',textAlign:'right',color:sub,borderBottom:`1px solid ${bdr}`}}>{b.count}</td>
+                                <td style={{padding:'4px 10px',textAlign:'right',fontWeight:700,color:b.total>=0?C.blue:C.red,borderBottom:`1px solid ${bdr}`}}>{fmt$(b.total)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <div style={{fontSize:10,color:sub,marginTop:8,lineHeight:1.5}}>
+                          💡 Astuce : identifie quelle(s) combinaison(s) de lignes ci-dessus = <strong>{fmt$(lautopakLines.frais_produit_settlement)}</strong> ou le montant exact de ton relevé. Dis-moi lesquelles, et j'ajoute ces catégories au calcul.
+                        </div>
+                      </div>
+                    </details>
+                  )}
 
                   {/* Tableau */}
                   <div style={{overflow:'auto',flex:1}}>

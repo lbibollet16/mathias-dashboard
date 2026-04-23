@@ -27,21 +27,40 @@ export async function GET(req: NextRequest) {
       .maybeSingle()
     if (!s) return NextResponse.json({ erreur: 'Settlement introuvable' }, { status: 404 })
 
-    // 2) Lignes "Principal" du settlement, groupées par SKU
-    const tx: any[] = []
-    let from = 0
-    while (true) {
-      const { data, error } = await supabaseAdmin
-        .from('amazon_transactions')
-        .select('sku, traction_code, quantity_purchased, amount, amount_description, transaction_type')
-        .eq('settlement_id', id)
-        .eq('amount_description', 'Principal')
-        .range(from, from + 999)
-      if (error) throw error
-      tx.push(...(data || []))
-      if (!data || data.length < 1000) break
-      from += 1000
+    // 2a) TOUTES les transactions avec SKU du settlement (pour breakdown par
+    //     amount_description). Permet d'identifier ce qui compose réellement
+    //     le "Frais de produits" sur le relevé imprimé.
+    const all: any[] = []
+    {
+      let from = 0
+      while (true) {
+        const { data, error } = await supabaseAdmin
+          .from('amazon_transactions')
+          .select('sku, traction_code, quantity_purchased, amount, amount_type, amount_description, transaction_type')
+          .eq('settlement_id', id)
+          .range(from, from + 999)
+        if (error) throw error
+        all.push(...(data || []))
+        if (!data || data.length < 1000) break
+        from += 1000
+      }
     }
+
+    // Récapitulatif par amount_description (tous transaction_type confondus)
+    const breakdownMap = new Map<string, { count: number; total: number }>()
+    for (const t of all) {
+      const k = t.amount_description || '(null)'
+      const ex = breakdownMap.get(k) || { count: 0, total: 0 }
+      ex.count++
+      ex.total += Number(t.amount || 0)
+      breakdownMap.set(k, ex)
+    }
+    const breakdown = [...breakdownMap.entries()]
+      .map(([amount_description, v]) => ({ amount_description, count: v.count, total: Number(v.total.toFixed(2)) }))
+      .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
+
+    // 2b) Lignes "Principal" du settlement, groupées par SKU (pour facture LAUTOPAK)
+    const tx = all.filter(t => t.amount_description === 'Principal')
 
     // 3) Produit info (nom) — on récupère depuis amazon_fba_inventory (dernier snapshot connu)
     const skus = Array.from(new Set(tx.map(t => t.sku).filter(Boolean)))
@@ -126,6 +145,7 @@ export async function GET(req: NextRequest) {
       nb_lignes: lignes.length,
       balance_ok: Math.abs(total_calcule - frais_produit_settlement) < 0.01,
       ecart: Number((total_calcule - frais_produit_settlement).toFixed(2)),
+      breakdown,   // décomposition par amount_description (aide au diagnostic)
       lignes,
     })
   } catch (e: any) {
