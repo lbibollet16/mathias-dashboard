@@ -3714,6 +3714,13 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     // Champs transactions peuvent être vides (= 0), seuls cause, commentaire et qte_reelle sont requis
     return f.qte_reelle !== '' && f.cause !== '' && f.commentaire_compta !== ''
   }
+  // Validation allégée pour la pièce alternative : la cause + commentaire sont
+  // partagés avec la pièce principale (un seul bloc Justification dans l'UI),
+  // donc l'alt n'a besoin que de son stock réel.
+  function altFormComplet(f: any, principalCauseIdx: number) {
+    if (principalCauseIdx === 0) return true  // non réceptionnée → pas de comptage
+    return f.qte_reelle !== ''
+  }
 
   function photoObligatoire(ajust: number, cause?: string, causeIdx?: number) {
     if (causeIdx === 0 || (cause && CAUSES.indexOf(cause) === 0)) return false
@@ -3936,7 +3943,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
       const altQteTab = qteTablette(altForm)
       const altAjust = hasAlt ? getAjust(altStockSys, altForm) : null
       const photoObl = photoObligatoire(ajust, form.cause, form.causeIdx)
-      const allFormsComplet = formComplet(form) && (!hasAlt || formComplet(altForm))
+      const allFormsComplet = formComplet(form) && (!hasAlt || altFormComplet(altForm, form.causeIdx))
 
       return (
         <div style={{position:'fixed',inset:0,background:dark?'#0d0d0d':'#f0f2f5',zIndex:9999,overflowY:'auto',fontFamily:"'DM Sans',sans-serif"}}>
