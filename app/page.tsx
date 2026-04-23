@@ -4966,6 +4966,8 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [archivesList, setArchivesList] = useState<any[]>([])
   const [lautopakLines, setLautopakLines] = useState<any>(null)
   const [lautopakLoading, setLautopakLoading] = useState(false)
+  const [releveMatch, setReleveMatch] = useState<any>(null)
+  const [releveSaisi, setReleveSaisi] = useState<Record<string, string>>({})
   const [inventaireGaps, setInventaireGaps] = useState<any>({ rows: [], totals: {}, snapshot_date: null, dashboard: null, history: null })
   const [filtGap, setFiltGap] = useState<'tous'|'action'|'unsellable'|'rupture_fba'|'reclamation'|'ajust_traction'|'watched'|'ok'>('action')
   const [searchGap, setSearchGap] = useState('')
@@ -5184,6 +5186,16 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       const j = await r.json()
       if (j.archives) setArchivesList(j.archives)
     } catch {}
+  }
+
+  async function chargerReleveMatch(settlementId: string) {
+    setReleveMatch(null)
+    try {
+      const r = await fetch(`/api/amazon/closure/releve-match?id=${encodeURIComponent(settlementId)}`)
+      const j = await r.json()
+      if (!j.erreur) setReleveMatch(j)
+      else alert('Erreur : ' + j.erreur)
+    } catch (e: any) { alert('Exception : ' + e.message) }
   }
 
   async function chargerLautopakLines(settlementId: string) {
@@ -5694,6 +5706,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   style={{background:'transparent',border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:'pointer',fontSize:12,color:sub}}>
                   ← Liste
                 </button>
+                <button onClick={()=>chargerReleveMatch(s.settlement_id)}
+                  style={{background:C.yellow,color:'#fff',border:'none',borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                  🧾 Rapprochement relevé
+                </button>
                 {!closureDetail.is_closed && closureDetail.can_close && (
                   <button onClick={()=>{if(confirm('Fermer définitivement ce settlement ?')) validerEtape(s.settlement_id,'close')}}
                     style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:800,cursor:'pointer',fontSize:12}}>
@@ -6029,6 +6045,97 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ═══ Modal RAPPROCHEMENT RELEVÉ AMAZON ═══ */}
+      {releveMatch && (() => {
+        const fmt$ = (n: number) => `${n<0?'−':''}${Math.abs(Number(n||0)).toLocaleString('fr-CA',{minimumFractionDigits:2,maximumFractionDigits:2})} $`
+        // Saisie du relevé papier
+        const saisi = (k: string) => {
+          const v = parseFloat((releveSaisi[k] || '').replace(',', '.'))
+          return isNaN(v) ? null : v
+        }
+        const ligne = (label: string, calc: number, key: string, indent = 0, bold = false, neg = false) => {
+          const v = saisi(key)
+          const diff = v !== null ? Number((calc - v).toFixed(2)) : null
+          return (
+            <tr style={{background:diff !== null && Math.abs(diff) > 0.01 ? (dark?'#2b1113':'#fce8e6') : 'transparent'}}>
+              <td style={{padding:'5px 10px',paddingLeft:10+indent*20,fontWeight:bold?800:400,fontSize:bold?12:11,borderBottom:`1px solid ${bdr}`}}>{label}</td>
+              <td style={{padding:'5px 10px',textAlign:'right',fontWeight:bold?800:600,fontFamily:'monospace',fontSize:12,borderBottom:`1px solid ${bdr}`,color:neg&&calc<0?C.red:bold?C.blue:'inherit'}}>{fmt$(calc)}</td>
+              <td style={{padding:'2px 4px',borderBottom:`1px solid ${bdr}`}}>
+                <input type="text" value={releveSaisi[key] || ''} onChange={e=>setReleveSaisi(p=>({...p,[key]:e.target.value}))}
+                  placeholder="saisir..." style={{...S,textAlign:'right',fontSize:11,padding:'4px 6px',width:110,fontFamily:'monospace'}}/>
+              </td>
+              <td style={{padding:'5px 10px',textAlign:'right',fontWeight:700,fontSize:11,color:diff === null ? sub : Math.abs(diff) < 0.01 ? C.green : C.red,borderBottom:`1px solid ${bdr}`}}>
+                {diff === null ? '—' : Math.abs(diff) < 0.01 ? '✓' : fmt$(diff)}
+              </td>
+            </tr>
+          )
+        }
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+               onClick={()=>{setReleveMatch(null); setReleveSaisi({})}}>
+            <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,maxWidth:900,width:'100%',maxHeight:'92vh',overflow:'hidden',display:'flex',flexDirection:'column',border:`1px solid ${bdr}`}}>
+              <div style={{padding:'14px 18px',borderBottom:`1px solid ${bdr}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <div>
+                  <div style={{fontSize:14,fontWeight:900}}>🧾 Rapprochement avec le relevé de paiement Amazon</div>
+                  <div style={{fontSize:11,color:sub,marginTop:2}}>Saisis les montants de ton relevé imprimé pour vérifier que ton TSV correspond</div>
+                </div>
+                <button onClick={()=>{setReleveMatch(null); setReleveSaisi({})}}
+                  style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>✕ Fermer</button>
+              </div>
+              <div style={{overflow:'auto',flex:1,padding:'0 0 14px'}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                  <thead><tr style={{background:thBg,position:'sticky',top:0}}>
+                    <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Catégorie relevé Amazon</th>
+                    <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Calculé TSV</th>
+                    <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`,width:130}}>Relevé papier</th>
+                    <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Écart</th>
+                  </tr></thead>
+                  <tbody>
+                    {/* VENTES */}
+                    {ligne('VENTES', releveMatch.ventes.total, 'ventes_total', 0, true)}
+                    {ligne('Frais produit', releveMatch.ventes.frais_produit, 'frais_produit', 1)}
+                    {ligne('Expédition', releveMatch.ventes.expedition, 'expedition_ventes', 1)}
+                    {ligne('Remboursements de stock (FBA)', releveMatch.ventes.remboursements_stock_fba, 'remb_stock_fba', 1)}
+
+                    {/* REMBOURSEMENTS */}
+                    {ligne('REMBOURSEMENTS', releveMatch.remboursements.total, 'remb_total', 0, true, true)}
+                    {ligne('Dépenses remboursées', releveMatch.remboursements.depenses_rembourses, 'depenses_rembourses', 1)}
+                    {ligne('Ventes remboursées', releveMatch.remboursements.ventes_remboursees_total, 'ventes_remb_total', 1, false, true)}
+                    {ligne('— Expédition', releveMatch.remboursements.ventes_remboursees_expedition, 'ventes_remb_exp', 2, false, true)}
+                    {ligne('— Frais produit', releveMatch.remboursements.ventes_remboursees_frais_produit, 'ventes_remb_produit', 2, false, true)}
+
+                    {/* DÉPENSES */}
+                    {ligne('DÉPENSES', releveMatch.depenses.total, 'dep_total', 0, true, true)}
+                    {ligne('Rabais promotionnels', releveMatch.depenses.rabais_promotionnels, 'rabais_promo', 1, false, true)}
+                    {ligne('Frais Expédié par Amazon', releveMatch.depenses.frais_fba_total, 'frais_fba', 1, false, true)}
+                    {ligne('— Frais de stockage mensuels', releveMatch.depenses.frais_fba_stockage, 'frais_fba_stockage', 2, false, true)}
+                    {ligne('— Autre', releveMatch.depenses.frais_fba_autre, 'frais_fba_autre', 2, false, true)}
+                    {ligne('Prix de la publicité', releveMatch.depenses.publicite, 'publicite', 1, false, true)}
+                    {ligne('Commissions Amazon', releveMatch.depenses.commissions_amazon, 'commissions', 1, false, true)}
+                    {ligne('Remboursements inversés (FBA)', releveMatch.depenses.remboursements_inverses_fba, 'remb_inverses', 1, false, true)}
+
+                    {/* PROFITS NETS */}
+                    <tr><td colSpan={4} style={{padding:6,borderBottom:'none'}}></td></tr>
+                    {ligne('PROFITS NETS (dépôt bancaire)', releveMatch.profits_nets_calcules, 'profits_nets', 0, true)}
+
+                    {releveMatch.reste_non_classe !== 0 && (
+                      <tr style={{background:dark?'#2b2411':'#fdf6e3'}}>
+                        <td colSpan={4} style={{padding:'10px',fontSize:11,color:C.yellow,fontWeight:700}}>
+                          ⚠️ Reste non classé : {fmt$(releveMatch.reste_non_classe)} — des amount_description du TSV n'ont pas été assignés aux catégories standard du relevé. Contacte moi avec la liste complète des amount_description pour compléter le mapping.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{padding:'10px 18px',borderTop:`1px solid ${bdr}`,fontSize:11,color:sub,lineHeight:1.5}}>
+                💡 Saisis les montants de ton relevé papier dans les champs à droite. Les lignes où l'écart ≥ 0,01 $ s'affichent en rouge. Quand toutes les lignes sont ✓ vertes, ton TSV correspond à 100% au relevé Amazon.
+              </div>
             </div>
           </div>
         )
