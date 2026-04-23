@@ -338,4 +338,34 @@ CREATE INDEX IF NOT EXISTS idx_scoa_ventes_marque ON scoa_ventes(marque);
 CREATE INDEX IF NOT EXISTS idx_scoa_ventes_vendeur ON scoa_ventes(vendeur_id);
 CREATE INDEX IF NOT EXISTS idx_scoa_ventes_date ON scoa_ventes(date_vente);
 ALTER TABLE scoa_ventes DISABLE ROW LEVEL SECURITY;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Amazon : fermeture de settlement en 6 étapes séquentielles
+-- Étapes : 1=LAUTOPAK 2=Reimbursements 3=Unsellable 4=AjustTraction 5=Audit 6=Rapport
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE amazon_settlements
+  ADD COLUMN IF NOT EXISTS step3_unsellable_handled_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS step3_unsellable_handled_by TEXT,
+  ADD COLUMN IF NOT EXISTS step4_ajustements_fait_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS step4_ajustements_fait_by TEXT,
+  ADD COLUMN IF NOT EXISTS step6_rapport_valide_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS step6_rapport_valide_by TEXT,
+  ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS closed_by TEXT;
+
+-- Archive des pk_codes qui ont disparu du feed Traction (renommés/supprimés).
+-- On garde l'historique pour la traçabilité comptable.
+CREATE TABLE IF NOT EXISTS traction_sku_archive (
+  id BIGSERIAL PRIMARY KEY,
+  pk_code TEXT NOT NULL UNIQUE,
+  code_ligne TEXT,
+  last_qty_dispo NUMERIC,
+  last_prix_coutant NUMERIC,
+  last_desc_fra TEXT,
+  first_disappeared_at TIMESTAMPTZ DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ,
+  notes TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_traction_archive_pk ON traction_sku_archive(pk_code);
+ALTER TABLE traction_sku_archive DISABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS idx_amz_audit_settlement ON amazon_audits(settlement_id);

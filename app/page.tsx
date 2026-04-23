@@ -4956,7 +4956,14 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
 // ── Amazon Tab (Phase 1) ─────────────────────────────────────────────────────
 function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
-  const [vue, setVue] = useState<'import'|'settlements'|'inventaire'|'consolide'|'audit'|'mapping'>('import')
+  const [vue, setVue] = useState<'fermeture'|'import'|'settlements'|'inventaire'|'consolide'|'audit'|'mapping'|'archives'|'rapport'>('fermeture')
+  // États de la vue Fermeture (nouvelle vue principale)
+  const [closureList, setClosureList] = useState<any[]>([])
+  const [closureActif, setClosureActif] = useState<string | null>(null)
+  const [closureDetail, setClosureDetail] = useState<any>(null)
+  const [closureLoading, setClosureLoading] = useState(false)
+  const [rapportData, setRapportData] = useState<any>(null)
+  const [archivesList, setArchivesList] = useState<any[]>([])
   const [inventaireGaps, setInventaireGaps] = useState<any>({ rows: [], totals: {}, snapshot_date: null, dashboard: null, history: null })
   const [filtGap, setFiltGap] = useState<'tous'|'action'|'unsellable'|'rupture_fba'|'reclamation'|'ajust_traction'|'watched'|'ok'>('action')
   const [searchGap, setSearchGap] = useState('')
@@ -5105,6 +5112,56 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       const r = await fetch('/api/amazon/audits')
       const j = await r.json()
       if (Array.isArray(j)) setAudits(j)
+    } catch {}
+  }
+
+  async function chargerClosureList() {
+    try {
+      const r = await fetch('/api/amazon/closure')
+      const j = await r.json()
+      if (j.settlements) setClosureList(j.settlements)
+    } catch {}
+  }
+
+  async function chargerClosureDetail(settlementId: string) {
+    setClosureLoading(true)
+    setClosureActif(settlementId)
+    try {
+      const r = await fetch(`/api/amazon/closure?id=${encodeURIComponent(settlementId)}`)
+      const j = await r.json()
+      if (!j.erreur) setClosureDetail(j)
+    } catch {}
+    setClosureLoading(false)
+  }
+
+  async function validerEtape(settlementId: string, step: number | 'close' | 'reopen', action: 'validate' | 'unvalidate' = 'validate') {
+    try {
+      await fetch('/api/amazon/closure', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ settlement_id: settlementId, step, action, employe: profil?.nom || profil?.email || 'Inconnu' })
+      })
+      await chargerClosureDetail(settlementId)
+      await chargerClosureList()
+    } catch {}
+  }
+
+  async function chargerRapport(settlementId: string) {
+    try {
+      const r = await fetch(`/api/amazon/closure/report?id=${encodeURIComponent(settlementId)}`)
+      const j = await r.json()
+      if (!j.erreur) {
+        setRapportData(j)
+        setVue('rapport')
+      }
+    } catch {}
+  }
+
+  async function chargerArchives() {
+    try {
+      const r = await fetch('/api/amazon/archives')
+      const j = await r.json()
+      if (j.archives) setArchivesList(j.archives)
     } catch {}
   }
 
@@ -5288,7 +5345,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     }
   }
 
-  useEffect(() => { charger() }, [])
+  useEffect(() => { charger(); chargerClosureList() }, [])
   // Lance l'auto-résolution dès qu'on ouvre la vue mapping (silencieux si rien à faire)
   useEffect(() => {
     if (vue === 'mapping' && unresolved.length > 0) autoResolve(true)
@@ -5425,33 +5482,468 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         </div>
       </div>
 
-      {/* Sous-onglets */}
+      {/* Sous-onglets — Fermeture en premier (vue principale simplifiée) */}
       <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>
+        <button onClick={()=>{setVue('fermeture'); chargerClosureList()}}
+          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='fermeture'?C.green:bdr}`,background:vue==='fermeture'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:vue==='fermeture'?C.green:sub,fontWeight:800,cursor:'pointer',fontSize:12}}>
+          📋 Fermeture settlements
+        </button>
         <button onClick={()=>setVue('import')}
           style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='import'?C.blue:bdr}`,background:vue==='import'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='import'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
           📥 Import
         </button>
-        <button onClick={()=>setVue('settlements')}
-          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='settlements'?C.green:bdr}`,background:vue==='settlements'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:vue==='settlements'?C.green:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
-          💰 Settlements ({settlementsList.length})
+        <button onClick={()=>{setVue('archives'); chargerArchives()}}
+          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='archives'?sub:bdr}`,background:'transparent',color:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+          🗄 Archives SKU
         </button>
-        <button onClick={()=>setVue('inventaire')}
-          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='inventaire'?C.yellow:bdr}`,background:vue==='inventaire'?(dark?'#2b2413':'#fdf6e3'):'transparent',color:vue==='inventaire'?C.yellow:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
-          📊 Écarts inventaire ({inventaireGaps.totals?.nb_ecart||0})
-        </button>
-        <button onClick={()=>setVue('consolide')}
-          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='consolide'?C.blue:bdr}`,background:vue==='consolide'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='consolide'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
-          🏭 Inventaire consolidé ({consolide.totals?.nb_base_products||0})
-        </button>
-        <button onClick={()=>{setVue('audit'); if(!audits.length) chargerAudits()}}
-          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='audit'?C.green:bdr}`,background:vue==='audit'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:vue==='audit'?C.green:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
-          📋 Audit mensuel ({audits.length})
-        </button>
-        <button onClick={()=>setVue('mapping')}
-          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='mapping'?C.red:bdr}`,background:vue==='mapping'?(dark?'#2b1113':'#fce8e6'):'transparent',color:vue==='mapping'?C.red:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
-          🗺 SKU non mappés ({unresolved.length})
-        </button>
+        <div style={{flex:1,minWidth:10}}/>
+        <details style={{fontSize:11}}>
+          <summary style={{cursor:'pointer',color:sub,padding:'8px 10px'}}>▾ Vues avancées</summary>
+          <div style={{display:'flex',gap:4,flexWrap:'wrap',marginTop:6}}>
+            <button onClick={()=>setVue('settlements')} style={{padding:'5px 10px',borderRadius:12,border:`1px solid ${bdr}`,background:vue==='settlements'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:sub,cursor:'pointer',fontSize:11}}>💰 Settlements ({settlementsList.length})</button>
+            <button onClick={()=>setVue('inventaire')} style={{padding:'5px 10px',borderRadius:12,border:`1px solid ${bdr}`,background:'transparent',color:sub,cursor:'pointer',fontSize:11}}>📊 Écarts inv. ({inventaireGaps.totals?.nb_ecart||0})</button>
+            <button onClick={()=>setVue('consolide')} style={{padding:'5px 10px',borderRadius:12,border:`1px solid ${bdr}`,background:'transparent',color:sub,cursor:'pointer',fontSize:11}}>🏭 Consolidé ({consolide.totals?.nb_base_products||0})</button>
+            <button onClick={()=>{setVue('audit'); if(!audits.length) chargerAudits()}} style={{padding:'5px 10px',borderRadius:12,border:`1px solid ${bdr}`,background:'transparent',color:sub,cursor:'pointer',fontSize:11}}>📋 Audits ({audits.length})</button>
+            <button onClick={()=>setVue('mapping')} style={{padding:'5px 10px',borderRadius:12,border:`1px solid ${bdr}`,background:'transparent',color:sub,cursor:'pointer',fontSize:11}}>🗺 SKU non mappés ({unresolved.length})</button>
+          </div>
+        </details>
       </div>
+
+      {/* ═══ Vue FERMETURE (principale) ═══ */}
+      {vue === 'fermeture' && !closureActif && (() => {
+        const ouverts = closureList.filter(s => !s.closed_at)
+        const fermes = closureList.filter(s => s.closed_at)
+        const fmtDate = (d: string | null) => d ? String(d).split('T')[0] : '—'
+        const fmt$ = (n: number) => `${Number(n).toLocaleString('fr-CA',{minimumFractionDigits:2,maximumFractionDigits:2})} $`
+        return (
+          <div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:12,padding:'14px 16px',marginBottom:14}}>
+              <div style={{fontSize:14,fontWeight:800,marginBottom:6}}>📋 Fermeture de settlement — Workflow en 6 étapes</div>
+              <div style={{fontSize:11,color:sub,lineHeight:1.6}}>
+                Chaque settlement Amazon = une période à fermer. Séquentiellement :
+                <strong> 1️⃣ LAUTOPAK → 2️⃣ Reimbursements → 3️⃣ Unsellable → 4️⃣ Ajustements Traction → 5️⃣ Audit physique + balance → 6️⃣ Rapport comptable</strong>.
+                Tant qu'une étape n'est pas verte, la suivante est verrouillée. Balance bloquante si écart &gt; 1 unité.
+              </div>
+            </div>
+
+            {/* Ouverts en haut */}
+            <div style={{background:card,border:`2px solid ${C.yellow}`,borderRadius:10,overflow:'hidden',marginBottom:12}}>
+              <div style={{padding:'10px 14px',borderBottom:`1px solid ${bdr}`,fontSize:12,fontWeight:800,color:C.yellow}}>
+                ⏳ Settlements ouverts ({ouverts.length})
+              </div>
+              {ouverts.length === 0 ? (
+                <div style={{padding:20,textAlign:'center',color:sub,fontSize:12}}>Aucun settlement ouvert</div>
+              ) : (
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                  <thead><tr style={{background:thBg}}>
+                    <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Settlement</th>
+                    <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Période</th>
+                    <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Dépôt</th>
+                    <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Montant</th>
+                    <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>LAUTOPAK</th>
+                    <th style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}></th>
+                  </tr></thead>
+                  <tbody>
+                    {ouverts.map((s:any) => (
+                      <tr key={s.settlement_id} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
+                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,fontWeight:700}}>{s.settlement_id}</td>
+                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>{fmtDate(s.settlement_start)} → {fmtDate(s.settlement_end)}</td>
+                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11}}>{fmtDate(s.deposit_date)}</td>
+                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700}}>{fmt$(s.total_amount)}</td>
+                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>{s.lautopak_invoice_ref || <span style={{color:C.red}}>—</span>}</td>
+                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
+                          <button onClick={()=>chargerClosureDetail(s.settlement_id)}
+                            style={{background:C.blue,color:'#fff',border:'none',borderRadius:6,padding:'5px 10px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                            Ouvrir →
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Fermés */}
+            {fermes.length > 0 && (
+              <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,overflow:'hidden'}}>
+                <div style={{padding:'10px 14px',borderBottom:`1px solid ${bdr}`,fontSize:12,fontWeight:800,color:C.green}}>
+                  ✅ Settlements fermés ({fermes.length})
+                </div>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                  <thead><tr style={{background:thBg}}>
+                    <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Settlement</th>
+                    <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Période</th>
+                    <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Montant</th>
+                    <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>LAUTOPAK</th>
+                    <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Fermé</th>
+                    <th style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}></th>
+                  </tr></thead>
+                  <tbody>
+                    {fermes.map((s:any) => (
+                      <tr key={s.settlement_id} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
+                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11}}>{s.settlement_id}</td>
+                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub}}>{fmtDate(s.settlement_start)} → {fmtDate(s.settlement_end)}</td>
+                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(s.total_amount)}</td>
+                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>{s.lautopak_invoice_ref || '—'}</td>
+                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontSize:10,color:sub}}>{fmtDate(s.closed_at)} par {s.closed_by||'?'}</td>
+                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
+                          <button onClick={()=>chargerRapport(s.settlement_id)}
+                            style={{background:'transparent',border:`1px solid ${C.blue}`,color:C.blue,borderRadius:6,padding:'4px 8px',fontWeight:700,cursor:'pointer',fontSize:10,marginRight:4}}>
+                            📊 Rapport
+                          </button>
+                          <button onClick={()=>chargerClosureDetail(s.settlement_id)}
+                            style={{background:'transparent',border:`1px solid ${sub}`,color:sub,borderRadius:6,padding:'4px 8px',fontWeight:700,cursor:'pointer',fontSize:10}}>
+                            Voir
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* ═══ Vue FERMETURE — détail d'un settlement (6 étapes) ═══ */}
+      {vue === 'fermeture' && closureActif && closureDetail && (() => {
+        const s = closureDetail.settlement
+        const steps = closureDetail.steps || []
+        const fmtDate = (d: string | null) => d ? String(d).split('T')[0] : '—'
+        const fmt$ = (n: number) => `${Number(n).toLocaleString('fr-CA',{minimumFractionDigits:2,maximumFractionDigits:2})} $`
+        const stepIcon = (st: string) => st==='done' ? '✅' : st==='action' ? '⏳' : '🔒'
+        const stepColor = (st: string) => st==='done' ? C.green : st==='action' ? C.yellow : sub
+        return (
+          <div>
+            {/* Header settlement */}
+            <div style={{background:card,border:`2px solid ${closureDetail.is_closed?C.green:C.yellow}`,borderRadius:12,padding:'14px 16px',marginBottom:12,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:10}}>
+              <div>
+                <div style={{fontSize:11,color:sub,fontWeight:700,textTransform:'uppercase'}}>Settlement</div>
+                <div style={{fontSize:15,fontWeight:900,fontFamily:'monospace'}}>{s.settlement_id}</div>
+                <div style={{fontSize:12,color:sub,marginTop:2}}>
+                  {fmtDate(s.settlement_start)} → {fmtDate(s.settlement_end)} • Dépôt {fmtDate(s.deposit_date)} • <strong style={{color:C.blue}}>{fmt$(s.total_amount)}</strong>
+                  {s.lautopak_invoice_ref && <> • 🧾 LAUTOPAK <strong>{s.lautopak_invoice_ref}</strong></>}
+                  {closureDetail.is_closed && <> • <span style={{color:C.green,fontWeight:700}}>🔒 Fermé {fmtDate(s.closed_at)} par {s.closed_by}</span></>}
+                </div>
+              </div>
+              <div style={{display:'flex',gap:8}}>
+                <button onClick={()=>{setClosureActif(null); setClosureDetail(null)}}
+                  style={{background:'transparent',border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:'pointer',fontSize:12,color:sub}}>
+                  ← Liste
+                </button>
+                {!closureDetail.is_closed && closureDetail.can_close && (
+                  <button onClick={()=>{if(confirm('Fermer définitivement ce settlement ?')) validerEtape(s.settlement_id,'close')}}
+                    style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:800,cursor:'pointer',fontSize:12}}>
+                    🔒 Fermer le settlement
+                  </button>
+                )}
+                {closureDetail.is_closed && (
+                  <button onClick={()=>{if(confirm('Rouvrir ce settlement ?')) validerEtape(s.settlement_id,'reopen')}}
+                    style={{background:C.yellow,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                    ↩ Rouvrir
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* 6 étapes */}
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              {steps.map((st: any, idx: number) => (
+                <div key={st.key} style={{background:card,border:`2px solid ${stepColor(st.status)}`,borderRadius:10,padding:'14px 16px',opacity:st.status==='locked'?.55:1}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10,flexWrap:'wrap'}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:800,color:stepColor(st.status)}}>
+                        {stepIcon(st.status)} Étape {idx+1} — {st.label}
+                      </div>
+                      <div style={{fontSize:12,color:sub,marginTop:4}}>{st.detail}</div>
+                      {st.validated_at && <div style={{fontSize:10,color:sub,marginTop:3}}>Validé le {fmtDate(st.validated_at)} par <strong>{st.validated_by}</strong></div>}
+                    </div>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                      {/* Actions spécifiques par étape */}
+                      {st.key==='1_lautopak' && st.status==='action' && (
+                        <button onClick={()=>{setExpandedSettlement(s.settlement_id); setVue('settlements')}}
+                          style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'6px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                          Aller au settlement →
+                        </button>
+                      )}
+                      {st.key==='5_audit' && st.status==='action' && s.audit_id && (
+                        <button onClick={()=>{setVue('audit'); chargerAuditDetail(s.audit_id)}}
+                          style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'6px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                          Ouvrir l'audit →
+                        </button>
+                      )}
+                      {(st.key==='3_unsellable' || st.key==='4_ajustements' || st.key==='6_rapport') && st.status!=='locked' && !closureDetail.is_closed && (
+                        st.status==='done' ? (
+                          <button onClick={()=>validerEtape(s.settlement_id, st.key==='3_unsellable'?3:st.key==='4_ajustements'?4:6, 'unvalidate')}
+                            style={{background:'transparent',border:`1px solid ${sub}`,color:sub,borderRadius:8,padding:'6px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                            ↩ Dévalider
+                          </button>
+                        ) : (
+                          <button onClick={()=>validerEtape(s.settlement_id, st.key==='3_unsellable'?3:st.key==='4_ajustements'?4:6)}
+                            style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'6px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                            ✓ Valider l'étape
+                          </button>
+                        )
+                      )}
+                      {st.key==='6_rapport' && (
+                        <button onClick={()=>chargerRapport(s.settlement_id)}
+                          style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'6px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                          📊 Voir rapport
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Détails d'étape quand il y a des items à voir */}
+                  {st.items && st.items.length > 0 && st.status !== 'locked' && (
+                    <div style={{marginTop:10,background:dark?'#0f0f0f':'#fafbfc',borderRadius:8,border:`1px solid ${bdr}`,overflow:'hidden',maxHeight:320,overflowY:'auto'}}>
+                      {st.key==='3_unsellable' ? (
+                        <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
+                          <thead><tr style={{background:thBg}}>
+                            <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>SKU</th>
+                            <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Traction</th>
+                            <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Produit</th>
+                            <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Qté</th>
+                            <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Valeur</th>
+                          </tr></thead>
+                          <tbody>
+                            {st.items.map((u:any,i:number) => (
+                              <tr key={i}>
+                                <td style={{padding:'4px 10px',fontFamily:'monospace',borderBottom:`1px solid ${bdr}`}}>{u.sku}</td>
+                                <td style={{padding:'4px 10px',fontFamily:'monospace',color:u.traction_code?C.blue:C.red,borderBottom:`1px solid ${bdr}`}}>{u.traction_code||'—'}</td>
+                                <td style={{padding:'4px 10px',color:sub,borderBottom:`1px solid ${bdr}`,maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={u.product_name}>{u.product_name||'—'}</td>
+                                <td style={{padding:'4px 10px',textAlign:'right',fontWeight:700,color:C.red,borderBottom:`1px solid ${bdr}`}}>{u.qty}</td>
+                                <td style={{padding:'4px 10px',textAlign:'right',color:C.red,borderBottom:`1px solid ${bdr}`}}>{fmt$(u.valeur)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : st.key==='5_audit' ? (
+                        <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
+                          <thead><tr style={{background:thBg}}>
+                            <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Base code</th>
+                            <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Description</th>
+                            <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Traction</th>
+                            <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Physique</th>
+                            <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:C.red}}>Écart</th>
+                          </tr></thead>
+                          <tbody>
+                            {st.items.map((r:any,i:number) => (
+                              <tr key={i} title={`HUB ${r.breakdown.hub} + FBM ${r.breakdown.fbm} + SP ${r.breakdown.sp} + FBA-Tract ${r.breakdown.fba_traction} vs Whse comptés ${r.breakdown.whse_compte||0} + FBM comptés ${r.breakdown.fbm_compte||0} + FBA-Amz ${r.breakdown.fba_amazon}`}>
+                                <td style={{padding:'4px 10px',fontFamily:'monospace',fontWeight:700,borderBottom:`1px solid ${bdr}`}}>{r.base_code}</td>
+                                <td style={{padding:'4px 10px',color:sub,borderBottom:`1px solid ${bdr}`,maxWidth:260,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.description||'—'}</td>
+                                <td style={{padding:'4px 10px',textAlign:'right',borderBottom:`1px solid ${bdr}`}}>{r.traction_total}</td>
+                                <td style={{padding:'4px 10px',textAlign:'right',borderBottom:`1px solid ${bdr}`}}>{r.physique_total}</td>
+                                <td style={{padding:'4px 10px',textAlign:'right',fontWeight:800,color:C.red,borderBottom:`1px solid ${bdr}`}}>{r.ecart>0?'+':''}{r.ecart}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ═══ Vue ARCHIVES SKU ═══ */}
+      {vue === 'archives' && (
+        <div>
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'14px 16px',marginBottom:12}}>
+            <div style={{fontSize:13,fontWeight:800,marginBottom:4}}>🗄 Archives SKU Traction</div>
+            <div style={{fontSize:11,color:sub,lineHeight:1.5}}>
+              Pk_codes qui existaient dans le feed Traction et qui n'y sont plus (renommés ou supprimés). Gardés en historique pour la traçabilité.
+              Si un code réapparait, il sort automatiquement de cette liste.
+            </div>
+          </div>
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,overflow:'hidden'}}>
+            {archivesList.length === 0 ? (
+              <div style={{padding:30,textAlign:'center',color:sub,fontSize:13}}>Aucun SKU archivé</div>
+            ) : (
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                <thead><tr style={{background:thBg}}>
+                  <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>PKCode</th>
+                  <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Code ligne</th>
+                  <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Description (dernière)</th>
+                  <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Dernière qté</th>
+                  <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Coût</th>
+                  <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Disparu le</th>
+                </tr></thead>
+                <tbody>
+                  {archivesList.map((a:any) => (
+                    <tr key={a.id}>
+                      <td style={{padding:'6px 10px',fontFamily:'monospace',fontWeight:700,borderBottom:`1px solid ${bdr}`}}>{a.pk_code}</td>
+                      <td style={{padding:'6px 10px',color:sub,borderBottom:`1px solid ${bdr}`}}>{a.code_ligne}</td>
+                      <td style={{padding:'6px 10px',color:sub,borderBottom:`1px solid ${bdr}`,maxWidth:300,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.last_desc_fra||'—'}</td>
+                      <td style={{padding:'6px 10px',textAlign:'right',borderBottom:`1px solid ${bdr}`}}>{a.last_qty_dispo}</td>
+                      <td style={{padding:'6px 10px',textAlign:'right',color:sub,borderBottom:`1px solid ${bdr}`}}>{Number(a.last_prix_coutant||0).toFixed(2)} $</td>
+                      <td style={{padding:'6px 10px',color:sub,fontSize:10,borderBottom:`1px solid ${bdr}`}}>{String(a.first_disappeared_at).split('T')[0]}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Vue RAPPORT (imprimable) ═══ */}
+      {vue === 'rapport' && rapportData && (() => {
+        const r = rapportData
+        const fmt$ = (n: number) => `${n<0?'−':''}${Math.abs(Number(n||0)).toLocaleString('fr-CA',{minimumFractionDigits:2,maximumFractionDigits:2})} $`
+        const fmtDate = (d: string | null) => d ? String(d).split('T')[0] : '—'
+        return (
+          <div className="scoa-rapport-wrapper">
+            <style>{`
+              @media print {
+                body { background: #fff !important; }
+                .scoa-no-print { display: none !important; }
+                .scoa-rapport { box-shadow: none !important; margin: 0 !important; padding: 10mm !important; border: none !important; }
+                .scoa-rapport table { page-break-inside: auto; }
+                .scoa-rapport tr { page-break-inside: avoid; page-break-after: auto; }
+                .scoa-rapport h1, .scoa-rapport h2, .scoa-rapport h3 { page-break-after: avoid; }
+              }
+              .scoa-rapport { background: #fff; color: #000; padding: 28px 32px; max-width: 900px; margin: 0 auto; font-family: 'DM Sans', Arial, sans-serif; font-size: 12px; line-height: 1.5; }
+              .scoa-rapport h1 { font-size: 22px; margin: 0 0 4px; }
+              .scoa-rapport h2 { font-size: 15px; margin: 22px 0 8px; border-bottom: 2px solid #000; padding-bottom: 4px; }
+              .scoa-rapport h3 { font-size: 13px; margin: 14px 0 6px; }
+              .scoa-rapport table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; }
+              .scoa-rapport th, .scoa-rapport td { padding: 5px 8px; border-bottom: 1px solid #ddd; text-align: left; }
+              .scoa-rapport th { background: #f4f4f4; font-size: 10px; text-transform: uppercase; }
+              .scoa-rapport .num { text-align: right; font-family: monospace; }
+              .scoa-rapport .tot-row { font-weight: 800; border-top: 2px solid #000; }
+              .scoa-rapport .bloc-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px; margin: 10px 0 20px; }
+              .scoa-rapport .bloc-meta div { background: #f8f8f8; padding: 8px 10px; border: 1px solid #ddd; }
+              .scoa-rapport .bloc-meta strong { display: block; font-size: 10px; text-transform: uppercase; color: #555; }
+            `}</style>
+
+            {/* Barre d'action (non imprimée) */}
+            <div className="scoa-no-print" style={{maxWidth:900,margin:'0 auto 12px',display:'flex',gap:8,justifyContent:'space-between',flexWrap:'wrap'}}>
+              <button onClick={()=>{setVue('fermeture'); setRapportData(null)}}
+                style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                ← Retour
+              </button>
+              <button onClick={()=>window.print()}
+                style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                🖨 Imprimer / PDF
+              </button>
+            </div>
+
+            {/* Contenu rapport */}
+            <div className="scoa-rapport" style={{border:`1px solid ${bdr}`,boxShadow:dark?'none':'0 2px 12px rgba(0,0,0,.06)'}}>
+              <h1>Rapport de fermeture Amazon — Settlement</h1>
+              <div style={{fontSize:11,color:'#666',marginBottom:6}}>Généré le {fmtDate(r.genere_le)}</div>
+
+              <div className="bloc-meta">
+                <div><strong>Settlement ID</strong>{r.settlement.settlement_id}</div>
+                <div><strong>Période</strong>{fmtDate(r.settlement.settlement_start)} → {fmtDate(r.settlement.settlement_end)}</div>
+                <div><strong>Date de dépôt</strong>{fmtDate(r.settlement.deposit_date)}</div>
+                <div><strong>Montant Amazon</strong>{fmt$(r.settlement.total_amount)}</div>
+                <div><strong>Facture LAUTOPAK</strong>{r.settlement.lautopak_invoice_ref || '—'} du {fmtDate(r.settlement.lautopak_invoice_date)}</div>
+                <div><strong>Statut</strong>{r.settlement.closed_at ? `🔒 Fermé le ${fmtDate(r.settlement.closed_at)} par ${r.settlement.closed_by}` : '⏳ En cours'}</div>
+              </div>
+
+              <h2>1. Totaux financiers</h2>
+              <table>
+                <tbody>
+                  <tr><td>Dépôt Amazon</td><td className="num">{fmt$(r.totaux.total_depot_amazon)}</td></tr>
+                  <tr><td>Remboursements attribués à ce settlement</td><td className="num">{fmt$(r.totaux.total_reimbursements)}</td></tr>
+                  <tr><td>Ajustement inventaire net (valeur)</td><td className="num">{fmt$(r.totaux.total_ajustement_inventaire_net)}</td></tr>
+                  <tr><td>Unsellable en attente (valeur)</td><td className="num">{fmt$(r.totaux.total_unsellable)}</td></tr>
+                </tbody>
+              </table>
+
+              <h2>2. Flux du settlement par type</h2>
+              <table>
+                <thead><tr><th>Amount type</th><th className="num">Nb lignes</th><th className="num">Total</th></tr></thead>
+                <tbody>
+                  {r.flux.map((f:any,i:number) => (
+                    <tr key={i}><td>{f.amount_type}</td><td className="num">{f.count}</td><td className="num">{fmt$(f.total)}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <h2>3. Remboursements matchés ({r.reimbursements.length})</h2>
+              {r.reimbursements.length === 0 ? <div style={{color:'#666'}}>Aucun remboursement attribué à ce settlement.</div> : (
+                <table>
+                  <thead><tr><th>Reimb. ID</th><th>SKU</th><th>Traction</th><th>Raison</th><th className="num">Montant</th></tr></thead>
+                  <tbody>
+                    {r.reimbursements.map((x:any,i:number) => (
+                      <tr key={i}>
+                        <td style={{fontFamily:'monospace'}}>{x.reimbursement_id}</td>
+                        <td style={{fontFamily:'monospace'}}>{x.sku||'—'}</td>
+                        <td style={{fontFamily:'monospace'}}>{x.traction_code||'—'}</td>
+                        <td>{x.reason}</td>
+                        <td className="num">{fmt$(x.amount_total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              <h2>4. Ajustements d'inventaire ({r.ajustements.length})</h2>
+              {r.ajustements.length === 0 ? <div style={{color:'#666'}}>Aucun ajustement nécessaire — inventaire équilibré.</div> : (
+                <table>
+                  <thead><tr><th>Base code</th><th>Description</th><th className="num">Whse théo</th><th className="num">Whse compté</th><th className="num">Δ Whse</th><th className="num">FBM théo</th><th className="num">FBM compté</th><th className="num">Δ FBM</th><th className="num">Coût unit</th><th className="num">Valeur</th></tr></thead>
+                  <tbody>
+                    {r.ajustements.map((a:any,i:number) => (
+                      <tr key={i}>
+                        <td style={{fontFamily:'monospace',fontWeight:700}}>{a.base_code}</td>
+                        <td>{a.description||'—'}{a.has_oubli?` 🏷 (${a.sans_prefix_theorique} SP à tagger)`:''}</td>
+                        <td className="num">{a.warehouse_theorique_net}</td>
+                        <td className="num">{a.warehouse_compte??'—'}</td>
+                        <td className="num" style={{color:a.warehouse_ecart!==0?'#c00':'#000'}}>{a.warehouse_ecart>0?'+':''}{a.warehouse_ecart}</td>
+                        <td className="num">{a.fbm_theorique}</td>
+                        <td className="num">{a.fbm_compte??'—'}</td>
+                        <td className="num" style={{color:a.fbm_ecart!==0?'#c00':'#000'}}>{a.fbm_ecart>0?'+':''}{a.fbm_ecart}</td>
+                        <td className="num">{Number(a.coutant).toFixed(2)} $</td>
+                        <td className="num" style={{color:a.valeur_ecart<0?'#c00':'#000',fontWeight:700}}>{fmt$(a.valeur_ecart)}</td>
+                      </tr>
+                    ))}
+                    <tr className="tot-row"><td colSpan={9}>Total ajustement net</td><td className="num">{fmt$(r.totaux.total_ajustement_inventaire_net)}</td></tr>
+                    <tr><td colSpan={9} style={{fontSize:10,color:'#666'}}>Total ajustement absolu (valeur des erreurs)</td><td className="num" style={{color:'#666',fontSize:10}}>{fmt$(r.totaux.total_ajustement_inventaire_abs)}</td></tr>
+                  </tbody>
+                </table>
+              )}
+
+              <h2>5. Unsellable à réclamer ({r.unsellable.length})</h2>
+              {r.unsellable.length === 0 ? <div style={{color:'#666'}}>Aucun unsellable au snapshot de cette période.</div> : (
+                <table>
+                  <thead><tr><th>SKU</th><th>Traction</th><th>Produit</th><th className="num">Qté</th><th className="num">Valeur estimée</th></tr></thead>
+                  <tbody>
+                    {r.unsellable.map((u:any,i:number) => (
+                      <tr key={i}>
+                        <td style={{fontFamily:'monospace'}}>{u.sku}</td>
+                        <td style={{fontFamily:'monospace'}}>{u.traction_code||'—'}</td>
+                        <td>{u.product_name||'—'}</td>
+                        <td className="num">{u.qty}</td>
+                        <td className="num">{fmt$(u.valeur)}</td>
+                      </tr>
+                    ))}
+                    <tr className="tot-row"><td colSpan={4}>Total unsellable</td><td className="num">{fmt$(r.totaux.total_unsellable)}</td></tr>
+                  </tbody>
+                </table>
+              )}
+
+              <h2>6. Justification (audit physique)</h2>
+              <div style={{fontSize:11,color:'#666'}}>
+                {r.audit_stats.nb_counted}/{r.audit_stats.nb_total} base products comptés. Valeur d'écart absolue totale : {fmt$(r.audit_stats.valeur_ecart_abs)}.
+                Chaque ligne ci-dessus a été comptée physiquement à l'entrepôt pendant cette période.
+              </div>
+
+              <div style={{marginTop:30,borderTop:'2px solid #000',paddingTop:10,fontSize:11,color:'#666',display:'flex',justifyContent:'space-between'}}>
+                <div>Validation comptable : _______________________</div>
+                <div>Date : _______________</div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {vue === 'import' && (
         <div>
