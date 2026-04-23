@@ -376,4 +376,20 @@ ALTER TABLE amazon_reimbursements
   ADD COLUMN IF NOT EXISTS inventaire_ajuste_par TEXT,
   ADD COLUMN IF NOT EXISTS inventaire_pk_code TEXT;
 CREATE INDEX IF NOT EXISTS idx_amz_reimb_ajuste ON amazon_reimbursements(inventaire_ajuste_le);
+
+-- Multi-mapping : un SKU Amazon → plusieurs PKCodes Traction (sommés pour le stock)
+CREATE TABLE IF NOT EXISTS amazon_sku_pkcodes (
+  id BIGSERIAL PRIMARY KEY,
+  amazon_sku TEXT NOT NULL,
+  pk_code TEXT NOT NULL,
+  multiplier NUMERIC DEFAULT 1,   -- 1 unité Amazon = N unités Traction (pack)
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (amazon_sku, pk_code)
+);
+-- Si déjà créée sans multiplier, ajouter la colonne
+ALTER TABLE amazon_sku_pkcodes ADD COLUMN IF NOT EXISTS multiplier NUMERIC DEFAULT 1;
+CREATE INDEX IF NOT EXISTS idx_amz_sku_pk_sku ON amazon_sku_pkcodes(amazon_sku);
+CREATE INDEX IF NOT EXISTS idx_amz_sku_pk_pk ON amazon_sku_pkcodes(pk_code);
+ALTER TABLE amazon_sku_pkcodes DISABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS idx_amz_audit_settlement ON amazon_audits(settlement_id);

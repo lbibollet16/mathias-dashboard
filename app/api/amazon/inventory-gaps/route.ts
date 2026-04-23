@@ -114,6 +114,35 @@ export async function GET(_req: NextRequest) {
       }
     }
 
+    // 3c) Multi-mappings manuels SKU → [{pk_code, multiplier}] (prioritaire sur wideBase auto)
+    // multiplier = combien d'unités Traction pour 1 unité Amazon (packs).
+    // Ex: FBM-78920-4 mappé à FBM-78920 × 4 → 40 Traction = 10 packs Amazon.
+    const manualMap = new Map<string, { pk_code: string; multiplier: number }[]>()
+    {
+      const { data: mans } = await supabaseAdmin.from('amazon_sku_pkcodes').select('amazon_sku, pk_code, multiplier')
+      for (const m of mans || []) {
+        const list = manualMap.get(m.amazon_sku) || []
+        list.push({ pk_code: m.pk_code, multiplier: Number(m.multiplier) > 0 ? Number(m.multiplier) : 1 })
+        manualMap.set(m.amazon_sku, list)
+      }
+    }
+    // Index des stocks AMA par pk_code exact (pour le lookup manuel)
+    const pkStockAma = new Map<string, number>()
+    {
+      let from = 0
+      while (true) {
+        const { data } = await supabaseAdmin
+          .from('traction_amazon_lignes')
+          .select('pk_code, qty_minus_reserved')
+          .eq('code_ligne', 'AMA')
+          .range(from, from + 999)
+        if (!data || data.length === 0) break
+        for (const r of data) pkStockAma.set(r.pk_code, (pkStockAma.get(r.pk_code) || 0) + Number(r.qty_minus_reserved || 0))
+        if (data.length < 1000) break
+        from += 1000
+      }
+    }
+
     // 4) Watchlist
     const { data: watchData } = await supabaseAdmin.from('amazon_sku_watchlist').select('amazon_sku')
     const watchSet = new Set<string>((watchData || []).map((w: any) => w.amazon_sku))
@@ -132,16 +161,29 @@ export async function GET(_req: NextRequest) {
       const mfnFulfillable = Number(f.mfn_fulfillable_quantity || 0)
       // afn-researching non stocké en DB actuellement (sera 0), ignoré pour l'instant
 
-      // Lookup par BASE WIDE : on regroupe toutes les variantes Amazon du
-      // même produit (ex. pour SKU A2883424 on somme A2883424 + FBA-2883424
-      // + HUB-2883424 + 2883424), strictement sur code_ligne = 'AMA'.
-      const lookupCode = f.traction_code || f.sku
-      const base = wideBase(lookupCode)
-      const traction = base ? tractionBaseStock.get(base) : null
-      const tractionQty = traction?.qty_dispo_ama || 0   // somme CodeLigne AMA uniquement
+      // Priorité 1 : mapping MANUEL (amazon_sku_pkcodes) → somme stock/multiplier
+      // Priorité 2 : mapping AUTO via wideBase (retrocompat)
+      const manualList = manualMap.get(f.sku)
+      let tractionQty: number
+      let tractionVariants: any[]
+      let traction: any = null
+      if (manualList && manualList.length > 0) {
+        // Stock Amazon-équivalent = somme (stock pk_code / multiplier) arrondi inférieur
+        tractionQty = Math.floor(manualList.reduce((s, m) => s + ((pkStockAma.get(m.pk_code) || 0) / m.multiplier), 0))
+        tractionVariants = manualList.map(m => ({
+          pk_code: m.pk_code, code_ligne: 'AMA',
+          qty_dispo: pkStockAma.get(m.pk_code) || 0,
+          multiplier: m.multiplier,
+        }))
+      } else {
+        const lookupCode = f.traction_code || f.sku
+        const base = wideBase(lookupCode)
+        traction = base ? tractionBaseStock.get(base) : null
+        tractionQty = traction?.qty_dispo_ama || 0
+        tractionVariants = traction?.variants || []
+      }
       const tractionTotal = tractionQty
       const tractionFbm = traction?.qty_fbm || 0
-      const tractionVariants = traction?.variants || []
       const coutant = traction?.coutant || Number(f.your_price || 0)
       const desc = traction?.desc || f.product_name || null
 
@@ -188,6 +230,8 @@ export async function GET(_req: NextRequest) {
         traction_total: tractionTotal,
         traction_fbm: tractionFbm,
         traction_variants: tractionVariants,   // détail des pk_codes sommés sur AMA
+        has_manual_mapping: !!(manualList && manualList.length > 0),
+        manual_pk_codes: manualList ? manualList.map(m => `${m.pk_code}${m.multiplier > 1 ? `×${m.multiplier}` : ''}`) : null,
         coutant,
         your_price: Number(f.your_price || 0),
         ecart,

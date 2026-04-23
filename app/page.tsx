@@ -4956,7 +4956,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
 // ── Amazon Tab (Phase 1) ─────────────────────────────────────────────────────
 function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
-  const [vue, setVue] = useState<'fermeture'|'import'|'settlements'|'inventaire'|'consolide'|'audit'|'mapping'|'archives'|'rapport'>('fermeture')
+  const [vue, setVue] = useState<'fermeture'|'import'|'settlements'|'inventaire'|'consolide'|'audit'|'mapping'|'multimapping'|'archives'|'rapport'>('fermeture')
   // États de la vue Fermeture (nouvelle vue principale)
   const [closureList, setClosureList] = useState<any[]>([])
   const [closureActif, setClosureActif] = useState<string | null>(null)
@@ -4964,6 +4964,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [closureLoading, setClosureLoading] = useState(false)
   const [rapportData, setRapportData] = useState<any>(null)
   const [archivesList, setArchivesList] = useState<any[]>([])
+  const [multimappingList, setMultimappingList] = useState<any[]>([])
+  const [newMappingSku, setNewMappingSku] = useState('')
+  const [newMappingPk, setNewMappingPk] = useState('')
+  const [searchMultimapping, setSearchMultimapping] = useState('')
   const [lautopakLines, setLautopakLines] = useState<any>(null)
   const [lautopakLoading, setLautopakLoading] = useState(false)
   const [releveMatch, setReleveMatch] = useState<any>(null)
@@ -5178,6 +5182,35 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         setRapportData(j)
         setVue('rapport')
       }
+    } catch {}
+  }
+
+  async function chargerMultimapping() {
+    try {
+      const r = await fetch('/api/amazon/sku-pkcodes')
+      const j = await r.json()
+      if (j.mappings) setMultimappingList(j.mappings)
+    } catch {}
+  }
+  async function ajouterMapping(amazon_sku: string, pk_code: string) {
+    if (!amazon_sku.trim() || !pk_code.trim()) return
+    try {
+      const r = await fetch('/api/amazon/sku-pkcodes', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ amazon_sku: amazon_sku.trim(), pk_code: pk_code.trim() }),
+      })
+      const j = await r.json()
+      if (j.success) {
+        setNewMappingSku(''); setNewMappingPk('')
+        await chargerMultimapping()
+      } else alert('Erreur : ' + j.erreur)
+    } catch (e: any) { alert('Exception : ' + e.message) }
+  }
+  async function supprimerMappingMulti(id: number) {
+    try {
+      await fetch(`/api/amazon/sku-pkcodes?id=${id}`, { method: 'DELETE' })
+      await chargerMultimapping()
     } catch {}
   }
 
@@ -5571,6 +5604,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         <button onClick={()=>setVue('import')}
           style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='import'?C.blue:bdr}`,background:vue==='import'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='import'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
           📥 Import
+        </button>
+        <button onClick={()=>{setVue('multimapping'); chargerMultimapping()}}
+          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='multimapping'?C.blue:bdr}`,background:vue==='multimapping'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='multimapping'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+          🔗 Multi-mapping SKU
         </button>
         <button onClick={()=>{setVue('archives'); chargerArchives()}}
           style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='archives'?sub:bdr}`,background:'transparent',color:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
@@ -6254,6 +6291,122 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               <div style={{padding:'10px 18px',borderTop:`1px solid ${bdr}`,fontSize:11,color:sub,lineHeight:1.5}}>
                 💡 Saisis les montants de ton relevé papier dans les champs à droite. Les lignes où l'écart ≥ 0,01 $ s'affichent en rouge. Quand toutes les lignes sont ✓ vertes, ton TSV correspond à 100% au relevé Amazon.
               </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ═══ Vue MULTI-MAPPING SKU → PKCodes ═══ */}
+      {vue === 'multimapping' && (() => {
+        // Grouper par amazon_sku
+        const q = searchMultimapping.trim().toLowerCase()
+        const filtered = multimappingList.filter((m:any) =>
+          !q || m.amazon_sku.toLowerCase().includes(q) || m.pk_code.toLowerCase().includes(q)
+        )
+        const bySku = new Map<string, any[]>()
+        for (const m of filtered) {
+          if (!bySku.has(m.amazon_sku)) bySku.set(m.amazon_sku, [])
+          bySku.get(m.amazon_sku)!.push(m)
+        }
+        return (
+          <div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:12,padding:'14px 16px',marginBottom:14}}>
+              <div style={{fontSize:14,fontWeight:800,marginBottom:6}}>🔗 Multi-mapping SKU Amazon → PKCodes Traction</div>
+              <div style={{fontSize:11,color:sub,lineHeight:1.6,marginBottom:10}}>
+                Associe un SKU Amazon (FBA ou FBM) à UN ou PLUSIEURS PKCodes Traction. Le stock Traction affiché pour ce SKU sera la <strong>somme</strong> des stocks AMA des PKCodes mappés.
+                <br/>
+                <strong>Multiplicateur</strong> = combien d'unités Traction pour 1 unité Amazon (pack). Exemple : <code style={{background:dark?'#222':'#f0f0f0',padding:'1px 6px',borderRadius:3}}>FBM-78920-4 → FBM-78920 × 4</code> signifie que 1 pack vendu sur Amazon = 4 unités Traction à décrémenter. 10 unités Traction = 2 packs Amazon.
+              </div>
+              {/* Formulaire ajout */}
+              <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'flex-end',marginTop:10}}>
+                <div style={{flex:1,minWidth:180}}>
+                  <div style={{fontSize:10,color:sub,fontWeight:700,marginBottom:4}}>SKU Amazon</div>
+                  <input value={newMappingSku} onChange={e=>setNewMappingSku(e.target.value)} placeholder="ex: FBM-78920-4"
+                    style={{...S,fontSize:12,padding:'8px 10px',width:'100%',fontFamily:'monospace'}}/>
+                </div>
+                <div style={{flex:1,minWidth:180}}>
+                  <div style={{fontSize:10,color:sub,fontWeight:700,marginBottom:4}}>PKCode Traction</div>
+                  <input value={newMappingPk} onChange={e=>setNewMappingPk(e.target.value)} placeholder="ex: FBM-78920"
+                    style={{...S,fontSize:12,padding:'8px 10px',width:'100%',fontFamily:'monospace'}}/>
+                </div>
+                <button onClick={()=>ajouterMapping(newMappingSku, newMappingPk)} disabled={!newMappingSku.trim() || !newMappingPk.trim()}
+                  style={{background:(!newMappingSku.trim()||!newMappingPk.trim())?bdr:C.green,color:'#fff',border:'none',borderRadius:8,padding:'10px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                  ➕ Ajouter (mult = 1)
+                </button>
+              </div>
+              <div style={{fontSize:10,color:sub,marginTop:6}}>Le multiplicateur est fixé à 1 à l'ajout. Tu peux le modifier ensuite en cliquant sur le chiffre dans le tableau.</div>
+            </div>
+
+            {/* Recherche */}
+            <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:10,display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
+              <input value={searchMultimapping} onChange={e=>setSearchMultimapping(e.target.value)} placeholder="🔍 Chercher par SKU ou PKCode..."
+                style={{...S,maxWidth:300,fontSize:12,padding:'7px 10px'}}/>
+              <div style={{fontSize:11,color:sub,marginLeft:'auto'}}>{multimappingList.length} mappings · {bySku.size} SKU uniques</div>
+            </div>
+
+            {/* Tableau groupé par SKU */}
+            <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+              {bySku.size === 0 ? (
+                <div style={{padding:30,textAlign:'center',color:sub,fontSize:13}}>Aucun mapping. Ajoute le premier ci-dessus.</div>
+              ) : (
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                  <thead><tr style={{background:thBg}}>
+                    <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
+                    <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>PKCode Traction</th>
+                    <th style={{padding:'8px 10px',textAlign:'center',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`,width:110}}>Multiplicateur</th>
+                    <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Stock AMA actuel</th>
+                    <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Équiv. unités Amazon</th>
+                    <th style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,width:60}}></th>
+                  </tr></thead>
+                  <tbody>
+                    {[...bySku.entries()].map(([sku, list]) => (
+                      <React.Fragment key={sku}>
+                        {list.map((m:any, i:number) => (
+                          <tr key={m.id} style={{borderTop:i===0?`2px solid ${bdr}`:'none'}}>
+                            {i===0 && <td rowSpan={list.length} style={{padding:'8px 10px',fontFamily:'monospace',fontWeight:800,borderBottom:`1px solid ${bdr}`,verticalAlign:'top',background:dark?'#0f0f0f':'#fafbfc'}}>{sku}<div style={{fontSize:10,color:sub,fontWeight:400,marginTop:3}}>{list.length} PKCode{list.length>1?'s':''}</div></td>}
+                            <td style={{padding:'6px 10px',fontFamily:'monospace',borderBottom:`1px solid ${bdr}`}}>{m.pk_code}{m.current_stock_ama==null && <span style={{color:C.yellow,marginLeft:6,fontSize:10}}>(absent feed)</span>}</td>
+                            <td style={{padding:'4px 10px',textAlign:'center',borderBottom:`1px solid ${bdr}`}}>
+                              <input type="number" min="1" step="1" defaultValue={m.multiplier || 1}
+                                onBlur={async(e:any) => {
+                                  const v = parseFloat(e.target.value)
+                                  if (v > 0 && v !== m.multiplier) {
+                                    await fetch('/api/amazon/sku-pkcodes', {
+                                      method: 'PATCH',
+                                      headers: {'Content-Type':'application/json'},
+                                      body: JSON.stringify({ id: m.id, multiplier: v }),
+                                    })
+                                    await chargerMultimapping()
+                                  }
+                                }}
+                                style={{...S,width:70,textAlign:'center',fontSize:12,padding:'4px 6px',fontWeight:700}}/>
+                            </td>
+                            <td style={{padding:'6px 10px',textAlign:'right',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{m.current_stock_ama != null ? m.current_stock_ama : <span style={{color:sub}}>—</span>}</td>
+                            <td style={{padding:'6px 10px',textAlign:'right',borderBottom:`1px solid ${bdr}`,color:C.blue,fontWeight:700}}>
+                              {m.current_stock_ama != null ? Math.floor(m.current_stock_ama / (m.multiplier || 1)) : <span style={{color:sub}}>—</span>}
+                              {(m.multiplier || 1) > 1 && <div style={{fontSize:9,color:sub,fontWeight:400}}>÷ {m.multiplier}</div>}
+                            </td>
+                            <td style={{padding:'6px 10px',textAlign:'center',borderBottom:`1px solid ${bdr}`}}>
+                              <button onClick={()=>supprimerMappingMulti(m.id)} title="Supprimer ce mapping"
+                                style={{background:'transparent',border:`1px solid ${C.red}`,color:C.red,borderRadius:6,padding:'3px 8px',cursor:'pointer',fontSize:11}}>✕</button>
+                            </td>
+                          </tr>
+                        ))}
+                        {/* Ligne totale du SKU si multi */}
+                        {list.length > 1 && (() => {
+                          const totalEquiv = list.reduce((s:number,m:any) => s + (m.current_stock_ama != null ? Math.floor(m.current_stock_ama / (m.multiplier || 1)) : 0), 0)
+                          return (
+                            <tr style={{background:dark?'#0d2a18':'#e6f4ea',fontWeight:700}}>
+                              <td colSpan={4} style={{padding:'6px 10px',textAlign:'right',fontSize:11,color:C.green,borderBottom:`1px solid ${bdr}`}}>Total équiv. unités Amazon pour ce SKU :</td>
+                              <td style={{padding:'6px 10px',textAlign:'right',fontSize:13,color:C.green,borderBottom:`1px solid ${bdr}`}}>{totalEquiv}</td>
+                              <td style={{borderBottom:`1px solid ${bdr}`}}></td>
+                            </tr>
+                          )
+                        })()}
+                      </React.Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         )
