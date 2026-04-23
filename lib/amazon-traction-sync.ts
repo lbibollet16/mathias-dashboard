@@ -25,6 +25,9 @@ export async function syncTractionFeed(): Promise<SyncResult> {
     if (lines.length < 2) throw new Error('Feed Traction vide')
 
     const rows: any[] = []
+    // Ensemble de TOUS les pk_codes AMA/FBA/FBM présents dans le feed (même à 0),
+    // utilisé pour distinguer "réellement disparu" vs "juste filtré qty=0"
+    const pkCodesInFeed = new Set<string>()
     for (let i = 1; i < lines.length; i++) {
       const cols = lines[i].split(';')
       if (cols.length < 12) continue
@@ -32,14 +35,19 @@ export async function syncTractionFeed(): Promise<SyncResult> {
       if (!LIGNES_AMAZON.has(code_ligne)) continue
       const pk_code = (cols[0] || '').trim()
       if (!pk_code) continue
+      pkCodesInFeed.add(pk_code)
+      const qty = parseFloat(cols[6]) || 0
+      const qty_minus_reserved = parseFloat(cols[7]) || 0
+      // Filtre : on ne garde que les pièces avec stock ≠ 0 (positif ou négatif).
+      if (qty === 0 && qty_minus_reserved === 0) continue
       rows.push({
         pk_code,
         pk_fournisseur: (cols[1] || '').trim(),
         code_ligne,
         prix_liste1: parseFloat(cols[2]) || 0,
         prix_coutant: parseFloat(cols[5]) || 0,
-        qty: parseFloat(cols[6]) || 0,
-        qty_minus_reserved: parseFloat(cols[7]) || 0,
+        qty,
+        qty_minus_reserved,
         qte_reserve: parseFloat(cols[8]) || 0,
         code_barres: (cols[9] || '').trim() || null,
         desc_fra: (cols[11] || '').trim() || null,
@@ -78,12 +86,13 @@ export async function syncTractionFeed(): Promise<SyncResult> {
       inserted += batch.length
     }
 
-    // Archivage des pk_codes disparus (présents avant, absents maintenant).
-    // Dédup par pk_code : si plusieurs rangées avec même pk_code (différents fourn),
-    // on garde la somme de qty et la dernière desc/prix.
+    // Archivage : un pk_code est archivé UNIQUEMENT s'il a complètement
+    // disparu du feed (absent de pkCodesInFeed), pas s'il est simplement
+    // tombé à qty=0 (toujours présent mais filtré). Ça évite de polluer
+    // l'archive avec les pièces qui oscillent 0/1.
     const disparusMap = new Map<string, { code_ligne: string; qty: number; prix: number; desc: string | null }>()
     for (const p of prev) {
-      if (!p.pk_code || newPkSet.has(p.pk_code)) continue
+      if (!p.pk_code || pkCodesInFeed.has(p.pk_code)) continue
       const ex = disparusMap.get(p.pk_code) || { code_ligne: p.code_ligne, qty: 0, prix: Number(p.prix_coutant || 0), desc: p.desc_fra }
       ex.qty += Number(p.qty_minus_reserved || 0)
       if (ex.prix === 0) ex.prix = Number(p.prix_coutant || 0)
@@ -105,9 +114,9 @@ export async function syncTractionFeed(): Promise<SyncResult> {
         await supabaseAdmin.from('traction_sku_archive').upsert(batch, { onConflict: 'pk_code', ignoreDuplicates: false })
       }
     }
-    // Si un pk_code réapparait dans le feed → on le retire de l'archive
-    if (newPkSet.size > 0) {
-      const reapparus = [...newPkSet]
+    // Si un pk_code réapparait dans le feed (même à qty=0) → retirer de l'archive
+    if (pkCodesInFeed.size > 0) {
+      const reapparus = [...pkCodesInFeed]
       for (let i = 0; i < reapparus.length; i += 500) {
         const batch = reapparus.slice(i, i + 500)
         await supabaseAdmin.from('traction_sku_archive').delete().in('pk_code', batch)
