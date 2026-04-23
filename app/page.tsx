@@ -5200,11 +5200,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 
   function exportLautopakCsv(data: any) {
     if (!data || !data.lignes) return
-    const headers = ['SKU','Code Traction','Produit','Qté commandes','Qté refunds','Qté nette','Prix unitaire','Montant net']
+    const headers = ['SKU','Code Traction','Produit','Qté','Prix unitaire','Montant']
     const rows = data.lignes.map((l: any) => [
       l.sku, l.traction_code || '', l.product_name || '',
-      l.qty_orders, l.qty_refunds, l.qty_net,
-      l.prix_unitaire.toFixed(2), l.amount_net.toFixed(2),
+      l.qty, l.prix_unitaire.toFixed(2), l.amount.toFixed(2),
     ])
     const csv = [headers, ...rows].map(r => r.map(v => {
       const s = String(v ?? '')
@@ -5884,10 +5883,13 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     </div>
                   </div>
 
-                  {/* Info + Breakdown par amount_description */}
+                  {/* Info */}
                   <div style={{padding:'8px 18px',fontSize:11,color:sub,background:dark?'#0f0f0f':'#fafbfc',borderBottom:`1px solid ${bdr}`,lineHeight:1.5}}>
-                    La somme de ces <strong>{lautopakLines.nb_lignes} lignes</strong> (Principal uniquement) doit normalement égaler le <strong>Frais produit</strong> du settlement.
-                    Si ton relevé papier Amazon montre un autre montant, vérifie le tableau ci-dessous — le "Frais de produits" selon Amazon peut inclure Shipping + GiftWrap + Promotion.
+                    <strong>{lautopakLines.nb_lignes} lignes Orders Principal (brut)</strong> → à facturer dans LAUTOPAK.
+                    Total = <strong>{fmt$(lautopakLines.total_calcule)}</strong> qui correspond au "Frais de produits" de ton relevé Amazon.
+                    {lautopakLines.nb_refunds > 0 && (
+                      <> Les <strong>{lautopakLines.nb_refunds} refunds</strong> ({fmt$(lautopakLines.total_refunds)}) sont listés séparément en bas — traite-les comme notes de crédit / retours clients dans ton compte distinct.</>
+                    )}
                   </div>
                   {lautopakLines.breakdown && lautopakLines.breakdown.length > 0 && (
                     <details style={{borderBottom:`1px solid ${bdr}`,background:dark?'#0d0d0d':'#fafbfc'}}>
@@ -5920,18 +5922,19 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     </details>
                   )}
 
-                  {/* Tableau */}
+                  {/* Tableau Orders (pour facture LAUTOPAK) */}
                   <div style={{overflow:'auto',flex:1}}>
+                    <div style={{padding:'8px 18px 4px',fontSize:11,fontWeight:800,color:C.blue,background:dark?'#0d1829':'#e8f0fe'}}>
+                      📋 Lignes à entrer dans LAUTOPAK (Orders Principal brut)
+                    </div>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
                       <thead style={{position:'sticky',top:0,background:thBg,zIndex:1}}><tr>
                         <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
                         <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Code Traction</th>
                         <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Produit</th>
-                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Qté cmd</th>
-                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.red,borderBottom:`1px solid ${bdr}`}}>Qté refund</th>
-                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.green,borderBottom:`1px solid ${bdr}`}}>Qté nette</th>
+                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.green,borderBottom:`1px solid ${bdr}`}}>Qté</th>
                         <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Prix unit.</th>
-                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.blue,borderBottom:`1px solid ${bdr}`}}>Montant net</th>
+                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.blue,borderBottom:`1px solid ${bdr}`}}>Montant</th>
                       </tr></thead>
                       <tbody>
                         {lautopakLines.lignes.map((l:any, i:number) => (
@@ -5939,21 +5942,56 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                             <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11}}>{l.sku}</td>
                             <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:l.traction_code?C.blue:C.red}}>{l.traction_code||'— non mappé'}</td>
                             <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11,maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name}>{l.product_name||'—'}</td>
-                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{l.qty_orders||''}</td>
-                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:l.qty_refunds>0?C.red:sub,fontSize:11}}>{l.qty_refunds>0?`-${l.qty_refunds}`:''}</td>
-                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:C.green}}>{l.qty_net}</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:C.green}}>{l.qty}</td>
                             <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{l.prix_unitaire.toFixed(2)} $</td>
-                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:C.blue}}>{fmt$(l.amount_net)}</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:C.blue}}>{fmt$(l.amount)}</td>
                           </tr>
                         ))}
                       </tbody>
                       <tfoot>
-                        <tr style={{background:dark?'#1a1a1a':'#f0f0f0',position:'sticky',bottom:0}}>
-                          <td colSpan={7} style={{padding:'10px',textAlign:'right',fontWeight:900,borderTop:`2px solid ${bdr}`}}>TOTAL :</td>
+                        <tr style={{background:dark?'#1a1a1a':'#f0f0f0'}}>
+                          <td colSpan={5} style={{padding:'10px',textAlign:'right',fontWeight:900,borderTop:`2px solid ${bdr}`}}>TOTAL LAUTOPAK :</td>
                           <td style={{padding:'10px',textAlign:'right',fontWeight:900,fontSize:14,color:C.blue,borderTop:`2px solid ${bdr}`}}>{fmt$(lautopakLines.total_calcule)}</td>
                         </tr>
                       </tfoot>
                     </table>
+
+                    {/* Refunds séparés */}
+                    {lautopakLines.refunds_lignes && lautopakLines.refunds_lignes.length > 0 && (
+                      <>
+                        <div style={{padding:'12px 18px 4px',fontSize:11,fontWeight:800,color:C.red,background:dark?'#2b1113':'#fce8e6',marginTop:8}}>
+                          🔙 Refunds / Notes de crédit (NE PAS inclure dans la facture LAUTOPAK principale)
+                        </div>
+                        <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                          <thead style={{background:thBg}}><tr>
+                            <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
+                            <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Code Traction</th>
+                            <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Produit</th>
+                            <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.red,borderBottom:`1px solid ${bdr}`}}>Qté refund</th>
+                            <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Prix unit.</th>
+                            <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.red,borderBottom:`1px solid ${bdr}`}}>Montant</th>
+                          </tr></thead>
+                          <tbody>
+                            {lautopakLines.refunds_lignes.map((l:any, i:number) => (
+                              <tr key={i} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11}}>{l.sku}</td>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:l.traction_code?C.blue:C.red}}>{l.traction_code||'— non mappé'}</td>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11,maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name}>{l.product_name||'—'}</td>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:C.red}}>-{l.qty}</td>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{Math.abs(l.prix_unitaire).toFixed(2)} $</td>
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:C.red}}>{fmt$(l.amount)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr style={{background:dark?'#1a1a1a':'#f0f0f0'}}>
+                              <td colSpan={5} style={{padding:'10px',textAlign:'right',fontWeight:900,borderTop:`2px solid ${bdr}`,color:C.red}}>TOTAL REFUNDS :</td>
+                              <td style={{padding:'10px',textAlign:'right',fontWeight:900,fontSize:14,color:C.red,borderTop:`2px solid ${bdr}`}}>{fmt$(lautopakLines.total_refunds)}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </>
+                    )}
                   </div>
                 </>
               )}

@@ -59,8 +59,12 @@ export async function GET(req: NextRequest) {
       .map(([amount_description, v]) => ({ amount_description, count: v.count, total: Number(v.total.toFixed(2)) }))
       .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
 
-    // 2b) Lignes "Principal" du settlement, groupées par SKU (pour facture LAUTOPAK)
-    const tx = all.filter(t => t.amount_description === 'Principal')
+    // 2b) Lignes "Principal" Orders SEULEMENT (= "Frais de produits" du relevé Amazon)
+    //     Les refunds sont traités séparément : ils ne sont PAS déduits du total
+    //     à facturer dans LAUTOPAK. La comptable gère les refunds comme des
+    //     notes de crédit / retours clients dans un compte distinct.
+    const tx = all.filter(t => t.amount_description === 'Principal' && t.transaction_type === 'Order')
+    const refunds = all.filter(t => t.amount_description === 'Principal' && t.transaction_type === 'Refund')
 
     // 3) Produit info (nom) — on récupère depuis amazon_fba_inventory (dernier snapshot connu)
     const skus = Array.from(new Set(tx.map(t => t.sku).filter(Boolean)))
@@ -78,11 +82,10 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 4) Agrégation par SKU
+    // 4) Agrégation des ORDERS par SKU (ce qui va dans la facture LAUTOPAK)
     type Agg = {
       sku: string; traction_code: string | null; product_name: string | null;
-      qty_orders: number; qty_refunds: number;
-      amount_orders: number; amount_refunds: number;
+      qty: number; amount: number;
     }
     const bySku = new Map<string, Agg>()
     for (const t of tx) {
@@ -92,47 +95,59 @@ export async function GET(req: NextRequest) {
           sku,
           traction_code: t.traction_code || null,
           product_name: productNames.get(sku) || null,
-          qty_orders: 0, qty_refunds: 0,
-          amount_orders: 0, amount_refunds: 0,
+          qty: 0, amount: 0,
         })
       }
       const ex = bySku.get(sku)!
-      const isRefund = t.transaction_type === 'Refund' || Number(t.amount) < 0
-      const qty = Number(t.quantity_purchased || 0)
-      const amt = Number(t.amount || 0)
-      if (isRefund) {
-        // qty_purchased peut être positive sur un refund ; on la compte côté refund
-        ex.qty_refunds += Math.abs(qty)
-        ex.amount_refunds += amt  // négatif généralement
-      } else {
-        ex.qty_orders += qty
-        ex.amount_orders += amt
-      }
+      ex.qty += Number(t.quantity_purchased || 0)
+      ex.amount += Number(t.amount || 0)
       if (!ex.traction_code && t.traction_code) ex.traction_code = t.traction_code
     }
 
-    // 5) Lignes finales (nettes)
-    const lignes = [...bySku.values()].map(a => {
-      const qty_net = a.qty_orders - a.qty_refunds
-      const amount_net = Number((a.amount_orders + a.amount_refunds).toFixed(2))
-      const prix_unitaire = qty_net !== 0 ? Number((amount_net / qty_net).toFixed(2)) : 0
-      return {
-        sku: a.sku,
-        traction_code: a.traction_code,
-        product_name: a.product_name,
-        qty_orders: a.qty_orders,
-        qty_refunds: a.qty_refunds,
-        qty_net,
-        amount_orders: Number(a.amount_orders.toFixed(2)),
-        amount_refunds: Number(a.amount_refunds.toFixed(2)),
-        amount_net,
-        prix_unitaire,
+    // Agrégation des REFUNDS par SKU (pour affichage séparé et note de crédit)
+    const refundsBySku = new Map<string, Agg>()
+    for (const t of refunds) {
+      const sku = t.sku || '(sans SKU)'
+      if (!refundsBySku.has(sku)) {
+        refundsBySku.set(sku, {
+          sku,
+          traction_code: t.traction_code || null,
+          product_name: productNames.get(sku) || null,
+          qty: 0, amount: 0,
+        })
       }
-    })
-      .filter(l => l.qty_net !== 0 || l.amount_net !== 0)
-      .sort((a, b) => b.amount_net - a.amount_net)
+      const ex = refundsBySku.get(sku)!
+      ex.qty += Math.abs(Number(t.quantity_purchased || 0))
+      ex.amount += Number(t.amount || 0)   // négatif
+      if (!ex.traction_code && t.traction_code) ex.traction_code = t.traction_code
+    }
 
-    const total_calcule = Number(lignes.reduce((s, l) => s + l.amount_net, 0).toFixed(2))
+    // 5) Lignes finales (Orders uniquement, brut)
+    const lignes = [...bySku.values()].map(a => ({
+      sku: a.sku,
+      traction_code: a.traction_code,
+      product_name: a.product_name,
+      qty: a.qty,
+      amount: Number(a.amount.toFixed(2)),
+      prix_unitaire: a.qty !== 0 ? Number((a.amount / a.qty).toFixed(2)) : 0,
+    }))
+      .filter(l => l.qty !== 0 || l.amount !== 0)
+      .sort((a, b) => b.amount - a.amount)
+
+    const refunds_lignes = [...refundsBySku.values()].map(a => ({
+      sku: a.sku,
+      traction_code: a.traction_code,
+      product_name: a.product_name,
+      qty: a.qty,
+      amount: Number(a.amount.toFixed(2)),
+      prix_unitaire: a.qty !== 0 ? Number((a.amount / a.qty).toFixed(2)) : 0,
+    }))
+      .filter(l => l.qty !== 0 || l.amount !== 0)
+      .sort((a, b) => a.amount - b.amount)
+
+    const total_calcule = Number(lignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
+    const total_refunds = Number(refunds_lignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
+    // "Frais produit" côté Amazon = Orders Principal (brut, sans refunds)
     const frais_produit_settlement = Number(tx.reduce((s, t) => s + Number(t.amount || 0), 0).toFixed(2))
 
     return NextResponse.json({
@@ -140,13 +155,16 @@ export async function GET(req: NextRequest) {
       settlement_start: s.settlement_start,
       settlement_end: s.settlement_end,
       settlement_total: Number(s.total_amount || 0),
-      frais_produit_settlement,   // somme Principal (attendu)
-      total_calcule,              // somme des lignes (doit être identique)
+      frais_produit_settlement,   // = Orders Principal brut (= relevé Amazon)
+      total_calcule,              // = somme des lignes Orders (doit matcher)
+      total_refunds,              // = somme des refunds (à traiter séparément)
       nb_lignes: lignes.length,
+      nb_refunds: refunds_lignes.length,
       balance_ok: Math.abs(total_calcule - frais_produit_settlement) < 0.01,
       ecart: Number((total_calcule - frais_produit_settlement).toFixed(2)),
       breakdown,   // décomposition par amount_description (aide au diagnostic)
-      lignes,
+      lignes,              // Orders Principal brut par SKU
+      refunds_lignes,      // Refunds Principal par SKU (note de crédit séparée)
     })
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message || String(e) }, { status: 500 })
