@@ -4964,6 +4964,8 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [closureLoading, setClosureLoading] = useState(false)
   const [rapportData, setRapportData] = useState<any>(null)
   const [archivesList, setArchivesList] = useState<any[]>([])
+  const [lautopakLines, setLautopakLines] = useState<any>(null)
+  const [lautopakLoading, setLautopakLoading] = useState(false)
   const [inventaireGaps, setInventaireGaps] = useState<any>({ rows: [], totals: {}, snapshot_date: null, dashboard: null, history: null })
   const [filtGap, setFiltGap] = useState<'tous'|'action'|'unsellable'|'rupture_fba'|'reclamation'|'ajust_traction'|'watched'|'ok'>('action')
   const [searchGap, setSearchGap] = useState('')
@@ -5182,6 +5184,37 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       const j = await r.json()
       if (j.archives) setArchivesList(j.archives)
     } catch {}
+  }
+
+  async function chargerLautopakLines(settlementId: string) {
+    setLautopakLoading(true)
+    setLautopakLines(null)
+    try {
+      const r = await fetch(`/api/amazon/closure/lautopak-lines?id=${encodeURIComponent(settlementId)}`)
+      const j = await r.json()
+      if (!j.erreur) setLautopakLines(j)
+      else alert('Erreur : ' + j.erreur)
+    } catch (e: any) { alert('Exception : ' + e.message) }
+    setLautopakLoading(false)
+  }
+
+  function exportLautopakCsv(data: any) {
+    if (!data || !data.lignes) return
+    const headers = ['SKU','Code Traction','Produit','Qté commandes','Qté refunds','Qté nette','Prix unitaire','Montant net']
+    const rows = data.lignes.map((l: any) => [
+      l.sku, l.traction_code || '', l.product_name || '',
+      l.qty_orders, l.qty_refunds, l.qty_net,
+      l.prix_unitaire.toFixed(2), l.amount_net.toFixed(2),
+    ])
+    const csv = [headers, ...rows].map(r => r.map(v => {
+      const s = String(v ?? '')
+      return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g,'""')}"` : s
+    }).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `lautopak_${data.settlement_id}_${new Date().toISOString().slice(0,10)}.csv`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
   }
 
   async function chargerAuditDetail(auditId: number) {
@@ -5696,11 +5729,19 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     </div>
                     <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
                       {/* Actions spécifiques par étape */}
-                      {st.key==='1_lautopak' && st.status==='action' && (
-                        <button onClick={()=>{setExpandedSettlement(s.settlement_id); setVue('settlements')}}
-                          style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'6px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
-                          Aller au settlement →
-                        </button>
+                      {st.key==='1_lautopak' && st.status!=='locked' && (
+                        <>
+                          <button onClick={()=>chargerLautopakLines(s.settlement_id)}
+                            style={{background:C.yellow,color:'#fff',border:'none',borderRadius:8,padding:'6px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                            🧾 Voir lignes à facturer
+                          </button>
+                          {st.status==='action' && (
+                            <button onClick={()=>{setExpandedSettlement(s.settlement_id); setVue('settlements')}}
+                              style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'6px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                              Saisir n° LAUTOPAK →
+                            </button>
+                          )}
+                        </>
                       )}
                       {st.key==='5_audit' && st.status==='action' && s.audit_id && (
                         <button onClick={()=>{setVue('audit'); chargerAuditDetail(s.audit_id)}}
@@ -5780,6 +5821,114 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   )}
                 </div>
               ))}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ═══ Modal LIGNES À FACTURER LAUTOPAK ═══ */}
+      {(lautopakLoading || lautopakLines) && (() => {
+        const fmt$ = (n: number) => `${n<0?'−':''}${Math.abs(Number(n||0)).toLocaleString('fr-CA',{minimumFractionDigits:2,maximumFractionDigits:2})} $`
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+               onClick={()=>setLautopakLines(null)}>
+            <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,padding:0,maxWidth:1100,width:'100%',maxHeight:'92vh',overflow:'hidden',display:'flex',flexDirection:'column',border:`1px solid ${bdr}`}}>
+              <div style={{padding:'14px 18px',borderBottom:`1px solid ${bdr}`,display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                <div>
+                  <div style={{fontSize:14,fontWeight:900}}>🧾 Lignes à facturer dans LAUTOPAK</div>
+                  {lautopakLines && (
+                    <div style={{fontSize:11,color:sub,marginTop:2,fontFamily:'monospace'}}>Settlement {lautopakLines.settlement_id}</div>
+                  )}
+                </div>
+                <div style={{display:'flex',gap:6}}>
+                  {lautopakLines && (
+                    <button onClick={()=>exportLautopakCsv(lautopakLines)}
+                      style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                      📥 Export CSV
+                    </button>
+                  )}
+                  <button onClick={()=>setLautopakLines(null)}
+                    style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                    ✕ Fermer
+                  </button>
+                </div>
+              </div>
+
+              {lautopakLoading && (
+                <div style={{padding:60,textAlign:'center',color:sub,fontSize:13}}>⏳ Chargement des lignes...</div>
+              )}
+
+              {lautopakLines && (
+                <>
+                  {/* Bandeau balance */}
+                  <div style={{padding:'12px 18px',background:lautopakLines.balance_ok?(dark?'#0d2a18':'#e6f4ea'):(dark?'#2b1113':'#fce8e6'),borderBottom:`2px solid ${lautopakLines.balance_ok?C.green:C.red}`,display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:10}}>
+                    <div>
+                      <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase'}}>Frais produit (attendu)</div>
+                      <div style={{fontSize:16,fontWeight:900,color:C.blue}}>{fmt$(lautopakLines.frais_produit_settlement)}</div>
+                      <div style={{fontSize:9,color:sub}}>Somme "Principal" du settlement</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase'}}>Total calculé (lignes)</div>
+                      <div style={{fontSize:16,fontWeight:900}}>{fmt$(lautopakLines.total_calcule)}</div>
+                      <div style={{fontSize:9,color:sub}}>{lautopakLines.nb_lignes} SKU distincts</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase'}}>Écart</div>
+                      <div style={{fontSize:16,fontWeight:900,color:lautopakLines.balance_ok?C.green:C.red}}>{fmt$(lautopakLines.ecart)}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase'}}>Balance</div>
+                      <div style={{fontSize:18,fontWeight:900,color:lautopakLines.balance_ok?C.green:C.red}}>
+                        {lautopakLines.balance_ok ? '✓ OK' : '⚠ Écart'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Info */}
+                  <div style={{padding:'8px 18px',fontSize:11,color:sub,background:dark?'#0f0f0f':'#fafbfc',borderBottom:`1px solid ${bdr}`,lineHeight:1.5}}>
+                    La somme de ces <strong>{lautopakLines.nb_lignes} lignes</strong> doit être égale au <strong>Frais produit</strong> du settlement
+                    ({fmt$(lautopakLines.frais_produit_settlement)}). Tout le reste (shipping, tax, commission, FBA fees, ads, promo, reimbursements)
+                    va dans le compte <strong>Coût de ventes Amazon</strong>.
+                    Les refunds sont déjà déduits dans la colonne "Qté nette" et "Montant net".
+                  </div>
+
+                  {/* Tableau */}
+                  <div style={{overflow:'auto',flex:1}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                      <thead style={{position:'sticky',top:0,background:thBg,zIndex:1}}><tr>
+                        <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
+                        <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Code Traction</th>
+                        <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Produit</th>
+                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Qté cmd</th>
+                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.red,borderBottom:`1px solid ${bdr}`}}>Qté refund</th>
+                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.green,borderBottom:`1px solid ${bdr}`}}>Qté nette</th>
+                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Prix unit.</th>
+                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.blue,borderBottom:`1px solid ${bdr}`}}>Montant net</th>
+                      </tr></thead>
+                      <tbody>
+                        {lautopakLines.lignes.map((l:any, i:number) => (
+                          <tr key={i} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11}}>{l.sku}</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:l.traction_code?C.blue:C.red}}>{l.traction_code||'— non mappé'}</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11,maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name}>{l.product_name||'—'}</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{l.qty_orders||''}</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:l.qty_refunds>0?C.red:sub,fontSize:11}}>{l.qty_refunds>0?`-${l.qty_refunds}`:''}</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:C.green}}>{l.qty_net}</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{l.prix_unitaire.toFixed(2)} $</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:C.blue}}>{fmt$(l.amount_net)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr style={{background:dark?'#1a1a1a':'#f0f0f0',position:'sticky',bottom:0}}>
+                          <td colSpan={7} style={{padding:'10px',textAlign:'right',fontWeight:900,borderTop:`2px solid ${bdr}`}}>TOTAL :</td>
+                          <td style={{padding:'10px',textAlign:'right',fontWeight:900,fontSize:14,color:C.blue,borderTop:`2px solid ${bdr}`}}>{fmt$(lautopakLines.total_calcule)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )
