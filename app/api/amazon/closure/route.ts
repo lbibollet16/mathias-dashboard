@@ -265,6 +265,33 @@ export async function GET(req: NextRequest) {
   }
 }
 
+// DELETE /api/amazon/closure?id=XXX — supprime un settlement complet.
+// Casse:
+//   - amazon_transactions (lignes payments)        → DELETE
+//   - amazon_audits (+ audit_counts via cascade)    → DELETE
+//   - amazon_reimbursements                         → UPDATE settlement_id=null
+//     (on garde l'import CSV, on le dé-lie simplement — il pourra se re-matcher
+//      à une future ré-import du settlement)
+//   - amazon_settlements                            → DELETE
+export async function DELETE(req: NextRequest) {
+  try {
+    const id = req.nextUrl.searchParams.get('id')
+    if (!id) return NextResponse.json({ erreur: 'id requis' }, { status: 400 })
+
+    const { error: e1 } = await supabaseAdmin.from('amazon_transactions').delete().eq('settlement_id', id)
+    if (e1) throw e1
+    const { error: e2 } = await supabaseAdmin.from('amazon_audits').delete().eq('settlement_id', id)
+    if (e2) throw e2
+    const { error: e3 } = await supabaseAdmin.from('amazon_reimbursements').update({ settlement_id: null }).eq('settlement_id', id)
+    if (e3) throw e3
+    const { error: e4 } = await supabaseAdmin.from('amazon_settlements').delete().eq('settlement_id', id)
+    if (e4) throw e4
+    return NextResponse.json({ success: true })
+  } catch (e: any) {
+    return NextResponse.json({ erreur: e.message || String(e) }, { status: 500 })
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()

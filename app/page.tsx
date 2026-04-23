@@ -5123,6 +5123,25 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     } catch {}
   }
 
+  async function supprimerSettlement(settlementId: string) {
+    const txt = `⚠️ SUPPRIMER DÉFINITIVEMENT ce settlement ?\n\n${settlementId}\n\nCela va effacer :\n• Les lignes de transactions (payments)\n• L'audit associé + tous les comptages\n• Le settlement lui-même\n\nLes remboursements CSV seront juste dé-liés (pas supprimés). Cette action est irréversible.`
+    if (!confirm(txt)) return
+    if (!confirm('Vraiment sûr ? Clique OK pour confirmer.')) return
+    try {
+      const r = await fetch(`/api/amazon/closure?id=${encodeURIComponent(settlementId)}`, { method: 'DELETE' })
+      const j = await r.json()
+      if (j.success) {
+        setClosureActif(null); setClosureDetail(null)
+        await chargerClosureList()
+        await charger()  // recharge la liste settlementsList (vue avancée)
+      } else {
+        alert('Erreur : ' + (j.erreur || 'inconnue'))
+      }
+    } catch (e: any) {
+      alert('Exception : ' + e.message)
+    }
+  }
+
   async function chargerClosureDetail(settlementId: string) {
     setClosureLoading(true)
     setClosureActif(settlementId)
@@ -5551,10 +5570,15 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                         <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11}}>{fmtDate(s.deposit_date)}</td>
                         <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700}}>{fmt$(s.total_amount)}</td>
                         <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>{s.lautopak_invoice_ref || <span style={{color:C.red}}>—</span>}</td>
-                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
+                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',whiteSpace:'nowrap'}}>
                           <button onClick={()=>chargerClosureDetail(s.settlement_id)}
-                            style={{background:C.blue,color:'#fff',border:'none',borderRadius:6,padding:'5px 10px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                            style={{background:C.blue,color:'#fff',border:'none',borderRadius:6,padding:'5px 10px',fontWeight:700,cursor:'pointer',fontSize:11,marginRight:4}}>
                             Ouvrir →
+                          </button>
+                          <button onClick={()=>supprimerSettlement(s.settlement_id)}
+                            title="Supprimer ce settlement"
+                            style={{background:'transparent',border:`1px solid ${C.red}`,color:C.red,borderRadius:6,padding:'4px 8px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                            🗑
                           </button>
                         </td>
                       </tr>
@@ -5587,14 +5611,19 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                         <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(s.total_amount)}</td>
                         <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>{s.lautopak_invoice_ref || '—'}</td>
                         <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,fontSize:10,color:sub}}>{fmtDate(s.closed_at)} par {s.closed_by||'?'}</td>
-                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
+                        <td style={{padding:'7px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',whiteSpace:'nowrap'}}>
                           <button onClick={()=>chargerRapport(s.settlement_id)}
                             style={{background:'transparent',border:`1px solid ${C.blue}`,color:C.blue,borderRadius:6,padding:'4px 8px',fontWeight:700,cursor:'pointer',fontSize:10,marginRight:4}}>
                             📊 Rapport
                           </button>
                           <button onClick={()=>chargerClosureDetail(s.settlement_id)}
-                            style={{background:'transparent',border:`1px solid ${sub}`,color:sub,borderRadius:6,padding:'4px 8px',fontWeight:700,cursor:'pointer',fontSize:10}}>
+                            style={{background:'transparent',border:`1px solid ${sub}`,color:sub,borderRadius:6,padding:'4px 8px',fontWeight:700,cursor:'pointer',fontSize:10,marginRight:4}}>
                             Voir
+                          </button>
+                          <button onClick={()=>supprimerSettlement(s.settlement_id)}
+                            title="Supprimer ce settlement"
+                            style={{background:'transparent',border:`1px solid ${C.red}`,color:C.red,borderRadius:6,padding:'4px 8px',fontWeight:700,cursor:'pointer',fontSize:10}}>
+                            🗑
                           </button>
                         </td>
                       </tr>
@@ -5645,6 +5674,11 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     ↩ Rouvrir
                   </button>
                 )}
+                <button onClick={()=>supprimerSettlement(s.settlement_id)}
+                  title="Supprimer ce settlement complet"
+                  style={{background:'transparent',border:`1px solid ${C.red}`,color:C.red,borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                  🗑 Supprimer
+                </button>
               </div>
             </div>
 
