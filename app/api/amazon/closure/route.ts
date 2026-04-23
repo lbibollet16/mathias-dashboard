@@ -74,13 +74,12 @@ export async function GET(req: NextRequest) {
         : `Créer une facture LAUTOPAK de ${Number(s.total_amount || 0).toFixed(2)} $ et inscrire son n° ici`,
     }
 
-    // ── Étape 2 : Reimbursements matchés ──────────────────────────────
+    // ── Étape 2 : Reimbursements matchés + ajustements Traction ──────
     const { data: reimbs } = await supabaseAdmin
       .from('amazon_reimbursements')
-      .select('id, reimbursement_id, sku, amount_total, reason, settlement_id')
+      .select('id, reimbursement_id, sku, fnsku, traction_code, amount_total, amount_per_unit, quantity_reimbursed_cash, quantity_reimbursed_inventory, reason, product_name, settlement_id')
       .eq('settlement_id', s.settlement_id)
     const reimbsCount = (reimbs || []).length
-    // Croiser avec amazon_transactions qui ont amount_type='FBA Inventory Reimbursement'
     const { data: reimbTx } = await supabaseAdmin
       .from('amazon_transactions')
       .select('sku, amount, amount_type')
@@ -88,13 +87,55 @@ export async function GET(req: NextRequest) {
       .ilike('amount_type', '%Reimbursement%')
     const txCount = (reimbTx || []).length
     const step2_done = reimbsCount > 0 ? reimbsCount === txCount : txCount === 0
+
+    // Pour chaque reimbursement CASH : calculer la ligne Traction à décrémenter.
+    // On cherche le pk_code "FBA-<base>" dans traction_amazon_lignes.
+    const reimbCashItems = (reimbs || []).filter((r: any) => Number(r.quantity_reimbursed_cash || 0) > 0)
+    const ajustementsFba: any[] = []
+    if (reimbCashItems.length > 0) {
+      const tractionCodes = Array.from(new Set(reimbCashItems.map((r: any) => r.traction_code).filter(Boolean)))
+      // Chercher les pk_codes FBA-xxx correspondants (strip A/HUB/FBA-/FBM- → base, ajoute préfixe FBA-)
+      const bases = tractionCodes.map((tc: string) => {
+        const stripped = tc.replace(/^[A]/, '').replace(/^(HUB|FBA|FBM)-/i, '').replace(/-(HUB|FBA|FBM)\d*$/i, '')
+        return { traction_code: tc, base: stripped, fba_pk: `FBA-${stripped}` }
+      })
+      const fbaPkCodes = bases.map(b => b.fba_pk)
+      const { data: fbaLines } = await supabaseAdmin
+        .from('traction_amazon_lignes')
+        .select('pk_code, qty, qty_minus_reserved, code_ligne')
+        .in('pk_code', fbaPkCodes)
+      const fbaByPk = new Map<string, any>()
+      for (const f of fbaLines || []) fbaByPk.set(f.pk_code, f)
+
+      for (const r of reimbCashItems) {
+        const b = bases.find(x => x.traction_code === r.traction_code)
+        const fbaLine = b ? fbaByPk.get(b.fba_pk) : null
+        ajustementsFba.push({
+          reimbursement_id: r.reimbursement_id,
+          sku: r.sku,
+          product_name: r.product_name,
+          traction_code: r.traction_code,
+          reason: r.reason,
+          qty_cash: Number(r.quantity_reimbursed_cash || 0),
+          qty_inventory: Number(r.quantity_reimbursed_inventory || 0),
+          amount: Number(r.amount_total || 0),
+          pk_code_to_adjust: b?.fba_pk || null,
+          current_traction_qty: fbaLine ? Number(fbaLine.qty_minus_reserved || 0) : null,
+          found_in_traction: !!fbaLine,
+        })
+      }
+    }
+
     const step2: StepStatus = {
       key: '2_reimbursements',
-      label: 'Remboursements matchés',
+      label: 'Remboursements matchés + ajustements Traction',
       status: step1_done ? (step2_done ? 'done' : 'action') : 'locked',
       detail: reimbsCount === 0 && txCount === 0
         ? 'Aucun remboursement dans cette période (OK)'
-        : `${reimbsCount} fichier CSV reimbursements ↔ ${txCount} lignes payments`,
+        : ajustementsFba.length > 0
+          ? `${reimbsCount} reimbursements ↔ ${txCount} payments • ${ajustementsFba.length} à décrémenter dans Traction FBA`
+          : `${reimbsCount} reimbursements ↔ ${txCount} payments (aucun cash)`,
+      items: ajustementsFba,
       blocking_count: Math.max(0, txCount - reimbsCount),
     }
 

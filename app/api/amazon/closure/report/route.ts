@@ -42,6 +42,37 @@ export async function GET(req: NextRequest) {
       .select('*')
       .eq('settlement_id', s.settlement_id)
 
+    // Ajustements Traction FBA requis (reimbursements cash = unités disparues)
+    const reimbCash = (reimbs || []).filter((r: any) => Number(r.quantity_reimbursed_cash || 0) > 0)
+    const ajustements_fba: any[] = []
+    if (reimbCash.length > 0) {
+      const bases = reimbCash.map((r: any) => {
+        const tc = r.traction_code || ''
+        const stripped = tc.replace(/^[A]/, '').replace(/^(HUB|FBA|FBM)-/i, '').replace(/-(HUB|FBA|FBM)\d*$/i, '')
+        return { reimb: r, base: stripped, fba_pk: stripped ? `FBA-${stripped}` : null }
+      })
+      const fbaPkCodes = bases.map(b => b.fba_pk).filter(Boolean)
+      const { data: fbaLines } = fbaPkCodes.length
+        ? await supabaseAdmin.from('traction_amazon_lignes').select('pk_code, qty_minus_reserved').in('pk_code', fbaPkCodes as string[])
+        : { data: [] }
+      const fbaByPk = new Map<string, any>()
+      for (const f of fbaLines || []) fbaByPk.set(f.pk_code, f)
+      for (const b of bases) {
+        const r = b.reimb
+        ajustements_fba.push({
+          reimbursement_id: r.reimbursement_id,
+          sku: r.sku,
+          product_name: r.product_name,
+          traction_code: r.traction_code,
+          reason: r.reason,
+          qty_cash: Number(r.quantity_reimbursed_cash || 0),
+          amount: Number(r.amount_total || 0),
+          pk_code_to_adjust: b.fba_pk,
+          current_traction_qty: b.fba_pk && fbaByPk.has(b.fba_pk) ? Number(fbaByPk.get(b.fba_pk).qty_minus_reserved || 0) : null,
+        })
+      }
+    }
+
     // Audit lié
     const { data: audits } = await supabaseAdmin
       .from('amazon_audits')
@@ -149,6 +180,7 @@ export async function GET(req: NextRequest) {
       flux,
       reimbursements: reimbs || [],
       ajustements,
+      ajustements_fba,
       unsellable,
       audit_stats,
       totaux: {

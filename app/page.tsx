@@ -5772,8 +5772,42 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 
                   {/* Détails d'étape quand il y a des items à voir */}
                   {st.items && st.items.length > 0 && st.status !== 'locked' && (
-                    <div style={{marginTop:10,background:dark?'#0f0f0f':'#fafbfc',borderRadius:8,border:`1px solid ${bdr}`,overflow:'hidden',maxHeight:320,overflowY:'auto'}}>
-                      {st.key==='3_unsellable' ? (
+                    <div style={{marginTop:10,background:dark?'#0f0f0f':'#fafbfc',borderRadius:8,border:`1px solid ${bdr}`,overflow:'hidden',maxHeight:360,overflowY:'auto'}}>
+                      {st.key==='2_reimbursements' ? (
+                        <>
+                          <div style={{padding:'8px 12px',background:dark?'#2b2411':'#fdf6e3',borderBottom:`1px solid ${bdr}`,fontSize:11,fontWeight:700,color:C.yellow}}>
+                            ⚠️ Reimbursements cash = unité physiquement perdue → décrémenter le pk_code FBA-xxx dans Traction (étape 4)
+                          </div>
+                          <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
+                            <thead><tr style={{background:thBg}}>
+                              <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Reimb. ID</th>
+                              <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>SKU</th>
+                              <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Raison</th>
+                              <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Qté $</th>
+                              <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Qté inv</th>
+                              <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Montant</th>
+                              <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:C.red}}>➡ Ajuster pk_code</th>
+                              <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Stock actuel</th>
+                            </tr></thead>
+                            <tbody>
+                              {st.items.map((r:any,i:number) => (
+                                <tr key={i}>
+                                  <td style={{padding:'4px 10px',fontFamily:'monospace',fontSize:10,borderBottom:`1px solid ${bdr}`}}>{r.reimbursement_id}</td>
+                                  <td style={{padding:'4px 10px',fontFamily:'monospace',borderBottom:`1px solid ${bdr}`}} title={r.product_name}>{r.sku}</td>
+                                  <td style={{padding:'4px 10px',color:sub,borderBottom:`1px solid ${bdr}`,fontSize:10}}>{r.reason}</td>
+                                  <td style={{padding:'4px 10px',textAlign:'right',fontWeight:700,color:C.red,borderBottom:`1px solid ${bdr}`}}>{r.qty_cash || ''}</td>
+                                  <td style={{padding:'4px 10px',textAlign:'right',color:sub,borderBottom:`1px solid ${bdr}`}}>{r.qty_inventory || ''}</td>
+                                  <td style={{padding:'4px 10px',textAlign:'right',color:sub,borderBottom:`1px solid ${bdr}`}}>{fmt$(r.amount)}</td>
+                                  <td style={{padding:'4px 10px',fontFamily:'monospace',fontWeight:700,color:r.found_in_traction?C.red:sub,borderBottom:`1px solid ${bdr}`}}>
+                                    {r.pk_code_to_adjust ? (<>−{r.qty_cash} × <strong>{r.pk_code_to_adjust}</strong>{!r.found_in_traction && <span style={{color:sub,fontSize:9}}> (introuvable)</span>}</>) : <span style={{color:sub}}>— (non mappé)</span>}
+                                  </td>
+                                  <td style={{padding:'4px 10px',textAlign:'right',color:sub,borderBottom:`1px solid ${bdr}`}}>{r.current_traction_qty != null ? r.current_traction_qty : '—'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </>
+                      ) : st.key==='3_unsellable' ? (
                         <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
                           <thead><tr style={{background:thBg}}>
                             <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>SKU</th>
@@ -6133,6 +6167,38 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     ))}
                   </tbody>
                 </table>
+              )}
+
+              {r.ajustements_fba && r.ajustements_fba.length > 0 && (
+                <>
+                  <h2>3b. Ajustements Traction FBA — Reimbursements cash</h2>
+                  <div style={{fontSize:11,color:'#666',marginBottom:6}}>
+                    Amazon a remboursé ces unités en cash ($) → elles sont physiquement perdues.
+                    Il faut <strong>décrémenter la ligne FBA-xxx correspondante</strong> dans Traction du nombre indiqué.
+                  </div>
+                  <table>
+                    <thead><tr>
+                      <th>Reimb. ID</th><th>SKU Amazon</th><th>Produit</th><th>Raison</th>
+                      <th className="num">Qté</th><th className="num">Montant</th>
+                      <th>Pk_code Traction à ajuster</th><th className="num">Stock actuel</th><th className="num">Nouveau stock</th>
+                    </tr></thead>
+                    <tbody>
+                      {r.ajustements_fba.map((a:any, i:number) => (
+                        <tr key={i}>
+                          <td style={{fontFamily:'monospace',fontSize:10}}>{a.reimbursement_id}</td>
+                          <td style={{fontFamily:'monospace'}}>{a.sku}</td>
+                          <td style={{fontSize:10,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.product_name||'—'}</td>
+                          <td style={{fontSize:10}}>{a.reason}</td>
+                          <td className="num" style={{color:'#c00',fontWeight:700}}>−{a.qty_cash}</td>
+                          <td className="num">{fmt$(a.amount)}</td>
+                          <td style={{fontFamily:'monospace',fontWeight:700}}>{a.pk_code_to_adjust || '—'}</td>
+                          <td className="num">{a.current_traction_qty != null ? a.current_traction_qty : '—'}</td>
+                          <td className="num" style={{fontWeight:700}}>{a.current_traction_qty != null ? a.current_traction_qty - a.qty_cash : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
               )}
 
               <h2>4. Ajustements d'inventaire ({r.ajustements.length})</h2>
