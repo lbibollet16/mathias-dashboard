@@ -77,7 +77,7 @@ export async function GET(req: NextRequest) {
     // ── Étape 2 : Reimbursements matchés + ajustements Traction ──────
     const { data: reimbs } = await supabaseAdmin
       .from('amazon_reimbursements')
-      .select('id, reimbursement_id, sku, fnsku, traction_code, amount_total, amount_per_unit, quantity_reimbursed_cash, quantity_reimbursed_inventory, reason, product_name, settlement_id')
+      .select('id, reimbursement_id, sku, fnsku, traction_code, amount_total, amount_per_unit, quantity_reimbursed_cash, quantity_reimbursed_inventory, reason, product_name, settlement_id, inventaire_ajuste_le, inventaire_ajuste_par, inventaire_pk_code')
       .eq('settlement_id', s.settlement_id)
     const reimbsCount = (reimbs || []).length
     const { data: reimbTx } = await supabaseAdmin
@@ -122,6 +122,9 @@ export async function GET(req: NextRequest) {
           pk_code_to_adjust: b?.fba_pk || null,
           current_traction_qty: fbaLine ? Number(fbaLine.qty_minus_reserved || 0) : null,
           found_in_traction: !!fbaLine,
+          inventaire_ajuste_le: r.inventaire_ajuste_le,
+          inventaire_ajuste_par: r.inventaire_ajuste_par,
+          inventaire_pk_code: r.inventaire_pk_code,
         })
       }
     }

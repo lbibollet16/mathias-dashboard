@@ -5189,6 +5189,22 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     } catch {}
   }
 
+  async function toggleAjustementReimbursement(reimbursementId: string, pkCode: string | null, dejaAjuste: boolean) {
+    try {
+      await fetch('/api/amazon/reimbursements', {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          reimbursement_id: reimbursementId,
+          pk_code: pkCode,
+          employe: profil?.nom || profil?.email || 'Inconnu',
+          action: dejaAjuste ? 'unmark' : 'mark',
+        }),
+      })
+      if (closureActif) await chargerClosureDetail(closureActif)
+    } catch (e: any) { alert('Erreur : ' + e.message) }
+  }
+
   async function chargerReleveMatch(settlementId: string) {
     setReleveMatch(null)
     try {
@@ -5689,6 +5705,38 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         const fmt$ = (n: number) => `${Number(n).toLocaleString('fr-CA',{minimumFractionDigits:2,maximumFractionDigits:2})} $`
         const stepIcon = (st: string) => st==='done' ? '✅' : st==='action' ? '⏳' : '🔒'
         const stepColor = (st: string) => st==='done' ? C.green : st==='action' ? C.yellow : sub
+        const stepExplications: Record<string, { quoi: string; comment: string; valide: string }> = {
+          '1_lautopak': {
+            quoi: "Créer une facture LAUTOPAK pour les ventes Amazon du settlement (Orders Principal brut = Frais produit du relevé). En créant la facture dans LAUTOPAK, l'inventaire LAUTOPAK décrémente automatiquement les unités vendues.",
+            comment: "1) Clique 🧾 Voir lignes à facturer pour obtenir la liste SKU × qté × prix. 2) Vérifie avec 🧾 Rapprochement relevé que ton TSV matche ton relevé papier. 3) Clique 'Saisir n° LAUTOPAK' pour ouvrir la vue Settlements et inscrire le n° de facture + la date.",
+            valide: "AUTO — passe verte dès que lautopak_invoice_ref + lautopak_invoice_date sont remplis.",
+          },
+          '2_reimbursements': {
+            quoi: "Confirmer que les remboursements Amazon (Lost/Damaged/CustomerReturn cash) sont cohérents : autant de lignes dans le CSV Reimbursements que dans le TSV payments. Ces unités sont physiquement perdues — il FAUDRA les sortir de l'inventaire LAUTOPAK (étape 4).",
+            comment: "1) Importe le CSV Reimbursements de la période. 2) Coche chaque ligne au fur et à mesure que tu fais l'ajustement dans LAUTOPAK (la coche est persistante, sauvegardée par reimbursement_id). 3) L'étape se valide auto quand le nb CSV = nb TSV.",
+            valide: "AUTO — passe verte quand nb reimbursements CSV = nb lignes 'FBA Inventory Reimbursement' du payments.",
+          },
+          '3_unsellable': {
+            quoi: "Traiter chaque SKU avec afn_unsellable > 0 chez Amazon (produits endommagés que Amazon te retient). Soit tu demandes un removal, soit tu fais une réclamation.",
+            comment: "1) Regarde la liste sous l'étape. 2) Pour chaque SKU, va dans Amazon Seller Central → Inventory → Unsellable, demande un removal ou ouvre un case. 3) Quand tout est initié, clique ✓ Valider l'étape.",
+            valide: "MANUEL — clique ✓ Valider l'étape.",
+          },
+          '4_ajustements': {
+            quoi: "Confirmer que tu as passé DANS LAUTOPAK toutes les décrémentations de stock liées aux reimbursements cash (listés à l'étape 2). L'unité physique n'existe plus, l'inventaire LAUTOPAK doit le refléter.",
+            comment: "1) Retourne à l'étape 2, coche chaque reimbursement quand tu as fait l'ajustement dans LAUTOPAK. 2) Tu peux suivre le rapport final section 3b pour la liste complète. 3) Quand tu as tout fait, clique ✓ Valider l'étape ici.",
+            valide: "MANUEL — clique ✓ Valider l'étape.",
+          },
+          '5_audit': {
+            quoi: "Audit physique mensuel : compter l'inventaire warehouse + FBM, comparer à ce que dit LAUTOPAK/Traction + ce que dit Amazon FBA. Équation de balance : Total LAUTOPAK AMA = Amazon FBA + Amazon FBM + Warehouse physique compté. Bloquant si écart > 1 unité.",
+            comment: "1) Clique 'Ouvrir l'audit →'. 2) Compte physiquement chaque base product (saisis Warehouse + FBM). 3) Si un produit affiche écart > 1, la ligne apparait ici dans le détail d'étape — ajuste LAUTOPAK et re-vérifie. 4) Finalise l'audit quand 100% compté et balance OK.",
+            valide: "AUTO — passe verte quand audit finalisé + 100% compté + balance OK (écart ≤ 1 sur tous les produits).",
+          },
+          '6_rapport': {
+            quoi: "Valider le rapport comptable final imprimable. Ce PDF contient tout : totaux financiers, flux par type, remboursements ligne-par-ligne, ajustements d'inventaire avec justificatif, unsellable, n° facture LAUTOPAK, signature comptable.",
+            comment: "1) Clique 📊 Voir rapport. 2) Vérifie que les totaux ont du sens (profits nets = dépôt bancaire Amazon, ajustements = ce que tu as passé dans LAUTOPAK). 3) Imprime / PDF pour ta comptable si besoin. 4) Reviens ici et clique ✓ Valider l'étape.",
+            valide: "MANUEL — clique ✓ Valider l'étape.",
+          },
+        }
         return (
           <div>
             {/* Header settlement */}
@@ -5731,6 +5779,12 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               </div>
             </div>
 
+            {/* Bandeau info sur LAUTOPAK */}
+            <div style={{background:dark?'#1a233a':'#e8f0fe',border:`1px solid ${C.blue}`,borderRadius:10,padding:'10px 14px',marginBottom:10,fontSize:11,color:C.blue,lineHeight:1.5}}>
+              💡 <strong>LAUTOPAK = ta source de vérité comptable (DSM)</strong>. Traction importe l'inventaire LAUTOPAK tous les jours — tout ajustement doit se faire dans LAUTOPAK, sinon il sera écrasé à la prochaine sync.
+              Chaque étape ci-dessous vérifie une condition précise ; clique sur <strong>ℹ️ Détails</strong> pour comprendre.
+            </div>
+
             {/* 6 étapes */}
             <div style={{display:'flex',flexDirection:'column',gap:8}}>
               {steps.map((st: any, idx: number) => (
@@ -5742,6 +5796,16 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                       </div>
                       <div style={{fontSize:12,color:sub,marginTop:4}}>{st.detail}</div>
                       {st.validated_at && <div style={{fontSize:10,color:sub,marginTop:3}}>Validé le {fmtDate(st.validated_at)} par <strong>{st.validated_by}</strong></div>}
+                      {stepExplications[st.key] && (
+                        <details style={{marginTop:6}}>
+                          <summary style={{cursor:'pointer',fontSize:10,color:C.blue,fontWeight:700}}>ℹ️ Détails (quoi / comment / validation)</summary>
+                          <div style={{marginTop:6,background:dark?'#0a0a0a':'#fafbfc',border:`1px solid ${bdr}`,borderRadius:6,padding:'8px 10px',fontSize:11,lineHeight:1.5}}>
+                            <div style={{marginBottom:4}}><strong style={{color:sub}}>Quoi :</strong> {stepExplications[st.key].quoi}</div>
+                            <div style={{marginBottom:4}}><strong style={{color:sub}}>Comment :</strong> {stepExplications[st.key].comment}</div>
+                            <div><strong style={{color:sub}}>Validation :</strong> {stepExplications[st.key].valide}</div>
+                          </div>
+                        </details>
+                      )}
                     </div>
                     <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
                       {/* Actions spécifiques par étape */}
@@ -5793,36 +5857,54 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                       {st.key==='2_reimbursements' ? (
                         <>
                           <div style={{padding:'8px 12px',background:dark?'#2b2411':'#fdf6e3',borderBottom:`1px solid ${bdr}`,fontSize:11,fontWeight:700,color:C.yellow}}>
-                            ⚠️ Reimbursements cash = unité physiquement perdue → décrémenter le pk_code FBA-xxx dans Traction (étape 4)
+                            ⚠️ Reimbursements cash = unité physiquement perdue → décrémenter le pk_code FBA-xxx dans <strong>LAUTOPAK</strong> (la source DSM). Traction se sync auto le lendemain.
                           </div>
                           <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
                             <thead><tr style={{background:thBg}}>
+                              <th style={{padding:'6px 10px',textAlign:'center',fontSize:9,color:sub,width:30}}>Fait ?</th>
                               <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Reimb. ID</th>
                               <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>SKU</th>
                               <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Raison</th>
                               <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Qté $</th>
-                              <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Qté inv</th>
                               <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Montant</th>
                               <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:C.red}}>➡ Ajuster pk_code</th>
                               <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Stock actuel</th>
                             </tr></thead>
                             <tbody>
-                              {st.items.map((r:any,i:number) => (
-                                <tr key={i}>
-                                  <td style={{padding:'4px 10px',fontFamily:'monospace',fontSize:10,borderBottom:`1px solid ${bdr}`}}>{r.reimbursement_id}</td>
-                                  <td style={{padding:'4px 10px',fontFamily:'monospace',borderBottom:`1px solid ${bdr}`}} title={r.product_name}>{r.sku}</td>
-                                  <td style={{padding:'4px 10px',color:sub,borderBottom:`1px solid ${bdr}`,fontSize:10}}>{r.reason}</td>
-                                  <td style={{padding:'4px 10px',textAlign:'right',fontWeight:700,color:C.red,borderBottom:`1px solid ${bdr}`}}>{r.qty_cash || ''}</td>
-                                  <td style={{padding:'4px 10px',textAlign:'right',color:sub,borderBottom:`1px solid ${bdr}`}}>{r.qty_inventory || ''}</td>
-                                  <td style={{padding:'4px 10px',textAlign:'right',color:sub,borderBottom:`1px solid ${bdr}`}}>{fmt$(r.amount)}</td>
-                                  <td style={{padding:'4px 10px',fontFamily:'monospace',fontWeight:700,color:r.found_in_traction?C.red:sub,borderBottom:`1px solid ${bdr}`}}>
-                                    {r.pk_code_to_adjust ? (<>−{r.qty_cash} × <strong>{r.pk_code_to_adjust}</strong>{!r.found_in_traction && <span style={{color:sub,fontSize:9}}> (introuvable)</span>}</>) : <span style={{color:sub}}>— (non mappé)</span>}
-                                  </td>
-                                  <td style={{padding:'4px 10px',textAlign:'right',color:sub,borderBottom:`1px solid ${bdr}`}}>{r.current_traction_qty != null ? r.current_traction_qty : '—'}</td>
-                                </tr>
-                              ))}
+                              {st.items.map((r:any,i:number) => {
+                                const deja = !!r.inventaire_ajuste_le
+                                return (
+                                  <tr key={i} style={{background:deja?(dark?'#0d2a18':'#e6f4ea'):'transparent'}}>
+                                    <td style={{padding:'4px 10px',textAlign:'center',borderBottom:`1px solid ${bdr}`}}>
+                                      <input type="checkbox" checked={deja}
+                                        onChange={()=>toggleAjustementReimbursement(r.reimbursement_id, r.pk_code_to_adjust, deja)}
+                                        style={{accentColor:C.green,width:16,height:16,cursor:'pointer'}}
+                                        title={deja ? `Fait le ${String(r.inventaire_ajuste_le).split('T')[0]} par ${r.inventaire_ajuste_par}` : 'Marquer comme ajusté dans LAUTOPAK'}/>
+                                    </td>
+                                    <td style={{padding:'4px 10px',fontFamily:'monospace',fontSize:10,borderBottom:`1px solid ${bdr}`,textDecoration:deja?'line-through':'none',color:deja?sub:'inherit'}}>{r.reimbursement_id}</td>
+                                    <td style={{padding:'4px 10px',fontFamily:'monospace',borderBottom:`1px solid ${bdr}`,color:deja?sub:'inherit'}} title={r.product_name}>{r.sku}</td>
+                                    <td style={{padding:'4px 10px',color:sub,borderBottom:`1px solid ${bdr}`,fontSize:10}}>{r.reason}</td>
+                                    <td style={{padding:'4px 10px',textAlign:'right',fontWeight:700,color:deja?sub:C.red,borderBottom:`1px solid ${bdr}`}}>{r.qty_cash || ''}</td>
+                                    <td style={{padding:'4px 10px',textAlign:'right',color:sub,borderBottom:`1px solid ${bdr}`}}>{fmt$(r.amount)}</td>
+                                    <td style={{padding:'4px 10px',fontFamily:'monospace',fontWeight:700,color:deja?sub:(r.found_in_traction?C.red:sub),borderBottom:`1px solid ${bdr}`}}>
+                                      {r.pk_code_to_adjust ? (<>−{r.qty_cash} × <strong>{r.pk_code_to_adjust}</strong>{!r.found_in_traction && <span style={{color:sub,fontSize:9}}> (introuvable)</span>}</>) : <span style={{color:sub}}>— (non mappé)</span>}
+                                    </td>
+                                    <td style={{padding:'4px 10px',textAlign:'right',color:sub,borderBottom:`1px solid ${bdr}`}}>{r.current_traction_qty != null ? r.current_traction_qty : '—'}</td>
+                                  </tr>
+                                )
+                              })}
                             </tbody>
                           </table>
+                          {(() => {
+                            const fait = st.items.filter((r:any) => r.inventaire_ajuste_le).length
+                            const total = st.items.length
+                            return (
+                              <div style={{padding:'8px 12px',background:dark?'#0f0f0f':'#fafbfc',borderTop:`1px solid ${bdr}`,fontSize:11,color:sub,display:'flex',justifyContent:'space-between'}}>
+                                <span>Progression : <strong style={{color:fait===total?C.green:C.yellow}}>{fait}/{total}</strong> ajustements faits</span>
+                                {fait === total && total > 0 && <span style={{color:C.green,fontWeight:700}}>✓ Tous les reimbursements sont traités</span>}
+                              </div>
+                            )
+                          })()}
                         </>
                       ) : st.key==='3_unsellable' ? (
                         <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>

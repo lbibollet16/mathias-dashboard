@@ -368,4 +368,12 @@ CREATE TABLE IF NOT EXISTS traction_sku_archive (
 );
 CREATE INDEX IF NOT EXISTS idx_traction_archive_pk ON traction_sku_archive(pk_code);
 ALTER TABLE traction_sku_archive DISABLE ROW LEVEL SECURITY;
+
+-- Tracking persistant des ajustements d'inventaire liés aux reimbursements
+-- (évite les ré-ajustements si un settlement est ré-importé + historique)
+ALTER TABLE amazon_reimbursements
+  ADD COLUMN IF NOT EXISTS inventaire_ajuste_le TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS inventaire_ajuste_par TEXT,
+  ADD COLUMN IF NOT EXISTS inventaire_pk_code TEXT;
+CREATE INDEX IF NOT EXISTS idx_amz_reimb_ajuste ON amazon_reimbursements(inventaire_ajuste_le);
 CREATE INDEX IF NOT EXISTS idx_amz_audit_settlement ON amazon_audits(settlement_id);
