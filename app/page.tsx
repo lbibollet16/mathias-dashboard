@@ -4968,6 +4968,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [lautopakLoading, setLautopakLoading] = useState(false)
   const [releveMatch, setReleveMatch] = useState<any>(null)
   const [releveSaisi, setReleveSaisi] = useState<Record<string, string>>({})
+  const [releveExpanded, setReleveExpanded] = useState<Record<string, boolean>>({})
   const [inventaireGaps, setInventaireGaps] = useState<any>({ rows: [], totals: {}, snapshot_date: null, dashboard: null, history: null })
   const [filtGap, setFiltGap] = useState<'tous'|'action'|'unsellable'|'rupture_fba'|'reclamation'|'ajust_traction'|'watched'|'ok'>('action')
   const [searchGap, setSearchGap] = useState('')
@@ -6058,21 +6059,45 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           const v = parseFloat((releveSaisi[k] || '').replace(',', '.'))
           return isNaN(v) ? null : v
         }
-        const ligne = (label: string, calc: number, key: string, indent = 0, bold = false, neg = false) => {
+        const ligne = (label: string, calc: number, key: string, composants?: any[], indent = 0, bold = false, neg = false) => {
           const v = saisi(key)
           const diff = v !== null ? Number((calc - v).toFixed(2)) : null
+          const hasComp = composants && composants.length > 0
+          const open = !!releveExpanded[key]
           return (
-            <tr style={{background:diff !== null && Math.abs(diff) > 0.01 ? (dark?'#2b1113':'#fce8e6') : 'transparent'}}>
-              <td style={{padding:'5px 10px',paddingLeft:10+indent*20,fontWeight:bold?800:400,fontSize:bold?12:11,borderBottom:`1px solid ${bdr}`}}>{label}</td>
-              <td style={{padding:'5px 10px',textAlign:'right',fontWeight:bold?800:600,fontFamily:'monospace',fontSize:12,borderBottom:`1px solid ${bdr}`,color:neg&&calc<0?C.red:bold?C.blue:'inherit'}}>{fmt$(calc)}</td>
-              <td style={{padding:'2px 4px',borderBottom:`1px solid ${bdr}`}}>
-                <input type="text" value={releveSaisi[key] || ''} onChange={e=>setReleveSaisi(p=>({...p,[key]:e.target.value}))}
-                  placeholder="saisir..." style={{...S,textAlign:'right',fontSize:11,padding:'4px 6px',width:110,fontFamily:'monospace'}}/>
-              </td>
-              <td style={{padding:'5px 10px',textAlign:'right',fontWeight:700,fontSize:11,color:diff === null ? sub : Math.abs(diff) < 0.01 ? C.green : C.red,borderBottom:`1px solid ${bdr}`}}>
-                {diff === null ? '—' : Math.abs(diff) < 0.01 ? '✓' : fmt$(diff)}
-              </td>
-            </tr>
+            <React.Fragment key={key}>
+              <tr style={{background:diff !== null && Math.abs(diff) > 0.01 ? (dark?'#2b1113':'#fce8e6') : 'transparent'}}>
+                <td style={{padding:'5px 10px',paddingLeft:10+indent*20,fontWeight:bold?800:400,fontSize:bold?12:11,borderBottom:`1px solid ${bdr}`}}>
+                  {hasComp ? (
+                    <button onClick={()=>setReleveExpanded(p=>({...p,[key]:!open}))}
+                      style={{background:'transparent',border:'none',color:sub,cursor:'pointer',padding:'0 4px 0 0',fontSize:10,fontFamily:'monospace'}}>
+                      {open ? '▼' : '▶'}
+                    </button>
+                  ) : <span style={{display:'inline-block',width:14}}/>}
+                  {label}
+                  {hasComp && <span style={{marginLeft:6,fontSize:10,color:sub,fontWeight:400}}>({composants!.length})</span>}
+                </td>
+                <td style={{padding:'5px 10px',textAlign:'right',fontWeight:bold?800:600,fontFamily:'monospace',fontSize:12,borderBottom:`1px solid ${bdr}`,color:neg&&calc<0?C.red:bold?C.blue:'inherit'}}>{fmt$(calc)}</td>
+                <td style={{padding:'2px 4px',borderBottom:`1px solid ${bdr}`}}>
+                  <input type="text" value={releveSaisi[key] || ''} onChange={e=>setReleveSaisi(p=>({...p,[key]:e.target.value}))}
+                    placeholder="saisir..." style={{...S,textAlign:'right',fontSize:11,padding:'4px 6px',width:110,fontFamily:'monospace'}}/>
+                </td>
+                <td style={{padding:'5px 10px',textAlign:'right',fontWeight:700,fontSize:11,color:diff === null ? sub : Math.abs(diff) < 0.01 ? C.green : C.red,borderBottom:`1px solid ${bdr}`}}>
+                  {diff === null ? '—' : Math.abs(diff) < 0.01 ? '✓' : fmt$(diff)}
+                </td>
+              </tr>
+              {hasComp && open && composants!.map((c: any, ci: number) => (
+                <tr key={`${key}-c-${ci}`} style={{background:dark?'#0a0a0a':'#fafbfc'}}>
+                  <td style={{padding:'3px 10px',paddingLeft:30+indent*20,fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`,fontFamily:'monospace'}}>
+                    ↳ {c.amount_description}
+                    <span style={{marginLeft:6,fontStyle:'italic'}}>[{c.transaction_type}]</span>
+                    <span style={{marginLeft:6,color:sub}}>· {c.count} lignes</span>
+                  </td>
+                  <td style={{padding:'3px 10px',textAlign:'right',fontFamily:'monospace',fontSize:11,borderBottom:`1px solid ${bdr}`,color:c.total<0?C.red:'inherit'}}>{fmt$(c.total)}</td>
+                  <td colSpan={2} style={{borderBottom:`1px solid ${bdr}`}}></td>
+                </tr>
+              ))}
+            </React.Fragment>
           )
         }
         return (
@@ -6097,38 +6122,49 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   </tr></thead>
                   <tbody>
                     {/* VENTES */}
-                    {ligne('VENTES', releveMatch.ventes.total, 'ventes_total', 0, true)}
-                    {ligne('Frais produit', releveMatch.ventes.frais_produit, 'frais_produit', 1)}
-                    {ligne('Expédition', releveMatch.ventes.expedition, 'expedition_ventes', 1)}
-                    {ligne('Remboursements de stock (FBA)', releveMatch.ventes.remboursements_stock_fba, 'remb_stock_fba', 1)}
+                    {ligne('VENTES', releveMatch.ventes.total, 'ventes_total', undefined, 0, true)}
+                    {ligne('Frais produit', releveMatch.ventes.frais_produit, 'frais_produit', releveMatch.ventes.frais_produit_composants, 1)}
+                    {ligne('Expédition', releveMatch.ventes.expedition, 'expedition_ventes', releveMatch.ventes.expedition_composants, 1)}
+                    {ligne('Remboursements de stock (FBA)', releveMatch.ventes.remboursements_stock_fba, 'remb_stock_fba', releveMatch.ventes.remboursements_stock_fba_composants, 1)}
 
                     {/* REMBOURSEMENTS */}
-                    {ligne('REMBOURSEMENTS', releveMatch.remboursements.total, 'remb_total', 0, true, true)}
-                    {ligne('Dépenses remboursées', releveMatch.remboursements.depenses_rembourses, 'depenses_rembourses', 1)}
-                    {ligne('Ventes remboursées', releveMatch.remboursements.ventes_remboursees_total, 'ventes_remb_total', 1, false, true)}
-                    {ligne('— Expédition', releveMatch.remboursements.ventes_remboursees_expedition, 'ventes_remb_exp', 2, false, true)}
-                    {ligne('— Frais produit', releveMatch.remboursements.ventes_remboursees_frais_produit, 'ventes_remb_produit', 2, false, true)}
+                    {ligne('REMBOURSEMENTS', releveMatch.remboursements.total, 'remb_total', undefined, 0, true, true)}
+                    {ligne('Dépenses remboursées', releveMatch.remboursements.depenses_rembourses, 'depenses_rembourses', releveMatch.remboursements.depenses_rembourses_composants, 1)}
+                    {ligne('Ventes remboursées', releveMatch.remboursements.ventes_remboursees_total, 'ventes_remb_total', undefined, 1, false, true)}
+                    {ligne('— Expédition', releveMatch.remboursements.ventes_remboursees_expedition, 'ventes_remb_exp', releveMatch.remboursements.ventes_remb_exp_composants, 2, false, true)}
+                    {ligne('— Frais produit', releveMatch.remboursements.ventes_remboursees_frais_produit, 'ventes_remb_produit', releveMatch.remboursements.ventes_remb_produit_composants, 2, false, true)}
 
                     {/* DÉPENSES */}
-                    {ligne('DÉPENSES', releveMatch.depenses.total, 'dep_total', 0, true, true)}
-                    {ligne('Rabais promotionnels', releveMatch.depenses.rabais_promotionnels, 'rabais_promo', 1, false, true)}
-                    {ligne('Frais Expédié par Amazon', releveMatch.depenses.frais_fba_total, 'frais_fba', 1, false, true)}
-                    {ligne('— Frais de stockage mensuels', releveMatch.depenses.frais_fba_stockage, 'frais_fba_stockage', 2, false, true)}
-                    {ligne('— Autre', releveMatch.depenses.frais_fba_autre, 'frais_fba_autre', 2, false, true)}
-                    {ligne('Prix de la publicité', releveMatch.depenses.publicite, 'publicite', 1, false, true)}
-                    {ligne('Commissions Amazon', releveMatch.depenses.commissions_amazon, 'commissions', 1, false, true)}
-                    {ligne('Remboursements inversés (FBA)', releveMatch.depenses.remboursements_inverses_fba, 'remb_inverses', 1, false, true)}
+                    {ligne('DÉPENSES', releveMatch.depenses.total, 'dep_total', undefined, 0, true, true)}
+                    {ligne('Rabais promotionnels', releveMatch.depenses.rabais_promotionnels, 'rabais_promo', releveMatch.depenses.rabais_composants, 1, false, true)}
+                    {ligne('Frais Expédié par Amazon', releveMatch.depenses.frais_fba_total, 'frais_fba', undefined, 1, false, true)}
+                    {ligne('— Frais de stockage mensuels', releveMatch.depenses.frais_fba_stockage, 'frais_fba_stockage', releveMatch.depenses.frais_fba_stockage_composants, 2, false, true)}
+                    {ligne('— Autre', releveMatch.depenses.frais_fba_autre, 'frais_fba_autre', releveMatch.depenses.frais_fba_autre_composants, 2, false, true)}
+                    {ligne('Prix de la publicité', releveMatch.depenses.publicite, 'publicite', releveMatch.depenses.publicite_composants, 1, false, true)}
+                    {ligne('Commissions Amazon', releveMatch.depenses.commissions_amazon, 'commissions', releveMatch.depenses.commissions_composants, 1, false, true)}
+                    {ligne('Remboursements inversés (FBA)', releveMatch.depenses.remboursements_inverses_fba, 'remb_inverses', releveMatch.depenses.remb_inverses_composants, 1, false, true)}
 
                     {/* PROFITS NETS */}
                     <tr><td colSpan={4} style={{padding:6,borderBottom:'none'}}></td></tr>
-                    {ligne('PROFITS NETS (dépôt bancaire)', releveMatch.profits_nets_calcules, 'profits_nets', 0, true)}
+                    {ligne('PROFITS NETS (dépôt bancaire)', releveMatch.profits_nets_calcules, 'profits_nets', undefined, 0, true)}
 
-                    {releveMatch.reste_non_classe !== 0 && (
-                      <tr style={{background:dark?'#2b2411':'#fdf6e3'}}>
-                        <td colSpan={4} style={{padding:'10px',fontSize:11,color:C.yellow,fontWeight:700}}>
-                          ⚠️ Reste non classé : {fmt$(releveMatch.reste_non_classe)} — des amount_description du TSV n'ont pas été assignés aux catégories standard du relevé. Contacte moi avec la liste complète des amount_description pour compléter le mapping.
-                        </td>
-                      </tr>
+                    {releveMatch.non_classes_composants && releveMatch.non_classes_composants.length > 0 && (
+                      <>
+                        <tr style={{background:dark?'#2b2411':'#fdf6e3'}}>
+                          <td colSpan={4} style={{padding:'10px',fontSize:11,color:C.yellow,fontWeight:700}}>
+                            ⚠️ {releveMatch.non_classes_composants.length} amount_description{releveMatch.non_classes_composants.length>1?'s':''} non classé{releveMatch.non_classes_composants.length>1?'s':''} — total {fmt$(releveMatch.reste_non_classe)} (probablement à ajouter au mapping d'une catégorie)
+                          </td>
+                        </tr>
+                        {releveMatch.non_classes_composants.map((c:any, i:number) => (
+                          <tr key={`nc-${i}`} style={{background:dark?'#1a1408':'#fffbea'}}>
+                            <td style={{padding:'4px 10px',paddingLeft:30,fontSize:10,color:C.yellow,fontFamily:'monospace'}}>
+                              ↳ {c.amount_description} <span style={{fontStyle:'italic'}}>[{c.transaction_type}]</span> · {c.count} lignes
+                            </td>
+                            <td style={{padding:'4px 10px',textAlign:'right',fontFamily:'monospace',fontSize:11,color:c.total<0?C.red:C.yellow}}>{fmt$(c.total)}</td>
+                            <td colSpan={2}></td>
+                          </tr>
+                        ))}
+                      </>
                     )}
                   </tbody>
                 </table>

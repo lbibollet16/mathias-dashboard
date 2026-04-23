@@ -56,9 +56,40 @@ export async function GET(req: NextRequest) {
 
     const totalTx = Number(tx.reduce((s, t) => s + Number(t.amount || 0), 0).toFixed(2))
 
+    // Breakdown TSV complet par (amount_description, transaction_type)
+    const breakdownMap = new Map<string, { amount_description: string; transaction_type: string; amount_type: string; count: number; total: number }>()
+    for (const t of tx) {
+      const key = `${t.amount_description || '(null)'}|${t.transaction_type || '(null)'}|${t.amount_type || '(null)'}`
+      const ex = breakdownMap.get(key) || {
+        amount_description: t.amount_description || '(null)',
+        transaction_type: t.transaction_type || '(null)',
+        amount_type: t.amount_type || '(null)',
+        count: 0, total: 0,
+      }
+      ex.count++
+      ex.total += Number(t.amount || 0)
+      breakdownMap.set(key, ex)
+    }
+    const breakdown = [...breakdownMap.values()].map(b => ({ ...b, total: Number(b.total.toFixed(2)) }))
+      .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
+
     // Helpers
     const sumWhere = (fn: (t: any) => boolean) =>
       Number(tx.filter(fn).reduce((s, t) => s + Number(t.amount || 0), 0).toFixed(2))
+
+    // Retourne aussi la liste des composants (breakdown détaillé) d'une catégorie
+    function composantsOf(fn: (t: any) => boolean) {
+      const m = new Map<string, { amount_description: string; transaction_type: string; count: number; total: number }>()
+      for (const t of tx) {
+        if (!fn(t)) continue
+        const k = `${t.amount_description || '(null)'}|${t.transaction_type || '(null)'}`
+        const ex = m.get(k) || { amount_description: t.amount_description || '(null)', transaction_type: t.transaction_type || '(null)', count: 0, total: 0 }
+        ex.count++
+        ex.total += Number(t.amount || 0)
+        m.set(k, ex)
+      }
+      return [...m.values()].map(b => ({ ...b, total: Number(b.total.toFixed(2)) })).sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
+    }
     const isOrder = (t: any) => t.transaction_type === 'Order'
     const isRefund = (t: any) => t.transaction_type === 'Refund'
     const desc = (t: any) => t.amount_description || ''
@@ -94,6 +125,28 @@ export async function GET(req: NextRequest) {
     const classifiedSum = ventes_total + remboursements_total + depenses_total
     const reste_non_classe = Number((totalTx - classifiedSum).toFixed(2))
 
+    // Filtres utilisés (pour produire les composants de chaque ligne)
+    const fFraisProduit = (t: any) => isOrder(t) && desc(t) === 'Principal'
+    const fExpedition = (t: any) => isOrder(t) && ['Shipping','ShippingTax','GiftWrap','GiftWrapTax'].includes(desc(t))
+    const fRembStockFba = (t: any) => ['REVERSAL_REIMBURSEMENT','WAREHOUSE_DAMAGE','WAREHOUSE_LOST','WAREHOUSE_DAMAGE_EXCEPTION','WAREHOUSE_LOST_MANIFEST'].includes(type(t)) || ['REVERSAL_REIMBURSEMENT','WAREHOUSE_DAMAGE','WAREHOUSE_LOST'].includes(desc(t))
+    const fVentesRembProduit = (t: any) => isRefund(t) && desc(t) === 'Principal'
+    const fVentesRembExp = (t: any) => isRefund(t) && ['Shipping','ShippingTax'].includes(desc(t))
+    const fDepensesRemb = (t: any) => isRefund(t) && Number(t.amount || 0) > 0 && !['Principal','Shipping','ShippingTax'].includes(desc(t))
+    const fRabaisPromo = (t: any) => isOrder(t) && (desc(t) === 'Promotion' || desc(t).toLowerCase().includes('promo'))
+    const fStorageFee = (t: any) => type(t) === 'Storage Fee' || desc(t) === 'Storage Fee'
+    const fRemovalComplete = (t: any) => type(t) === 'RemovalComplete' || desc(t) === 'RemovalComplete'
+    const fPublicite = (t: any) => type(t) === 'Cost of Advertising' || desc(t) === 'TransactionTotalAmount'
+    const fCommissions = (t: any) => commissionDescs.includes(desc(t))
+    const fRembInverses = (t: any) => type(t) === 'COMPENSATED_CLAWBACK' || desc(t) === 'COMPENSATED_CLAWBACK'
+
+    // Union de tous les filtres pour identifier ce qui N'EST PAS classé
+    const isClassifie = (t: any) =>
+      fFraisProduit(t) || fExpedition(t) || fRembStockFba(t)
+      || fVentesRembProduit(t) || fVentesRembExp(t) || fDepensesRemb(t)
+      || fRabaisPromo(t) || fStorageFee(t) || fRemovalComplete(t)
+      || fPublicite(t) || fCommissions(t) || fRembInverses(t)
+    const non_classes_composants = composantsOf((t: any) => !isClassifie(t))
+
     return NextResponse.json({
       settlement_id: s.settlement_id,
       settlement_start: s.settlement_start,
@@ -103,28 +156,30 @@ export async function GET(req: NextRequest) {
       profits_nets_calcules: totalTx,
       ventes: {
         total: ventes_total,
-        frais_produit,
-        expedition: expedition_ventes,
-        remboursements_stock_fba: remb_stock_fba,
+        frais_produit, frais_produit_composants: composantsOf(fFraisProduit),
+        expedition: expedition_ventes, expedition_composants: composantsOf(fExpedition),
+        remboursements_stock_fba: remb_stock_fba, remboursements_stock_fba_composants: composantsOf(fRembStockFba),
       },
       remboursements: {
         total: remboursements_total,
-        depenses_rembourses,
+        depenses_rembourses, depenses_rembourses_composants: composantsOf(fDepensesRemb),
         ventes_remboursees_total: ventes_remb_total,
-        ventes_remboursees_expedition: ventes_remb_expedition,
-        ventes_remboursees_frais_produit: ventes_remb_produit,
+        ventes_remboursees_expedition: ventes_remb_expedition, ventes_remb_exp_composants: composantsOf(fVentesRembExp),
+        ventes_remboursees_frais_produit: ventes_remb_produit, ventes_remb_produit_composants: composantsOf(fVentesRembProduit),
       },
       depenses: {
         total: depenses_total,
-        rabais_promotionnels: rabais_promo,
+        rabais_promotionnels: rabais_promo, rabais_composants: composantsOf(fRabaisPromo),
         frais_fba_total,
-        frais_fba_stockage: storage_fee,
-        frais_fba_autre: removal_complete,
-        publicite,
-        commissions_amazon: commissions,
-        remboursements_inverses_fba: remb_inverses,
+        frais_fba_stockage: storage_fee, frais_fba_stockage_composants: composantsOf(fStorageFee),
+        frais_fba_autre: removal_complete, frais_fba_autre_composants: composantsOf(fRemovalComplete),
+        publicite, publicite_composants: composantsOf(fPublicite),
+        commissions_amazon: commissions, commissions_composants: composantsOf(fCommissions),
+        remboursements_inverses_fba: remb_inverses, remb_inverses_composants: composantsOf(fRembInverses),
       },
       reste_non_classe,
+      non_classes_composants,
+      breakdown_complet: breakdown,
     })
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message || String(e) }, { status: 500 })
