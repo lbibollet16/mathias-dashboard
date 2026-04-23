@@ -4,6 +4,7 @@
 
 import { supabaseAdmin } from './supabase'
 import { detectVariant } from './amazon-inventory'
+import { loadManualMappings, distributeToBases } from './amazon-mapping'
 
 export interface CreateAuditInput {
   mois: string              // YYYY-MM
@@ -75,6 +76,9 @@ export async function createAuditSnapshot(input: CreateAuditInput): Promise<Crea
       .limit(1)
     const latestSnap = snapDates && snapDates[0]?.snapshot_date
 
+    // Charger les multi-mappings manuels pour convertir packs Amazon → unités physiques
+    const manualMappings = await loadManualMappings()
+
     const fbaByBase = new Map<string, number>()
     if (latestSnap) {
       let f = 0
@@ -86,13 +90,18 @@ export async function createAuditSnapshot(input: CreateAuditInput): Promise<Crea
           .range(f, f + 999)
         if (!data) break
         for (const row of data) {
-          const base = detectVariant(row.traction_code || row.sku).base
-          const total = Number(row.afn_fulfillable_quantity || 0)
+          const amazonTotal = Number(row.afn_fulfillable_quantity || 0)
             + Number(row.afn_inbound_working_quantity || 0)
             + Number(row.afn_inbound_shipped_quantity || 0)
             + Number(row.afn_inbound_receiving_quantity || 0)
             + Number(row.afn_reserved_quantity || 0)
-          fbaByBase.set(base, (fbaByBase.get(base) || 0) + total)
+          if (amazonTotal === 0) continue
+          // Distribue vers les bases Traction en unités physiques (× multiplier si pack)
+          const dist = distributeToBases(row.sku, row.traction_code, amazonTotal, manualMappings)
+          for (const d of dist) {
+            if (!d.base) continue
+            fbaByBase.set(d.base, (fbaByBase.get(d.base) || 0) + d.physical_qty)
+          }
         }
         if (data.length < 1000) break
         f += 1000

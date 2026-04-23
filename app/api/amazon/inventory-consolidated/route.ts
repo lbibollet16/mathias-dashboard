@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { detectVariant, Location } from '@/lib/amazon-inventory'
+import { loadManualMappings, distributeToBases } from '@/lib/amazon-mapping'
 
 // GET — vue consolidée par "base product":
 //   - regroupe toutes les variantes Traction HUB/FBA/FBM/sans-préfixe
@@ -52,33 +53,45 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 3) Indexer les données Amazon FBA par traction_code (après résolution)
-    //    Pour les SKU avec traction_code connu, on peut les lier à la base
+    // 2b) Charger les multi-mappings manuels (SKU → [pk_codes × multiplier])
+    const manualMappings = await loadManualMappings()
+
+    // 3) Indexer les données Amazon FBA par base Traction (en UNITÉS PHYSIQUES).
+    //    Si un mapping manuel existe pour le SKU Amazon, on applique le multiplier
+    //    pour convertir les "packs" Amazon en unités physiques Traction.
     const amazonByBase = new Map<string, {
       afn_fulfillable: number; afn_inbound: number; afn_reserved: number;
       afn_unsellable: number; mfn_fulfillable: number;
       amazon_sku: string; asin_product_name: string | null; your_price: number;
     }>()
     for (const f of fbaRows) {
-      // Résoudre le base code: utiliser traction_code si dispo, sinon parser le sku Amazon
-      let base: string
-      if (f.traction_code) {
-        base = detectVariant(f.traction_code).base
-      } else {
-        base = detectVariant(f.sku).base
+      const fulfillable = Number(f.afn_fulfillable_quantity || 0)
+      const inbound = Number(f.afn_inbound_working_quantity || 0) + Number(f.afn_inbound_shipped_quantity || 0) + Number(f.afn_inbound_receiving_quantity || 0)
+      const reserved = Number(f.afn_reserved_quantity || 0)
+      const unsellable = Number(f.afn_unsellable_quantity || 0)
+      const mfn = Number(f.mfn_fulfillable_quantity || 0)
+
+      // distributeToBases applique le multiplier si manual mapping présent
+      // On distribue chaque quantité séparément pour garder la sémantique
+      const applyToBases = (amazonQty: number, field: 'afn_fulfillable'|'afn_inbound'|'afn_reserved'|'afn_unsellable'|'mfn_fulfillable') => {
+        if (amazonQty === 0) return
+        const dist = distributeToBases(f.sku, f.traction_code, amazonQty, manualMappings)
+        for (const d of dist) {
+          if (!d.base) continue
+          const ex = amazonByBase.get(d.base) || {
+            afn_fulfillable: 0, afn_inbound: 0, afn_reserved: 0,
+            afn_unsellable: 0, mfn_fulfillable: 0,
+            amazon_sku: f.sku, asin_product_name: f.product_name, your_price: Number(f.your_price || 0),
+          }
+          ex[field] += d.physical_qty
+          amazonByBase.set(d.base, ex)
+        }
       }
-      if (!base) continue
-      const ex = amazonByBase.get(base) || {
-        afn_fulfillable: 0, afn_inbound: 0, afn_reserved: 0,
-        afn_unsellable: 0, mfn_fulfillable: 0,
-        amazon_sku: f.sku, asin_product_name: f.product_name, your_price: Number(f.your_price || 0),
-      }
-      ex.afn_fulfillable += Number(f.afn_fulfillable_quantity || 0)
-      ex.afn_inbound += Number(f.afn_inbound_working_quantity || 0) + Number(f.afn_inbound_shipped_quantity || 0) + Number(f.afn_inbound_receiving_quantity || 0)
-      ex.afn_reserved += Number(f.afn_reserved_quantity || 0)
-      ex.afn_unsellable += Number(f.afn_unsellable_quantity || 0)
-      ex.mfn_fulfillable += Number(f.mfn_fulfillable_quantity || 0)
-      amazonByBase.set(base, ex)
+      applyToBases(fulfillable, 'afn_fulfillable')
+      applyToBases(inbound, 'afn_inbound')
+      applyToBases(reserved, 'afn_reserved')
+      applyToBases(unsellable, 'afn_unsellable')
+      applyToBases(mfn, 'mfn_fulfillable')
     }
 
     // 4) Grouper les variantes Traction par base code
