@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { loadManualMappings } from '@/lib/amazon-mapping'
 
 // GET /api/amazon/closure/lautopak-reimb-lines?id=XXX
 //
-// Retourne les lignes à entrer dans la facture LAUTOPAK SÉPARÉE pour les
-// pièces remboursées par Amazon (Lost/Damaged/CustomerReturn cash).
-//
-// Chaque ligne = 1 reimbursement cash :
-//   SKU Amazon | pk_code FBA | qty | prix unitaire (cost Amazon) | total
-// Total = somme des amount_total des reimbursements cash
-//       = ce que la facture LAUTOPAK reimb doit totaliser.
+// Lignes à entrer dans la 2e facture LAUTOPAK (pièces remboursées cash).
+// Regroupement par pk_code cible (via multi-mapping si dispo, sinon auto-strip).
+// Prix unitaires arrondis à 0,10 avec balance auto pour que le total = somme
+// des amount_total cash reimbursements (= "Remb. de stock FBA" du relevé).
 
 export async function GET(req: NextRequest) {
   const id = req.nextUrl.searchParams.get('id')
@@ -30,28 +28,114 @@ export async function GET(req: NextRequest) {
 
     const cashOnly = (reimbs || []).filter((r: any) => Number(r.quantity_reimbursed_cash || 0) > 0)
 
-    // Calculer le pk_code FBA à utiliser (même logique que step 2)
-    const lignes = cashOnly.map((r: any) => {
-      const tc = r.traction_code || ''
-      const stripped = tc.replace(/^[A]/, '').replace(/^(HUB|FBA|FBM)-/i, '').replace(/-(HUB|FBA|FBM)\d*$/i, '')
-      const fbaPk = stripped ? `FBA-${stripped}` : null
-      const qty = Number(r.quantity_reimbursed_cash || 0)
-      const amount = Number(r.amount_total || 0)
-      const unitPrice = qty > 0 ? Number((amount / qty).toFixed(2)) : Number(r.amount_per_unit || 0)
-      return {
-        reimbursement_id: r.reimbursement_id,
-        sku: r.sku,
-        traction_code: r.traction_code,
-        fba_pk_code: fbaPk,
-        reason: r.reason,
-        product_name: r.product_name,
-        qty,
-        prix_unitaire: unitPrice,
-        montant: Number(amount.toFixed(2)),
+    // Résoudre pk_code cible : manual mapping > auto-strip
+    const manualMappings = await loadManualMappings()
+    const resolvePkCode = (amazonSku: string, tractionCode: string | null): { pk: string; mult: number; manual: boolean } => {
+      const manual = manualMappings.get(amazonSku)
+      if (manual && manual.length > 0) {
+        return { pk: manual[0].pk_code, mult: manual[0].multiplier, manual: true }
       }
-    }).sort((a: any, b: any) => b.montant - a.montant)
+      const tc = tractionCode || ''
+      const stripped = tc.replace(/^[A]/, '').replace(/^(HUB|FBA|FBM)-/i, '').replace(/-(HUB|FBA|FBM)\d*$/i, '')
+      return { pk: stripped ? `FBA-${stripped}` : (tractionCode || amazonSku), mult: 1, manual: false }
+    }
 
-    const total_facture = Number(lignes.reduce((s: number, l: any) => s + l.montant, 0).toFixed(2))
+    // Regroupement par pk_code cible
+    type Variante = { reimbursement_id: string; amazon_sku: string; traction_code: string | null; reason: string | null; qty: number; multiplier: number; qty_lautopak: number; amount_source: number }
+    type Group = {
+      pk_code: string
+      variantes: Variante[]
+      product_name: string | null
+      qty_amazon_total: number
+      qty_lautopak_total: number
+      amount: number
+      prix_unitaire: number
+      amount_balanced: number
+      manual_mapping: boolean
+    }
+    const byPk = new Map<string, Group>()
+    for (const r of cashOnly) {
+      const qty = Number(r.quantity_reimbursed_cash || 0)
+      const amt = Number(r.amount_total || 0)
+      const { pk, mult, manual } = resolvePkCode(r.sku, r.traction_code)
+      const qtyLpk = qty * mult
+      const entry = byPk.get(pk) || {
+        pk_code: pk, variantes: [],
+        product_name: r.product_name,
+        qty_amazon_total: 0, qty_lautopak_total: 0,
+        amount: 0, prix_unitaire: 0, amount_balanced: 0,
+        manual_mapping: manual,
+      }
+      entry.qty_amazon_total += qty
+      entry.qty_lautopak_total += qtyLpk
+      entry.amount += amt
+      entry.variantes.push({
+        reimbursement_id: r.reimbursement_id, amazon_sku: r.sku, traction_code: r.traction_code,
+        reason: r.reason, qty, multiplier: mult, qty_lautopak: qtyLpk,
+        amount_source: Number(amt.toFixed(2)),
+      })
+      if (!entry.product_name && r.product_name) entry.product_name = r.product_name
+      byPk.set(pk, entry)
+    }
+
+    // Balance : prix unitaire arrondi à 0,10, ajustement pour matcher le total cash
+    const target = Number(cashOnly.reduce((s, r: any) => s + Number(r.amount_total || 0), 0).toFixed(2))
+    const roundToTenth = (n: number) => Math.round(n * 10) / 10
+    const groups = [...byPk.values()]
+    for (const g of groups) {
+      const divQty = g.qty_lautopak_total || g.qty_amazon_total
+      const raw = divQty !== 0 ? g.amount / divQty : 0
+      g.prix_unitaire = roundToTenth(raw)
+      g.amount_balanced = Number((g.prix_unitaire * divQty).toFixed(2))
+    }
+    let delta = Number((target - groups.reduce((s, g) => s + g.amount_balanced, 0)).toFixed(2))
+    let adjustments = 0
+    if (Math.abs(delta) >= 0.005) {
+      const direction = delta > 0 ? 1 : -1
+      let remaining = Math.abs(delta)
+      const sorted = [...groups].filter(g => (g.qty_lautopak_total || g.qty_amazon_total) > 0)
+        .sort((a, b) => (b.qty_lautopak_total || b.qty_amazon_total) - (a.qty_lautopak_total || a.qty_amazon_total))
+      for (const g of sorted) {
+        if (remaining < 0.005) break
+        const divQty = g.qty_lautopak_total || g.qty_amazon_total
+        const stepValue = divQty * 0.10
+        if (stepValue === 0) continue
+        const maxSteps = Math.floor(remaining / stepValue)
+        if (maxSteps <= 0) continue
+        const steps = Math.min(maxSteps, 20)
+        g.prix_unitaire = Number((g.prix_unitaire + direction * steps * 0.10).toFixed(2))
+        g.amount_balanced = Number((g.prix_unitaire * divQty).toFixed(2))
+        remaining = Number((remaining - steps * stepValue).toFixed(2))
+        adjustments++
+      }
+      if (remaining >= 0.005 && sorted.length > 0) {
+        const biggest = sorted[0]
+        const divQty = biggest.qty_lautopak_total || biggest.qty_amazon_total
+        biggest.amount_balanced = Number((biggest.amount_balanced + direction * remaining).toFixed(2))
+        biggest.prix_unitaire = Number((biggest.amount_balanced / divQty).toFixed(2))
+        adjustments++
+      }
+    }
+
+    const lignes = groups.map(g => ({
+      pk_code: g.pk_code,
+      manual_mapping: g.manual_mapping,
+      variantes: g.variantes,
+      amazon_skus: g.variantes.map(v => v.amazon_sku),
+      product_name: g.product_name,
+      qty: g.qty_amazon_total,
+      qty_lautopak: g.qty_lautopak_total,
+      amount: g.amount_balanced,
+      prix_unitaire: g.prix_unitaire,
+      // backward compat
+      sku: g.variantes.length === 1 ? g.variantes[0].amazon_sku : `${g.variantes.length} variantes`,
+      fba_pk_code: g.pk_code,
+      reason: g.variantes.map(v => v.reason).filter(Boolean).join(', '),
+      reimbursement_id: g.variantes.map(v => v.reimbursement_id).join(', '),
+      montant: g.amount_balanced,
+    })).sort((a, b) => b.amount - a.amount)
+
+    const total_facture = Number(lignes.reduce((s: number, l: any) => s + (l.amount || 0), 0).toFixed(2))
 
     return NextResponse.json({
       settlement_id: s.settlement_id,
@@ -61,6 +145,9 @@ export async function GET(req: NextRequest) {
       lautopak_reimb_invoice_date: s.lautopak_reimb_invoice_date,
       nb_lignes: lignes.length,
       total_facture,
+      target_settlement: target,   // somme brute des cash reimbursements
+      adjustments,
+      balance_ok: Math.abs(total_facture - target) < 0.01,
       lignes,
     })
   } catch (e: any) {
