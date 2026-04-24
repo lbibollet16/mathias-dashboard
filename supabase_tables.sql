@@ -404,6 +404,19 @@ CREATE TABLE IF NOT EXISTS amazon_unsellable_actions (
 CREATE INDEX IF NOT EXISTS idx_amz_unsell_settlement ON amazon_unsellable_actions(settlement_id);
 ALTER TABLE amazon_unsellable_actions DISABLE ROW LEVEL SECURITY;
 
+-- Cases à cocher persistantes pour les lignes de facture LAUTOPAK (étape 1)
+-- Permet de marquer "ligne saisie dans LAUTOPAK" par (settlement, sku).
+CREATE TABLE IF NOT EXISTS amazon_lautopak_lines_facturees (
+  id BIGSERIAL PRIMARY KEY,
+  settlement_id TEXT NOT NULL,
+  sku TEXT NOT NULL,
+  facturee_le TIMESTAMPTZ DEFAULT NOW(),
+  facturee_par TEXT,
+  UNIQUE (settlement_id, sku)
+);
+CREATE INDEX IF NOT EXISTS idx_amz_lautopak_fact_settlement ON amazon_lautopak_lines_facturees(settlement_id);
+ALTER TABLE amazon_lautopak_lines_facturees DISABLE ROW LEVEL SECURITY;
+
 -- Multi-mapping : un SKU Amazon → plusieurs PKCodes Traction (sommés pour le stock)
 CREATE TABLE IF NOT EXISTS amazon_sku_pkcodes (
   id BIGSERIAL PRIMARY KEY,

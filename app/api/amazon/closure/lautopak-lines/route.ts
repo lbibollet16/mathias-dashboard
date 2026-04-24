@@ -145,6 +145,20 @@ export async function GET(req: NextRequest) {
       .filter(l => l.qty !== 0 || l.amount !== 0)
       .sort((a, b) => a.amount - b.amount)
 
+    // Enrichir avec l'état "facturée" (checkbox persistante)
+    const { data: facturees } = await supabaseAdmin
+      .from('amazon_lautopak_lines_facturees')
+      .select('sku, facturee_le, facturee_par')
+      .eq('settlement_id', id)
+    const facturSet = new Map<string, any>()
+    for (const f of facturees || []) facturSet.set(f.sku, f)
+    for (const l of lignes as any[]) {
+      const f = facturSet.get(l.sku)
+      l.facturee = !!f
+      l.facturee_le = f?.facturee_le || null
+      l.facturee_par = f?.facturee_par || null
+    }
+
     const total_calcule = Number(lignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
     const total_refunds = Number(refunds_lignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
     // "Frais produit" côté Amazon = Orders Principal (brut, sans refunds)

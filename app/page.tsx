@@ -5226,6 +5226,23 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     } catch {}
   }
 
+  async function toggleLautopakFacturee(settlementId: string, sku: string, dejaFacturee: boolean) {
+    try {
+      await fetch('/api/amazon/lautopak-facturees', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          settlement_id: settlementId,
+          sku,
+          employe: profil?.nom || profil?.email || 'Inconnu',
+          action: dejaFacturee ? 'uncheck' : 'check',
+        }),
+      })
+      // Recharger les lignes pour mettre à jour l'ordre
+      await chargerLautopakLines(settlementId)
+    } catch (e: any) { alert('Erreur : ' + e.message) }
+  }
+
   async function saveUnsellableAction(settlementId: string, sku: string, tractionCode: string | null, patch: { action_type?: string|null; amazon_ref?: string; notes?: string }) {
     try {
       await fetch('/api/amazon/unsellable-actions', {
@@ -6272,39 +6289,58 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     </details>
                   )}
 
-                  {/* Tableau Orders (pour facture LAUTOPAK) */}
+                  {/* Tableau Orders (pour facture LAUTOPAK) — non cochées en haut, cochées en bas */}
                   <div style={{overflow:'auto',flex:1}}>
-                    <div style={{padding:'8px 18px 4px',fontSize:11,fontWeight:800,color:C.blue,background:dark?'#0d1829':'#e8f0fe'}}>
-                      📋 Lignes à entrer dans LAUTOPAK (Orders Principal brut)
-                    </div>
-                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-                      <thead style={{position:'sticky',top:0,background:thBg,zIndex:1}}><tr>
-                        <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
-                        <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Code Traction</th>
-                        <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Produit</th>
-                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.green,borderBottom:`1px solid ${bdr}`}}>Qté</th>
-                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Prix unit.</th>
-                        <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.blue,borderBottom:`1px solid ${bdr}`}}>Montant</th>
-                      </tr></thead>
-                      <tbody>
-                        {lautopakLines.lignes.map((l:any, i:number) => (
-                          <tr key={i} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
-                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11}}>{l.sku}</td>
-                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:l.traction_code?C.blue:C.red}}>{l.traction_code||'— non mappé'}</td>
-                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11,maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name}>{l.product_name||'—'}</td>
-                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:C.green}}>{l.qty}</td>
-                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{l.prix_unitaire.toFixed(2)} $</td>
-                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:C.blue}}>{fmt$(l.amount)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                      <tfoot>
-                        <tr style={{background:dark?'#1a1a1a':'#f0f0f0'}}>
-                          <td colSpan={5} style={{padding:'10px',textAlign:'right',fontWeight:900,borderTop:`2px solid ${bdr}`}}>TOTAL LAUTOPAK :</td>
-                          <td style={{padding:'10px',textAlign:'right',fontWeight:900,fontSize:14,color:C.blue,borderTop:`2px solid ${bdr}`}}>{fmt$(lautopakLines.total_calcule)}</td>
-                        </tr>
-                      </tfoot>
-                    </table>
+                    {(() => {
+                      const sorted = [...lautopakLines.lignes].sort((a:any,b:any) => (a.facturee?1:0) - (b.facturee?1:0))
+                      const faitCount = sorted.filter((l:any) => l.facturee).length
+                      return (
+                        <>
+                          <div style={{padding:'8px 18px 4px',fontSize:11,fontWeight:800,color:C.blue,background:dark?'#0d1829':'#e8f0fe',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
+                            <span>📋 Lignes à entrer dans LAUTOPAK (Orders Principal brut)</span>
+                            <span style={{fontSize:10,color:sub,fontWeight:400}}>Coche au fur et à mesure → la ligne descend en bas. Progression : <strong style={{color:faitCount===sorted.length?C.green:C.yellow}}>{faitCount}/{sorted.length}</strong></span>
+                          </div>
+                          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                            <thead style={{position:'sticky',top:0,background:thBg,zIndex:1}}><tr>
+                              <th style={{padding:'8px 10px',textAlign:'center',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`,width:30}}>✓</th>
+                              <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
+                              <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Code Traction</th>
+                              <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Produit</th>
+                              <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.green,borderBottom:`1px solid ${bdr}`}}>Qté</th>
+                              <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Prix unit.</th>
+                              <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.blue,borderBottom:`1px solid ${bdr}`}}>Montant</th>
+                            </tr></thead>
+                            <tbody>
+                              {sorted.map((l:any, i:number) => {
+                                const fact = !!l.facturee
+                                return (
+                                  <tr key={l.sku+i} style={{background:fact?(dark?'#0d2a18':'#e6f4ea'):'transparent',opacity:fact?.7:1}}>
+                                    <td style={{padding:'4px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                                      <input type="checkbox" checked={fact}
+                                        onChange={()=>toggleLautopakFacturee(lautopakLines.settlement_id, l.sku, fact)}
+                                        title={fact ? `Facturée le ${String(l.facturee_le||'').split('T')[0]} par ${l.facturee_par||'?'}` : 'Marquer comme saisie dans LAUTOPAK'}
+                                        style={{accentColor:C.green,width:16,height:16,cursor:'pointer'}}/>
+                                    </td>
+                                    <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11,textDecoration:fact?'line-through':'none'}}>{l.sku}</td>
+                                    <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:l.traction_code?C.blue:C.red}}>{l.traction_code||'— non mappé'}</td>
+                                    <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11,maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name}>{l.product_name||'—'}</td>
+                                    <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:fact?sub:C.green}}>{l.qty}</td>
+                                    <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{l.prix_unitaire.toFixed(2)} $</td>
+                                    <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:fact?sub:C.blue}}>{fmt$(l.amount)}</td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                            <tfoot>
+                              <tr style={{background:dark?'#1a1a1a':'#f0f0f0'}}>
+                                <td colSpan={6} style={{padding:'10px',textAlign:'right',fontWeight:900,borderTop:`2px solid ${bdr}`}}>TOTAL LAUTOPAK :</td>
+                                <td style={{padding:'10px',textAlign:'right',fontWeight:900,fontSize:14,color:C.blue,borderTop:`2px solid ${bdr}`}}>{fmt$(lautopakLines.total_calcule)}</td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </>
+                      )
+                    })()}
 
                     {/* Refunds séparés */}
                     {lautopakLines.refunds_lignes && lautopakLines.refunds_lignes.length > 0 && (
