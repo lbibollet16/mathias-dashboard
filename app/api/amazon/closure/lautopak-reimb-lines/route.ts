@@ -147,6 +147,21 @@ export async function GET(req: NextRequest) {
       montant: g.amount_balanced,
     })).sort((a, b) => b.amount - a.amount)
 
+    // Enrichir avec l'état "facturée" (checkbox persistante).
+    // Pour éviter collision avec step 1 (même table), on préfixe la clé par "reimb:".
+    const { data: facturees } = await supabaseAdmin
+      .from('amazon_lautopak_lines_facturees')
+      .select('sku, facturee_le, facturee_par')
+      .eq('settlement_id', id)
+    const facturSet = new Map<string, any>()
+    for (const f of facturees || []) facturSet.set(f.sku, f)
+    for (const l of lignes as any[]) {
+      const f = facturSet.get('reimb:' + l.pk_code)
+      l.facturee = !!f
+      l.facturee_le = f?.facturee_le || null
+      l.facturee_par = f?.facturee_par || null
+    }
+
     const total_facture = Number(lignes.reduce((s: number, l: any) => s + (l.amount || 0), 0).toFixed(2))
 
     return NextResponse.json({

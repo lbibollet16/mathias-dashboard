@@ -5264,6 +5264,43 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     } catch {}
   }
 
+  async function toggleLautopakReimbFacturee(settlementId: string, pkCode: string, dejaFacturee: boolean) {
+    const nowIso = new Date().toISOString()
+    const employe = profil?.nom || profil?.email || 'Inconnu'
+    const key = 'reimb:' + pkCode   // namespace pour éviter collision avec orders
+    setLautopakReimbLines((prev: any) => {
+      if (!prev) return prev
+      const newLignes = prev.lignes.map((l: any) =>
+        l.pk_code === pkCode
+          ? { ...l, facturee: !dejaFacturee, facturee_le: !dejaFacturee ? nowIso : null, facturee_par: !dejaFacturee ? employe : null }
+          : l
+      )
+      return { ...prev, lignes: newLignes }
+    })
+    try {
+      const r = await fetch('/api/amazon/lautopak-facturees', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          settlement_id: settlementId, sku: key, employe,
+          action: dejaFacturee ? 'uncheck' : 'check',
+        }),
+      })
+      if (!r.ok) {
+        let msg = 'HTTP ' + r.status
+        try { const j = await r.json(); msg += ' — ' + (j.erreur || JSON.stringify(j)) } catch {}
+        throw new Error(msg)
+      }
+    } catch (e: any) {
+      setLautopakReimbLines((prev: any) => {
+        if (!prev) return prev
+        const newLignes = prev.lignes.map((l: any) => l.pk_code === pkCode ? { ...l, facturee: dejaFacturee } : l)
+        return { ...prev, lignes: newLignes }
+      })
+      alert('Erreur : ' + e.message)
+    }
+  }
+
   async function toggleLautopakFacturee(settlementId: string, pkCodeKey: string, dejaFacturee: boolean) {
     // Mise à jour optimiste : la ligne bouge immédiatement (match par pk_code)
     const nowIso = new Date().toISOString()
@@ -6184,6 +6221,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                               <div style={{overflow:'auto',maxHeight:260,border:`1px solid ${bdr}`,borderRadius:6}}>
                                 <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
                                   <thead style={{position:'sticky',top:0,background:thBg}}><tr>
+                                    <th style={{padding:'6px 8px',textAlign:'center',fontSize:9,color:sub,borderBottom:`1px solid ${bdr}`,width:28}}>✓</th>
                                     <th style={{padding:'6px 8px',textAlign:'left',fontSize:9,color:C.green,borderBottom:`1px solid ${bdr}`}}>PKCode</th>
                                     <th style={{padding:'6px 8px',textAlign:'left',fontSize:9,color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon (variantes)</th>
                                     <th style={{padding:'6px 8px',textAlign:'right',fontSize:9,color:C.yellow,borderBottom:`1px solid ${bdr}`}}>Qté Amz</th>
@@ -6192,34 +6230,43 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                     <th style={{padding:'6px 8px',textAlign:'right',fontSize:9,color:C.blue,borderBottom:`1px solid ${bdr}`}}>Montant</th>
                                   </tr></thead>
                                   <tbody>
-                                    {lautopakReimbLines.lignes.map((ll:any, li:number) => (
-                                      <tr key={li} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
-                                        <td onClick={()=>ll.pk_code && copyToClipboard(ll.pk_code)} title={ll.pk_code ? 'Cliquer pour copier' : ''}
-                                            style={{padding:'4px 8px',fontFamily:'monospace',fontWeight:800,fontSize:11,color:ll.manual_mapping?C.green:C.red,cursor:ll.pk_code?'pointer':'default',background:copiedCode===ll.pk_code?C.green+'33':'transparent',borderBottom:`1px solid ${bdr}`}}>
-                                          {copiedCode===ll.pk_code && ll.pk_code ? '✓ copié' : (<>
-                                            {ll.manual_mapping && <span style={{fontSize:9,color:C.green,marginRight:3}}>🔗</span>}
-                                            {ll.pk_code || '—'}
-                                          </>)}
-                                        </td>
-                                        <td style={{padding:'4px 8px',fontFamily:'monospace',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>
-                                          {(ll.variantes||[]).map((v:any, vi:number) => (
-                                            <span key={vi} style={{marginRight:vi<(ll.variantes.length-1)?5:0}}>
-                                              <strong onClick={()=>copyToClipboard(v.amazon_sku)} title="Cliquer pour copier"
-                                                style={{color:dark?'#e0e0e0':'#333',cursor:'pointer',background:copiedCode===v.amazon_sku?C.green+'33':'transparent',padding:'0 2px',borderRadius:3}}>
-                                                {copiedCode===v.amazon_sku ? '✓' : v.amazon_sku}
-                                              </strong>
-                                              <span style={{color:C.yellow,marginLeft:2}}>({v.qty})</span>
-                                              {v.multiplier > 1 && <span style={{color:sub,fontSize:9}}>×{v.multiplier}</span>}
-                                              {vi<(ll.variantes.length-1) && <span style={{color:sub,margin:'0 2px'}}>+</span>}
-                                            </span>
-                                          ))}
-                                        </td>
-                                        <td style={{padding:'4px 8px',textAlign:'right',color:C.yellow,borderBottom:`1px solid ${bdr}`}}>{ll.qty}</td>
-                                        <td style={{padding:'4px 8px',textAlign:'right',fontWeight:700,color:C.green,borderBottom:`1px solid ${bdr}`}}>{ll.qty_lautopak || ll.qty}</td>
-                                        <td style={{padding:'4px 8px',textAlign:'right',color:sub,fontSize:10,borderBottom:`1px solid ${bdr}`}}>{Number(ll.prix_unitaire||0).toFixed(2)} $</td>
-                                        <td style={{padding:'4px 8px',textAlign:'right',fontWeight:800,color:C.blue,borderBottom:`1px solid ${bdr}`}}>{fmt$(ll.amount)}</td>
-                                      </tr>
-                                    ))}
+                                    {[...lautopakReimbLines.lignes].sort((a:any,b:any)=>((a.facturee?1:0)-(b.facturee?1:0))||(b.amount-a.amount)).map((ll:any, li:number) => {
+                                      const fact = !!ll.facturee
+                                      return (
+                                        <tr key={li} style={{background:fact?(dark?'#0d2a18':'#e6f4ea'):'transparent',opacity:fact?.7:1}}>
+                                          <td style={{padding:'3px 8px',textAlign:'center',borderBottom:`1px solid ${bdr}`}}>
+                                            <input type="checkbox" checked={fact}
+                                              onChange={()=>toggleLautopakReimbFacturee(lautopakReimbLines.settlement_id, ll.pk_code, fact)}
+                                              title={fact ? `Facturée le ${String(ll.facturee_le||'').split('T')[0]} par ${ll.facturee_par||'?'}` : 'Marquer comme saisie dans LAUTOPAK'}
+                                              style={{accentColor:C.green,width:14,height:14,cursor:'pointer'}}/>
+                                          </td>
+                                          <td onClick={()=>ll.pk_code && copyToClipboard(ll.pk_code)} title={ll.pk_code ? 'Cliquer pour copier' : ''}
+                                              style={{padding:'4px 8px',fontFamily:'monospace',fontWeight:800,fontSize:11,color:ll.manual_mapping?C.green:C.red,cursor:ll.pk_code?'pointer':'default',background:copiedCode===ll.pk_code?C.green+'33':'transparent',borderBottom:`1px solid ${bdr}`,textDecoration:fact?'line-through':'none'}}>
+                                            {copiedCode===ll.pk_code && ll.pk_code ? '✓ copié' : (<>
+                                              {ll.manual_mapping && <span style={{fontSize:9,color:C.green,marginRight:3}}>🔗</span>}
+                                              {ll.pk_code || '—'}
+                                            </>)}
+                                          </td>
+                                          <td style={{padding:'4px 8px',fontFamily:'monospace',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>
+                                            {(ll.variantes||[]).map((v:any, vi:number) => (
+                                              <span key={vi} style={{marginRight:vi<(ll.variantes.length-1)?5:0}}>
+                                                <strong onClick={()=>copyToClipboard(v.amazon_sku)} title="Cliquer pour copier"
+                                                  style={{color:dark?'#e0e0e0':'#333',cursor:'pointer',background:copiedCode===v.amazon_sku?C.green+'33':'transparent',padding:'0 2px',borderRadius:3}}>
+                                                  {copiedCode===v.amazon_sku ? '✓' : v.amazon_sku}
+                                                </strong>
+                                                <span style={{color:C.yellow,marginLeft:2}}>({v.qty})</span>
+                                                {v.multiplier > 1 && <span style={{color:sub,fontSize:9}}>×{v.multiplier}</span>}
+                                                {vi<(ll.variantes.length-1) && <span style={{color:sub,margin:'0 2px'}}>+</span>}
+                                              </span>
+                                            ))}
+                                          </td>
+                                          <td style={{padding:'4px 8px',textAlign:'right',color:C.yellow,borderBottom:`1px solid ${bdr}`}}>{ll.qty}</td>
+                                          <td style={{padding:'4px 8px',textAlign:'right',fontWeight:700,color:fact?sub:C.green,borderBottom:`1px solid ${bdr}`}}>{ll.qty_lautopak || ll.qty}</td>
+                                          <td style={{padding:'4px 8px',textAlign:'right',color:sub,fontSize:10,borderBottom:`1px solid ${bdr}`}}>{Number(ll.prix_unitaire||0).toFixed(2)} $</td>
+                                          <td style={{padding:'4px 8px',textAlign:'right',fontWeight:800,color:fact?sub:C.blue,borderBottom:`1px solid ${bdr}`}}>{fmt$(ll.amount)}</td>
+                                        </tr>
+                                      )
+                                    })}
                                   </tbody>
                                 </table>
                               </div>
