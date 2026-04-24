@@ -4975,6 +4975,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [reimbInvoiceDate, setReimbInvoiceDate] = useState('')
   const [releveRembStock, setReleveRembStock] = useState<Record<string,string>>({})  // saisie par settlement_id
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
+  const [expandedPk, setExpandedPk] = useState<Record<string, boolean>>({})
 
   async function copyToClipboard(text: string) {
     if (!text) return
@@ -6391,21 +6392,33 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                               {sorted.map((l:any, i:number) => {
                                 const fact = !!l.facturee
                                 const skus = l.amazon_skus || [l.sku]
+                                const sources = l.sources || []
+                                const multi = skus.length > 1 || sources.some((s:any) => s.multiplier > 1)
+                                const expanded = !!expandedPk[l.pk_code]
                                 const skuDisplay = skus.length === 1 ? skus[0] : `${skus.length} SKU`
-                                return (
-                                  <tr key={l.pk_code+i} style={{background:fact?(dark?'#0d2a18':'#e6f4ea'):'transparent',opacity:fact?.7:1}}>
+                                return (<React.Fragment key={l.pk_code+i}>
+                                  <tr style={{background:fact?(dark?'#0d2a18':'#e6f4ea'):'transparent',opacity:fact?.7:1}}>
                                     <td style={{padding:'4px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                                       <input type="checkbox" checked={fact}
                                         onChange={()=>toggleLautopakFacturee(lautopakLines.settlement_id, l.pk_code, fact)}
                                         title={fact ? `Facturée le ${String(l.facturee_le||'').split('T')[0]} par ${l.facturee_par||'?'}` : 'Marquer comme saisie dans LAUTOPAK'}
                                         style={{accentColor:C.green,width:16,height:16,cursor:'pointer'}}/>
                                     </td>
-                                    <td onClick={()=>skus.length===1 && copyToClipboard(skus[0])} title={skus.length===1 ? 'Cliquer pour copier' : `SKUs regroupés : ${skus.join(', ')}`}
-                                        style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11,textDecoration:fact?'line-through':'none',cursor:skus.length===1?'pointer':'help',background:copiedCode===skus[0]?C.green+'33':'transparent',transition:'background .2s'}}>
-                                      {copiedCode===skus[0] && skus.length===1 ? '✓ copié' : (<>
-                                        {skus.length > 1 && <span style={{fontSize:9,color:C.yellow,marginRight:4}}>⛙</span>}
-                                        {skuDisplay}
-                                      </>)}
+                                    <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11,textDecoration:fact?'line-through':'none'}}>
+                                      {multi && (
+                                        <button onClick={()=>setExpandedPk(p=>({...p,[l.pk_code]:!expanded}))}
+                                          style={{background:'transparent',border:'none',color:sub,cursor:'pointer',padding:'0 4px 0 0',fontSize:10}}>
+                                          {expanded ? '▼' : '▶'}
+                                        </button>
+                                      )}
+                                      <span onClick={()=>skus.length===1 && copyToClipboard(skus[0])}
+                                        title={skus.length===1 ? 'Cliquer pour copier' : `SKUs regroupés : ${skus.join(', ')} — clique ▶ pour voir le détail`}
+                                        style={{cursor:skus.length===1?'pointer':'help',background:copiedCode===skus[0]?C.green+'33':'transparent',padding:'1px 3px',borderRadius:3}}>
+                                        {copiedCode===skus[0] && skus.length===1 ? '✓ copié' : (<>
+                                          {skus.length > 1 && <span style={{fontSize:9,color:C.yellow,marginRight:4}}>⛙</span>}
+                                          {skuDisplay}
+                                        </>)}
+                                      </span>
                                     </td>
                                     <td onClick={()=>l.pk_code && copyToClipboard(l.pk_code)} title={l.pk_code ? (l.manual_mapping ? 'Multi-mapping manuel · Cliquer pour copier' : 'Cliquer pour copier') : ''}
                                         style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:l.pk_code?C.blue:C.red,cursor:l.pk_code?'pointer':'default',background:copiedCode===l.pk_code?C.green+'33':'transparent',transition:'background .2s'}}>
@@ -6419,7 +6432,41 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                     <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{l.prix_unitaire.toFixed(2)} $</td>
                                     <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:fact?sub:C.blue}}>{fmt$(l.amount)}</td>
                                   </tr>
-                                )
+                                  {multi && expanded && (
+                                    <tr style={{background:dark?'#0a0a0a':'#f5f7fa'}}>
+                                      <td colSpan={7} style={{padding:'6px 18px',borderBottom:`1px solid ${bdr}`}}>
+                                        <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase',marginBottom:4}}>Détail par SKU Amazon source :</div>
+                                        <table style={{width:'100%',fontSize:10,borderCollapse:'collapse'}}>
+                                          <thead><tr>
+                                            <th style={{padding:'3px 8px',textAlign:'left',color:sub,fontSize:9}}>SKU Amazon</th>
+                                            <th style={{padding:'3px 8px',textAlign:'right',color:sub,fontSize:9}}>Qté Amazon (ventes)</th>
+                                            <th style={{padding:'3px 8px',textAlign:'center',color:sub,fontSize:9}}>×Mult.</th>
+                                            <th style={{padding:'3px 8px',textAlign:'right',color:sub,fontSize:9}}>= Qté physique</th>
+                                            <th style={{padding:'3px 8px',textAlign:'right',color:sub,fontSize:9}}>Montant</th>
+                                          </tr></thead>
+                                          <tbody>
+                                            {sources.map((src:any, si:number) => (
+                                              <tr key={si}>
+                                                <td style={{padding:'3px 8px',fontFamily:'monospace',fontWeight:700}}>{src.amazon_sku}</td>
+                                                <td style={{padding:'3px 8px',textAlign:'right',fontWeight:700,color:C.green}}>{src.qty_amazon}</td>
+                                                <td style={{padding:'3px 8px',textAlign:'center',color:src.multiplier>1?C.yellow:sub,fontWeight:src.multiplier>1?700:400}}>×{src.multiplier}</td>
+                                                <td style={{padding:'3px 8px',textAlign:'right',fontWeight:700,color:C.blue}}>{src.qty_physical}</td>
+                                                <td style={{padding:'3px 8px',textAlign:'right',color:sub}}>{fmt$(src.amount)}</td>
+                                              </tr>
+                                            ))}
+                                            <tr style={{fontWeight:800,borderTop:`1px solid ${bdr}`}}>
+                                              <td style={{padding:'3px 8px',textAlign:'right',color:sub}}>Total :</td>
+                                              <td style={{padding:'3px 8px',textAlign:'right',color:C.green}}>{sources.reduce((s:number,x:any)=>s+x.qty_amazon,0)} ventes</td>
+                                              <td></td>
+                                              <td style={{padding:'3px 8px',textAlign:'right',color:C.blue}}>{l.qty} unités</td>
+                                              <td style={{padding:'3px 8px',textAlign:'right',color:C.blue}}>{fmt$(l.amount)}</td>
+                                            </tr>
+                                          </tbody>
+                                        </table>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </React.Fragment>)
                               })}
                             </tbody>
                             <tfoot>

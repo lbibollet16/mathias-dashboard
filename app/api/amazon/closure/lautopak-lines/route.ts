@@ -128,9 +128,11 @@ export async function GET(req: NextRequest) {
     // à pk_code FBA-U6913023 → 1 seule ligne FBA-U6913023 avec 11 ventes.
     // Si pas de mapping manuel, on garde traction_code auto-résolu comme clé.
     const manualMappings = await loadManualMappings()
+    type Source = { amazon_sku: string; qty_amazon: number; multiplier: number; qty_physical: number; amount: number }
     type PkLine = {
       pk_code: string
       amazon_skus: string[]
+      sources: Source[]
       product_name: string | null
       qty: number
       amount: number
@@ -139,32 +141,41 @@ export async function GET(req: NextRequest) {
     const groupByPkCode = (aggs: Iterable<Agg>, isRefund: boolean) => {
       const byPk = new Map<string, PkLine>()
       for (const a of aggs) {
+        const amazonQty = isRefund ? Math.abs(a.qty) : a.qty
         const manual = manualMappings.get(a.sku)
         if (manual && manual.length > 0) {
           const share = 1 / manual.length
           for (const m of manual) {
             const entry = byPk.get(m.pk_code) || {
-              pk_code: m.pk_code, amazon_skus: [],
+              pk_code: m.pk_code, amazon_skus: [], sources: [],
               product_name: a.product_name, qty: 0, amount: 0,
               has_manual_mapping: true,
             }
-            // multiplier : packs Amazon → unités physiques Traction
-            entry.qty += (isRefund ? Math.abs(a.qty) : a.qty) * m.multiplier
+            const physicalQty = amazonQty * m.multiplier
+            entry.qty += physicalQty
             entry.amount += a.amount * share
             if (!entry.amazon_skus.includes(a.sku)) entry.amazon_skus.push(a.sku)
+            entry.sources.push({
+              amazon_sku: a.sku, qty_amazon: amazonQty, multiplier: m.multiplier,
+              qty_physical: physicalQty, amount: Number((a.amount * share).toFixed(2)),
+            })
             if (!entry.product_name && a.product_name) entry.product_name = a.product_name
             byPk.set(m.pk_code, entry)
           }
         } else {
           const pk = a.traction_code || a.sku
           const entry = byPk.get(pk) || {
-            pk_code: pk, amazon_skus: [],
+            pk_code: pk, amazon_skus: [], sources: [],
             product_name: a.product_name, qty: 0, amount: 0,
             has_manual_mapping: false,
           }
-          entry.qty += isRefund ? Math.abs(a.qty) : a.qty
+          entry.qty += amazonQty
           entry.amount += a.amount
           if (!entry.amazon_skus.includes(a.sku)) entry.amazon_skus.push(a.sku)
+          entry.sources.push({
+            amazon_sku: a.sku, qty_amazon: amazonQty, multiplier: 1,
+            qty_physical: amazonQty, amount: Number(a.amount.toFixed(2)),
+          })
           if (!entry.product_name && a.product_name) entry.product_name = a.product_name
           byPk.set(pk, entry)
         }
@@ -176,8 +187,9 @@ export async function GET(req: NextRequest) {
       [...pkMap.values()].map(a => ({
         pk_code: a.pk_code,
         amazon_skus: a.amazon_skus,
-        sku: a.amazon_skus.length === 1 ? a.amazon_skus[0] : `${a.amazon_skus.length} SKU`,  // backward compat champ sku
-        traction_code: a.pk_code,   // backward compat : la colonne "Code Traction" = pk_code
+        sources: a.sources,   // détail par SKU source (qty, multiplier, physical, amount)
+        sku: a.amazon_skus.length === 1 ? a.amazon_skus[0] : `${a.amazon_skus.length} SKU`,
+        traction_code: a.pk_code,
         product_name: a.product_name,
         qty: a.qty,
         amount: Number(a.amount.toFixed(2)),
