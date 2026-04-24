@@ -4974,6 +4974,24 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [reimbInvoiceRef, setReimbInvoiceRef] = useState('')
   const [reimbInvoiceDate, setReimbInvoiceDate] = useState('')
   const [releveRembStock, setReleveRembStock] = useState<Record<string,string>>({})  // saisie par settlement_id
+  const [copiedCode, setCopiedCode] = useState<string | null>(null)
+
+  async function copyToClipboard(text: string) {
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedCode(text)
+      setTimeout(() => setCopiedCode(prev => prev === text ? null : prev), 1200)
+    } catch {
+      // Fallback si clipboard API bloquée
+      const el = document.createElement('textarea')
+      el.value = text; document.body.appendChild(el); el.select()
+      try { document.execCommand('copy') } catch {}
+      document.body.removeChild(el)
+      setCopiedCode(text)
+      setTimeout(() => setCopiedCode(prev => prev === text ? null : prev), 1200)
+    }
+  }
   const [releveMatch, setReleveMatch] = useState<any>(null)
   const [releveSaisi, setReleveSaisi] = useState<Record<string, string>>({})
   const [releveExpanded, setReleveExpanded] = useState<Record<string, boolean>>({})
@@ -6321,8 +6339,14 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                         title={fact ? `Facturée le ${String(l.facturee_le||'').split('T')[0]} par ${l.facturee_par||'?'}` : 'Marquer comme saisie dans LAUTOPAK'}
                                         style={{accentColor:C.green,width:16,height:16,cursor:'pointer'}}/>
                                     </td>
-                                    <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11,textDecoration:fact?'line-through':'none'}}>{l.sku}</td>
-                                    <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:l.traction_code?C.blue:C.red}}>{l.traction_code||'— non mappé'}</td>
+                                    <td onClick={()=>copyToClipboard(l.sku)} title="Cliquer pour copier"
+                                        style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11,textDecoration:fact?'line-through':'none',cursor:'pointer',background:copiedCode===l.sku?C.green+'33':'transparent',transition:'background .2s'}}>
+                                      {copiedCode===l.sku ? '✓ copié' : l.sku}
+                                    </td>
+                                    <td onClick={()=>l.traction_code && copyToClipboard(l.traction_code)} title={l.traction_code ? 'Cliquer pour copier' : ''}
+                                        style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:l.traction_code?C.blue:C.red,cursor:l.traction_code?'pointer':'default',background:copiedCode===l.traction_code?C.green+'33':'transparent',transition:'background .2s'}}>
+                                      {copiedCode===l.traction_code && l.traction_code ? '✓ copié' : (l.traction_code||'— non mappé')}
+                                    </td>
                                     <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11,maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name}>{l.product_name||'—'}</td>
                                     <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:fact?sub:C.green}}>{l.qty}</td>
                                     <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{l.prix_unitaire.toFixed(2)} $</td>
@@ -6360,8 +6384,14 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                           <tbody>
                             {lautopakLines.refunds_lignes.map((l:any, i:number) => (
                               <tr key={i} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
-                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11}}>{l.sku}</td>
-                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:l.traction_code?C.blue:C.red}}>{l.traction_code||'— non mappé'}</td>
+                                <td onClick={()=>copyToClipboard(l.sku)} title="Cliquer pour copier"
+                                    style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11,cursor:'pointer',background:copiedCode===l.sku?C.green+'33':'transparent',transition:'background .2s'}}>
+                                  {copiedCode===l.sku ? '✓ copié' : l.sku}
+                                </td>
+                                <td onClick={()=>l.traction_code && copyToClipboard(l.traction_code)} title={l.traction_code ? 'Cliquer pour copier' : ''}
+                                    style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:l.traction_code?C.blue:C.red,cursor:l.traction_code?'pointer':'default',background:copiedCode===l.traction_code?C.green+'33':'transparent',transition:'background .2s'}}>
+                                  {copiedCode===l.traction_code && l.traction_code ? '✓ copié' : (l.traction_code||'— non mappé')}
+                                </td>
                                 <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11,maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name}>{l.product_name||'—'}</td>
                                 <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:C.red}}>-{l.qty}</td>
                                 <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{Math.abs(l.prix_unitaire).toFixed(2)} $</td>
