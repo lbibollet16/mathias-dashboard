@@ -377,6 +377,14 @@ ALTER TABLE amazon_reimbursements
   ADD COLUMN IF NOT EXISTS inventaire_pk_code TEXT;
 CREATE INDEX IF NOT EXISTS idx_amz_reimb_ajuste ON amazon_reimbursements(inventaire_ajuste_le);
 
+-- Facture LAUTOPAK séparée pour les pièces remboursées (Lost/Damaged/CustomerReturn cash)
+-- Permet de "facturer" les pièces perdues dans LAUTOPAK afin de décrémenter l'inventaire
+-- proprement (comme une vente) et tracer le remboursement Amazon correspondant.
+ALTER TABLE amazon_settlements
+  ADD COLUMN IF NOT EXISTS lautopak_reimb_invoice_ref TEXT,
+  ADD COLUMN IF NOT EXISTS lautopak_reimb_invoice_date TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS lautopak_reimb_notes TEXT;
+
 -- Multi-mapping : un SKU Amazon → plusieurs PKCodes Traction (sommés pour le stock)
 CREATE TABLE IF NOT EXISTS amazon_sku_pkcodes (
   id BIGSERIAL PRIMARY KEY,

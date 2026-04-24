@@ -86,7 +86,11 @@ export async function GET(req: NextRequest) {
       .eq('settlement_id', s.settlement_id)
       .ilike('amount_type', '%Reimbursement%')
     const txCount = (reimbTx || []).length
-    const step2_done = reimbsCount > 0 ? reimbsCount === txCount : txCount === 0
+    const matchOk = reimbsCount > 0 ? reimbsCount === txCount : txCount === 0
+    // S'il y a des reimbursements cash → facture LAUTOPAK séparée obligatoire
+    const hasCashReimb = (reimbs || []).some((r: any) => Number(r.quantity_reimbursed_cash || 0) > 0)
+    const hasReimbInvoice = !!s.lautopak_reimb_invoice_ref && !!s.lautopak_reimb_invoice_date
+    const step2_done = matchOk && (!hasCashReimb || hasReimbInvoice)
 
     // Pour chaque reimbursement CASH : calculer la ligne Traction à décrémenter.
     // On cherche le pk_code "FBA-<base>" dans traction_amazon_lignes.
@@ -129,15 +133,24 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    let step2_detail: string
+    if (reimbsCount === 0 && txCount === 0) {
+      step2_detail = 'Aucun remboursement dans cette période (OK)'
+    } else if (!matchOk) {
+      step2_detail = `${reimbsCount} reimbursements ↔ ${txCount} payments — vérifier l'import CSV reimbursements`
+    } else if (hasCashReimb && !hasReimbInvoice) {
+      step2_detail = `⚠️ ${ajustementsFba.length} reimbursements cash → créer une facture LAUTOPAK pour les pièces perdues et inscrire son n° ici`
+    } else if (hasReimbInvoice) {
+      step2_detail = `Facture LAUTOPAK reimb ${s.lautopak_reimb_invoice_ref} du ${String(s.lautopak_reimb_invoice_date).split('T')[0]}`
+    } else {
+      step2_detail = `${reimbsCount} reimbursements matchés (aucun cash)`
+    }
+
     const step2: StepStatus = {
       key: '2_reimbursements',
-      label: 'Remboursements matchés + ajustements Traction',
+      label: 'Remboursements matchés + Facture LAUTOPAK pièces perdues',
       status: step1_done ? (step2_done ? 'done' : 'action') : 'locked',
-      detail: reimbsCount === 0 && txCount === 0
-        ? 'Aucun remboursement dans cette période (OK)'
-        : ajustementsFba.length > 0
-          ? `${reimbsCount} reimbursements ↔ ${txCount} payments • ${ajustementsFba.length} à décrémenter dans Traction FBA`
-          : `${reimbsCount} reimbursements ↔ ${txCount} payments (aucun cash)`,
+      detail: step2_detail,
       items: ajustementsFba,
       blocking_count: Math.max(0, txCount - reimbsCount),
     }
@@ -294,6 +307,8 @@ export async function GET(req: NextRequest) {
         total_amount: Number(s.total_amount || 0),
         lautopak_invoice_ref: s.lautopak_invoice_ref,
         lautopak_invoice_date: s.lautopak_invoice_date,
+        lautopak_reimb_invoice_ref: s.lautopak_reimb_invoice_ref,
+        lautopak_reimb_invoice_date: s.lautopak_reimb_invoice_date,
         closed_at: s.closed_at,
         closed_by: s.closed_by,
         audit_id: audit?.id || null,

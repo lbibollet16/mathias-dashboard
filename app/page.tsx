@@ -4970,6 +4970,9 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [searchMultimapping, setSearchMultimapping] = useState('')
   const [lautopakLines, setLautopakLines] = useState<any>(null)
   const [lautopakLoading, setLautopakLoading] = useState(false)
+  const [lautopakReimbLines, setLautopakReimbLines] = useState<any>(null)
+  const [reimbInvoiceRef, setReimbInvoiceRef] = useState('')
+  const [reimbInvoiceDate, setReimbInvoiceDate] = useState('')
   const [releveMatch, setReleveMatch] = useState<any>(null)
   const [releveSaisi, setReleveSaisi] = useState<Record<string, string>>({})
   const [releveExpanded, setReleveExpanded] = useState<Record<string, boolean>>({})
@@ -5245,6 +5248,36 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       const j = await r.json()
       if (!j.erreur) setReleveMatch(j)
       else alert('Erreur : ' + j.erreur)
+    } catch (e: any) { alert('Exception : ' + e.message) }
+  }
+
+  async function chargerLautopakReimbLines(settlementId: string) {
+    setLautopakReimbLines(null)
+    try {
+      const r = await fetch(`/api/amazon/closure/lautopak-reimb-lines?id=${encodeURIComponent(settlementId)}`)
+      const j = await r.json()
+      if (!j.erreur) setLautopakReimbLines(j)
+      else alert('Erreur : ' + j.erreur)
+    } catch (e: any) { alert('Exception : ' + e.message) }
+  }
+
+  async function sauverReimbInvoice(settlementId: string) {
+    if (!reimbInvoiceRef.trim() || !reimbInvoiceDate) return
+    try {
+      const r = await fetch('/api/amazon/settlements', {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          settlement_id: settlementId,
+          lautopak_reimb_invoice_ref: reimbInvoiceRef.trim(),
+          lautopak_reimb_invoice_date: reimbInvoiceDate,
+        }),
+      })
+      const j = await r.json()
+      if (j.success) {
+        setReimbInvoiceRef(''); setReimbInvoiceDate('')
+        await chargerClosureDetail(settlementId)
+      } else alert('Erreur : ' + (j.erreur || 'inconnue'))
     } catch (e: any) { alert('Exception : ' + e.message) }
   }
 
@@ -5749,9 +5782,9 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
             valide: "AUTO — passe verte dès que lautopak_invoice_ref + lautopak_invoice_date sont remplis.",
           },
           '2_reimbursements': {
-            quoi: "Confirmer que les remboursements Amazon (Lost/Damaged/CustomerReturn cash) sont cohérents : autant de lignes dans le CSV Reimbursements que dans le TSV payments. Ces unités sont physiquement perdues — il FAUDRA les sortir de l'inventaire LAUTOPAK (étape 4).",
-            comment: "1) Importe le CSV Reimbursements de la période. 2) Coche chaque ligne au fur et à mesure que tu fais l'ajustement dans LAUTOPAK (la coche est persistante, sauvegardée par reimbursement_id). 3) L'étape se valide auto quand le nb CSV = nb TSV.",
-            valide: "AUTO — passe verte quand nb reimbursements CSV = nb lignes 'FBA Inventory Reimbursement' du payments.",
+            quoi: "Traiter les pièces remboursées par Amazon (Lost/Damaged/CustomerReturn cash) en créant une FACTURE LAUTOPAK SÉPARÉE qui liste ces pièces. Cette facture décrémente l'inventaire LAUTOPAK pour les unités physiquement perdues. Les reimbursements du CSV doivent aussi matcher les lignes 'FBA Inventory Reimbursement' du payments TSV.",
+            comment: "1) Clique 🧾 Voir lignes à facturer pour obtenir la liste (SKU × qté × prix cost = total reimbursement). 2) Dans LAUTOPAK, crée une 2e facture pour ces pièces. 3) Reviens ici, saisis le n° + la date → ✓ Enregistrer. 4) Coche ensuite chaque ligne dans le tableau au fur et à mesure.",
+            valide: "AUTO — passe verte quand : (a) nb reimbursements CSV = nb lignes payments, ET (b) s'il y a des cash reimbs, le n° de facture LAUTOPAK reimb est saisi.",
           },
           '3_unsellable': {
             quoi: "Traiter chaque SKU avec afn_unsellable > 0 chez Amazon (produits endommagés que Amazon te retient). Soit tu demandes un removal, soit tu fais une réclamation.",
@@ -5893,8 +5926,61 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     <div style={{marginTop:10,background:dark?'#0f0f0f':'#fafbfc',borderRadius:8,border:`1px solid ${bdr}`,overflow:'hidden',maxHeight:360,overflowY:'auto'}}>
                       {st.key==='2_reimbursements' ? (
                         <>
+                          {/* Bloc Facture LAUTOPAK séparée pour pièces perdues */}
+                          {st.items && st.items.length > 0 && (() => {
+                            const ref = s.lautopak_reimb_invoice_ref
+                            const date = s.lautopak_reimb_invoice_date
+                            const hasInvoice = !!ref && !!date
+                            return (
+                              <div style={{padding:'10px 12px',background:hasInvoice?(dark?'#0d2a18':'#e6f4ea'):(dark?'#2b1113':'#fce8e6'),borderBottom:`1px solid ${bdr}`}}>
+                                <div style={{fontSize:11,fontWeight:800,color:hasInvoice?C.green:C.red,marginBottom:6}}>
+                                  {hasInvoice ? '✅' : '🧾'} Facture LAUTOPAK séparée pour pièces perdues/remboursées
+                                </div>
+                                <div style={{fontSize:10,color:sub,marginBottom:8,lineHeight:1.5}}>
+                                  Crée une <strong>2e facture LAUTOPAK</strong> avec les pièces ci-dessous (qui ont été perdues/cassées/retournées perdues et remboursées par Amazon) et inscris son n° ici. Cette facture décrémentera l'inventaire LAUTOPAK pour ces unités disparues.
+                                </div>
+                                {hasInvoice ? (
+                                  <div style={{fontSize:11,display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+                                    <span><strong>N° :</strong> <code style={{background:dark?'#222':'#fff',padding:'2px 6px',borderRadius:4,fontFamily:'monospace'}}>{ref}</code></span>
+                                    <span><strong>Date :</strong> {String(date).split('T')[0]}</span>
+                                    <button onClick={()=>chargerLautopakReimbLines(s.settlement_id)}
+                                      style={{background:C.blue,color:'#fff',border:'none',borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:10}}>
+                                      🧾 Voir lignes facturées
+                                    </button>
+                                    <button onClick={()=>{setReimbInvoiceRef(ref); setReimbInvoiceDate(String(date).split('T')[0])}}
+                                      style={{background:'transparent',border:`1px solid ${sub}`,color:sub,borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:10}}>
+                                      ✏️ Modifier
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'flex-end'}}>
+                                    <div>
+                                      <div style={{fontSize:9,color:sub,fontWeight:700,marginBottom:3}}>N° facture LAUTOPAK</div>
+                                      <input value={reimbInvoiceRef} onChange={e=>setReimbInvoiceRef(e.target.value)}
+                                        placeholder="ex: LAU-2026-042"
+                                        style={{...S,fontSize:11,padding:'6px 8px',width:140,fontFamily:'monospace'}}/>
+                                    </div>
+                                    <div>
+                                      <div style={{fontSize:9,color:sub,fontWeight:700,marginBottom:3}}>Date</div>
+                                      <input type="date" value={reimbInvoiceDate} onChange={e=>setReimbInvoiceDate(e.target.value)}
+                                        style={{...S,fontSize:11,padding:'6px 8px'}}/>
+                                    </div>
+                                    <button onClick={()=>chargerLautopakReimbLines(s.settlement_id)}
+                                      style={{background:C.blue,color:'#fff',border:'none',borderRadius:6,padding:'7px 10px',fontWeight:700,cursor:'pointer',fontSize:10}}>
+                                      🧾 Voir lignes à facturer
+                                    </button>
+                                    <button onClick={()=>sauverReimbInvoice(s.settlement_id)}
+                                      disabled={!reimbInvoiceRef.trim() || !reimbInvoiceDate}
+                                      style={{background:(!reimbInvoiceRef.trim() || !reimbInvoiceDate)?bdr:C.green,color:'#fff',border:'none',borderRadius:6,padding:'7px 12px',fontWeight:700,cursor:'pointer',fontSize:10}}>
+                                      ✓ Enregistrer
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })()}
                           <div style={{padding:'8px 12px',background:dark?'#2b2411':'#fdf6e3',borderBottom:`1px solid ${bdr}`,fontSize:11,fontWeight:700,color:C.yellow}}>
-                            ⚠️ Reimbursements cash = unité physiquement perdue → décrémenter le pk_code FBA-xxx dans <strong>LAUTOPAK</strong> (la source DSM). Traction se sync auto le lendemain.
+                            ⚠️ Reimbursements cash = unité physiquement perdue → à facturer dans LAUTOPAK via la facture reimb ci-dessus + cocher chaque ligne quand l'ajustement est passé.
                           </div>
                           <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
                             <thead><tr style={{background:thBg}}>
@@ -6165,6 +6251,68 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ═══ Modal LIGNES FACTURE LAUTOPAK REIMBURSEMENTS ═══ */}
+      {lautopakReimbLines && (() => {
+        const fmt$ = (n: number) => `${n<0?'−':''}${Math.abs(Number(n||0)).toLocaleString('fr-CA',{minimumFractionDigits:2,maximumFractionDigits:2})} $`
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+               onClick={()=>setLautopakReimbLines(null)}>
+            <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,maxWidth:1000,width:'100%',maxHeight:'92vh',overflow:'hidden',display:'flex',flexDirection:'column',border:`1px solid ${bdr}`}}>
+              <div style={{padding:'14px 18px',borderBottom:`1px solid ${bdr}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <div>
+                  <div style={{fontSize:14,fontWeight:900}}>🧾 Lignes à facturer dans la 2e facture LAUTOPAK (pièces perdues)</div>
+                  <div style={{fontSize:11,color:sub,marginTop:2,fontFamily:'monospace'}}>Settlement {lautopakReimbLines.settlement_id}</div>
+                </div>
+                <button onClick={()=>setLautopakReimbLines(null)}
+                  style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>✕ Fermer</button>
+              </div>
+              <div style={{padding:'10px 18px',background:dark?'#0f0f0f':'#fafbfc',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,lineHeight:1.5}}>
+                Ces <strong>{lautopakReimbLines.nb_lignes} lignes</strong> correspondent aux unités physiquement perdues/cassées/retournées non-récupérées, pour lesquelles Amazon t'a remboursé en cash.
+                Total à facturer dans LAUTOPAK = <strong style={{color:C.blue}}>{fmt$(lautopakReimbLines.total_facture)}</strong> (= somme des remboursements Amazon).
+              </div>
+              <div style={{overflow:'auto',flex:1}}>
+                {lautopakReimbLines.lignes.length === 0 ? (
+                  <div style={{padding:30,textAlign:'center',color:sub,fontSize:13}}>Aucun reimbursement cash — rien à facturer.</div>
+                ) : (
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                    <thead style={{position:'sticky',top:0,background:thBg,zIndex:1}}><tr>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Reimb. ID</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>pk_code FBA</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Produit</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Raison</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:C.green,borderBottom:`1px solid ${bdr}`}}>Qté</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Prix unit.</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:C.blue,borderBottom:`1px solid ${bdr}`}}>Montant</th>
+                    </tr></thead>
+                    <tbody>
+                      {lautopakReimbLines.lignes.map((l:any, i:number) => (
+                        <tr key={i} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
+                          <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:10}}>{l.reimbursement_id}</td>
+                          <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11}}>{l.sku}</td>
+                          <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11,color:C.red}}>{l.fba_pk_code || '—'}</td>
+                          <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name}>{l.product_name||'—'}</td>
+                          <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:10}}>{l.reason}</td>
+                          <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:C.green}}>{l.qty}</td>
+                          <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{l.prix_unitaire.toFixed(2)} $</td>
+                          <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:C.blue}}>{fmt$(l.montant)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{background:dark?'#1a1a1a':'#f0f0f0'}}>
+                        <td colSpan={7} style={{padding:'10px',textAlign:'right',fontWeight:900,borderTop:`2px solid ${bdr}`}}>TOTAL FACTURE LAUTOPAK (pièces perdues) :</td>
+                        <td style={{padding:'10px',textAlign:'right',fontWeight:900,fontSize:14,color:C.blue,borderTop:`2px solid ${bdr}`}}>{fmt$(lautopakReimbLines.total_facture)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                )}
+              </div>
             </div>
           </div>
         )

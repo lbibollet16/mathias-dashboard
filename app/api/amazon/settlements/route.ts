@@ -475,7 +475,8 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json()
-    const { settlement_id, lautopak_status, lautopak_invoice_ref, lautopak_invoice_date, lautopak_notes } = body
+    const { settlement_id, lautopak_status, lautopak_invoice_ref, lautopak_invoice_date, lautopak_notes,
+            lautopak_reimb_invoice_ref, lautopak_reimb_invoice_date, lautopak_reimb_notes } = body
     if (!settlement_id) return NextResponse.json({ erreur: 'settlement_id requis' }, { status: 400 })
 
     const update: any = {}
@@ -483,6 +484,9 @@ export async function PATCH(req: NextRequest) {
     if (lautopak_invoice_ref !== undefined)  update.lautopak_invoice_ref = lautopak_invoice_ref || null
     if (lautopak_invoice_date !== undefined) update.lautopak_invoice_date = lautopak_invoice_date || null
     if (lautopak_notes !== undefined)        update.lautopak_notes = lautopak_notes || null
+    if (lautopak_reimb_invoice_ref !== undefined)  update.lautopak_reimb_invoice_ref = lautopak_reimb_invoice_ref || null
+    if (lautopak_reimb_invoice_date !== undefined) update.lautopak_reimb_invoice_date = lautopak_reimb_invoice_date || null
+    if (lautopak_reimb_notes !== undefined)        update.lautopak_reimb_notes = lautopak_reimb_notes || null
 
     const { error } = await supabaseAdmin
       .from('amazon_settlements')
