@@ -4970,7 +4970,9 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [searchMultimapping, setSearchMultimapping] = useState('')
   const [lautopakLines, setLautopakLines] = useState<any>(null)
   const [lautopakLoading, setLautopakLoading] = useState(false)
+  const [showLautopakModal, setShowLautopakModal] = useState(false)  // ouverture explicite de la modale
   const [lautopakReimbLines, setLautopakReimbLines] = useState<any>(null)
+  const [showLautopakReimbModal, setShowLautopakReimbModal] = useState(false)
   const [reimbInvoiceRef, setReimbInvoiceRef] = useState('')
   const [reimbInvoiceDate, setReimbInvoiceDate] = useState('')
   const [releveRembStock, setReleveRembStock] = useState<Record<string,string>>({})  // saisie par settlement_id
@@ -6005,7 +6007,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                       {/* Actions spécifiques par étape */}
                       {st.key==='1_lautopak' && st.status!=='locked' && (
                         <>
-                          <button onClick={()=>chargerLautopakLines(s.settlement_id)}
+                          <button onClick={()=>{chargerLautopakLines(s.settlement_id); setShowLautopakModal(true)}}
                             style={{background:C.yellow,color:'#fff',border:'none',borderRadius:8,padding:'6px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
                             🧾 Voir lignes à facturer
                           </button>
@@ -6133,7 +6135,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                   <div style={{fontSize:11,display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
                                     <span><strong>N° :</strong> <code style={{background:dark?'#222':'#fff',padding:'2px 6px',borderRadius:4,fontFamily:'monospace'}}>{ref}</code></span>
                                     <span><strong>Date :</strong> {String(date).split('T')[0]}</span>
-                                    <button onClick={()=>chargerLautopakReimbLines(s.settlement_id)}
+                                    <button onClick={()=>{chargerLautopakReimbLines(s.settlement_id); setShowLautopakReimbModal(true)}}
                                       style={{background:C.blue,color:'#fff',border:'none',borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:10}}>
                                       🧾 Voir lignes facturées
                                     </button>
@@ -6155,7 +6157,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                       <input type="date" value={reimbInvoiceDate} onChange={e=>setReimbInvoiceDate(e.target.value)}
                                         style={{...S,fontSize:11,padding:'6px 8px'}}/>
                                     </div>
-                                    <button onClick={()=>chargerLautopakReimbLines(s.settlement_id)}
+                                    <button onClick={()=>{chargerLautopakReimbLines(s.settlement_id); setShowLautopakReimbModal(true)}}
                                       style={{background:C.blue,color:'#fff',border:'none',borderRadius:6,padding:'7px 10px',fontWeight:700,cursor:'pointer',fontSize:10}}>
                                       🧾 Voir lignes à facturer
                                     </button>
@@ -6413,12 +6415,12 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         )
       })()}
 
-      {/* ═══ Modal LIGNES À FACTURER LAUTOPAK ═══ */}
-      {(lautopakLoading || lautopakLines) && (() => {
+      {/* ═══ Modal LIGNES À FACTURER LAUTOPAK (ouverture explicite) ═══ */}
+      {showLautopakModal && (lautopakLoading || lautopakLines) && (() => {
         const fmt$ = (n: number) => `${n<0?'−':''}${Math.abs(Number(n||0)).toLocaleString('fr-CA',{minimumFractionDigits:2,maximumFractionDigits:2})} $`
         return (
           <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
-               onClick={()=>setLautopakLines(null)}>
+               onClick={()=>setShowLautopakModal(false)}>
             <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,padding:0,maxWidth:1100,width:'100%',maxHeight:'92vh',overflow:'hidden',display:'flex',flexDirection:'column',border:`1px solid ${bdr}`}}>
               <div style={{padding:'14px 18px',borderBottom:`1px solid ${bdr}`,display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}>
                 <div>
@@ -6434,7 +6436,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                       📥 Export CSV
                     </button>
                   )}
-                  <button onClick={()=>setLautopakLines(null)}
+                  <button onClick={()=>setShowLautopakModal(false)}
                     style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
                     ✕ Fermer
                   </button>
@@ -6699,19 +6701,19 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         )
       })()}
 
-      {/* ═══ Modal LIGNES FACTURE LAUTOPAK REIMBURSEMENTS ═══ */}
-      {lautopakReimbLines && (() => {
+      {/* ═══ Modal LIGNES FACTURE LAUTOPAK REIMBURSEMENTS (ouverture explicite) ═══ */}
+      {showLautopakReimbModal && lautopakReimbLines && (() => {
         const fmt$ = (n: number) => `${n<0?'−':''}${Math.abs(Number(n||0)).toLocaleString('fr-CA',{minimumFractionDigits:2,maximumFractionDigits:2})} $`
         return (
           <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
-               onClick={()=>setLautopakReimbLines(null)}>
+               onClick={()=>setShowLautopakReimbModal(false)}>
             <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,maxWidth:1000,width:'100%',maxHeight:'92vh',overflow:'hidden',display:'flex',flexDirection:'column',border:`1px solid ${bdr}`}}>
               <div style={{padding:'14px 18px',borderBottom:`1px solid ${bdr}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                 <div>
                   <div style={{fontSize:14,fontWeight:900}}>🧾 Lignes à facturer dans la 2e facture LAUTOPAK (pièces perdues)</div>
                   <div style={{fontSize:11,color:sub,marginTop:2,fontFamily:'monospace'}}>Settlement {lautopakReimbLines.settlement_id}</div>
                 </div>
-                <button onClick={()=>setLautopakReimbLines(null)}
+                <button onClick={()=>setShowLautopakReimbModal(false)}
                   style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>✕ Fermer</button>
               </div>
               <div style={{padding:'10px 18px',background:dark?'#0f0f0f':'#fafbfc',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,lineHeight:1.5}}>
