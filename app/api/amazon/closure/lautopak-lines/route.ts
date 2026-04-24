@@ -123,84 +123,95 @@ export async function GET(req: NextRequest) {
       if (!ex.traction_code && t.traction_code) ex.traction_code = t.traction_code
     }
 
-    // 5) Re-groupement par pk_code CIBLE (après multi-mapping)
-    // Exemple: AU6913023 (2 ventes) + FBA-U6913023 (9 ventes) tous deux mappés
-    // à pk_code FBA-U6913023 → 1 seule ligne FBA-U6913023 avec 11 ventes.
-    // Si pas de mapping manuel, on garde traction_code auto-résolu comme clé.
+    // 5) Chaque ligne = 1 SKU Amazon (pas de regroupement).
+    // Colonne "PKCode mapping" = pk_code(s) associé(s) via multi-mapping + multiplier.
+    // Quantité = qty Amazon. Quantité LAUTOPAK = qty × multiplier (pour inventaire).
+    // Prix unitaires arrondis à 0,10, ajustés pour que Σ (qty × prix) = frais_produit_settlement.
     const manualMappings = await loadManualMappings()
-    type Source = { amazon_sku: string; qty_amazon: number; multiplier: number; qty_physical: number; amount: number }
-    type PkLine = {
-      pk_code: string
-      amazon_skus: string[]
-      sources: Source[]
-      product_name: string | null
-      qty: number
-      amount: number
-      has_manual_mapping: boolean
-    }
-    const groupByPkCode = (aggs: Iterable<Agg>, isRefund: boolean) => {
-      const byPk = new Map<string, PkLine>()
-      for (const a of aggs) {
-        const amazonQty = isRefund ? Math.abs(a.qty) : a.qty
+
+    const roundToTenth = (n: number) => Math.round(n * 10) / 10
+
+    const enrichAndMap = (aggs: Iterable<Agg>, isRefund: boolean) => {
+      return [...aggs].map(a => {
+        const qtyAmazon = isRefund ? Math.abs(a.qty) : a.qty
         const manual = manualMappings.get(a.sku)
-        if (manual && manual.length > 0) {
-          const share = 1 / manual.length
-          for (const m of manual) {
-            const entry = byPk.get(m.pk_code) || {
-              pk_code: m.pk_code, amazon_skus: [], sources: [],
-              product_name: a.product_name, qty: 0, amount: 0,
-              has_manual_mapping: true,
-            }
-            const physicalQty = amazonQty * m.multiplier
-            entry.qty += physicalQty
-            entry.amount += a.amount * share
-            if (!entry.amazon_skus.includes(a.sku)) entry.amazon_skus.push(a.sku)
-            entry.sources.push({
-              amazon_sku: a.sku, qty_amazon: amazonQty, multiplier: m.multiplier,
-              qty_physical: physicalQty, amount: Number((a.amount * share).toFixed(2)),
-            })
-            if (!entry.product_name && a.product_name) entry.product_name = a.product_name
-            byPk.set(m.pk_code, entry)
-          }
-        } else {
-          const pk = a.traction_code || a.sku
-          const entry = byPk.get(pk) || {
-            pk_code: pk, amazon_skus: [], sources: [],
-            product_name: a.product_name, qty: 0, amount: 0,
-            has_manual_mapping: false,
-          }
-          entry.qty += amazonQty
-          entry.amount += a.amount
-          if (!entry.amazon_skus.includes(a.sku)) entry.amazon_skus.push(a.sku)
-          entry.sources.push({
-            amazon_sku: a.sku, qty_amazon: amazonQty, multiplier: 1,
-            qty_physical: amazonQty, amount: Number(a.amount.toFixed(2)),
-          })
-          if (!entry.product_name && a.product_name) entry.product_name = a.product_name
-          byPk.set(pk, entry)
+        const pk_codes_mapping = manual && manual.length > 0
+          ? manual.map(m => ({ pk_code: m.pk_code, multiplier: m.multiplier, qty_lautopak: qtyAmazon * m.multiplier }))
+          : null
+        // Qté LAUTOPAK totale = somme des qty_lautopak des mappings (si multi) ou qty Amazon
+        const qty_lautopak_total = pk_codes_mapping
+          ? pk_codes_mapping.reduce((s, m) => s + m.qty_lautopak, 0)
+          : qtyAmazon
+        return {
+          sku: a.sku,
+          traction_code: a.traction_code,
+          product_name: a.product_name,
+          qty: qtyAmazon,                   // qté Amazon (ventes brutes)
+          qty_lautopak: qty_lautopak_total, // qté à débiter dans LAUTOPAK (avec multiplier)
+          amount: Number(a.amount.toFixed(2)),
+          prix_unitaire_raw: qtyAmazon !== 0 ? Number((a.amount / qtyAmazon).toFixed(4)) : 0,
+          prix_unitaire: 0, // calculé plus bas
+          amount_balanced: 0,
+          manual_mapping: !!pk_codes_mapping,
+          pk_codes_mapping,
+        }
+      })
+      .filter(l => l.qty !== 0 || l.amount !== 0)
+    }
+
+    const balanceLines = (lines: any[], targetTotal: number) => {
+      // Étape 1 : arrondir chaque prix unitaire à 0,10
+      for (const l of lines) {
+        if (l.qty > 0) {
+          l.prix_unitaire = roundToTenth(l.prix_unitaire_raw)
+          l.amount_balanced = Number((l.prix_unitaire * l.qty).toFixed(2))
         }
       }
-      return byPk
+      // Étape 2 : calculer le delta restant
+      const sumRounded = Number(lines.reduce((s, l) => s + (l.amount_balanced || 0), 0).toFixed(2))
+      let remaining = Number((targetTotal - sumRounded).toFixed(2))
+      if (Math.abs(remaining) < 0.005) return { adjustments: 0, delta_residuel: 0 }
+      const direction = remaining > 0 ? 1 : -1
+      remaining = Math.abs(remaining)
+      // Étape 3 : bump par 0,10 sur lignes avec plus grande qty (plus efficace)
+      const sorted = [...lines].filter(l => l.qty > 0).sort((a, b) => b.qty - a.qty)
+      let adjustments = 0
+      for (const l of sorted) {
+        if (remaining < 0.005) break
+        const stepValue = l.qty * 0.10   // ce que rapporte +0,10 sur le prix unitaire
+        if (stepValue === 0) continue
+        const maxSteps = Math.floor(remaining / stepValue)
+        if (maxSteps <= 0) continue
+        const steps = Math.min(maxSteps, 20)
+        l.prix_unitaire = Number((l.prix_unitaire + direction * steps * 0.10).toFixed(2))
+        l.amount_balanced = Number((l.prix_unitaire * l.qty).toFixed(2))
+        remaining = Number((remaining - steps * stepValue).toFixed(2))
+        adjustments++
+      }
+      // Résiduel < 0,10 × qty max : on l'absorbe en ajustant au centime la plus grande ligne
+      if (remaining >= 0.005 && sorted.length > 0) {
+        const biggest = sorted[0]
+        biggest.amount_balanced = Number((biggest.amount_balanced + direction * remaining).toFixed(2))
+        biggest.prix_unitaire = Number((biggest.amount_balanced / biggest.qty).toFixed(2))
+        remaining = 0
+        adjustments++
+      }
+      return { adjustments, delta_residuel: remaining }
     }
 
-    const toFinal = (pkMap: Map<string, PkLine>, sortDesc: boolean) =>
-      [...pkMap.values()].map(a => ({
-        pk_code: a.pk_code,
-        amazon_skus: a.amazon_skus,
-        sources: a.sources,   // détail par SKU source (qty, multiplier, physical, amount)
-        sku: a.amazon_skus.length === 1 ? a.amazon_skus[0] : `${a.amazon_skus.length} SKU`,
-        traction_code: a.pk_code,
-        product_name: a.product_name,
-        qty: a.qty,
-        amount: Number(a.amount.toFixed(2)),
-        prix_unitaire: a.qty !== 0 ? Number((a.amount / a.qty).toFixed(2)) : 0,
-        manual_mapping: a.has_manual_mapping,
-      }))
-        .filter(l => l.qty !== 0 || l.amount !== 0)
-        .sort((a, b) => sortDesc ? b.amount - a.amount : a.amount - b.amount)
+    // ── Orders (Principal brut = Frais produit settlement)
+    const fraisProduitTarget = Number(tx.reduce((s, t) => s + Number(t.amount || 0), 0).toFixed(2))
+    const lignes = enrichAndMap(bySku.values(), false)
+    const { adjustments: adjOrders, delta_residuel: deltaOrders } = balanceLines(lignes, fraisProduitTarget)
+    lignes.sort((a: any, b: any) => b.amount - a.amount)
 
-    const lignes = toFinal(groupByPkCode(bySku.values(), false), true)
-    const refunds_lignes = toFinal(groupByPkCode(refundsBySku.values(), true), false)
+    // ── Refunds (Principal Refund)
+    const refundsTarget = Number(refunds.reduce((s, t) => s + Number(t.amount || 0), 0).toFixed(2))
+    const refunds_lignes = enrichAndMap(refundsBySku.values(), true)
+    // Pour les refunds, montant est négatif. On force le signe du raw unit price à rester négatif.
+    for (const l of refunds_lignes) { l.prix_unitaire_raw = -Math.abs(l.prix_unitaire_raw) }
+    const { adjustments: adjRef, delta_residuel: deltaRef } = balanceLines(refunds_lignes, refundsTarget)
+    refunds_lignes.sort((a: any, b: any) => a.amount - b.amount)
 
     // Enrichir avec l'état "facturée" (checkbox persistante, keyée par pk_code)
     // NB: la colonne DB s'appelle "sku" mais on y stocke le pk_code cible pour
@@ -218,10 +229,10 @@ export async function GET(req: NextRequest) {
       l.facturee_par = f?.facturee_par || null
     }
 
-    const total_calcule = Number(lignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
-    const total_refunds = Number(refunds_lignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
-    // "Frais produit" côté Amazon = Orders Principal (brut, sans refunds)
-    const frais_produit_settlement = Number(tx.reduce((s, t) => s + Number(t.amount || 0), 0).toFixed(2))
+    // Total calculé = somme des montants BALANCÉS (= settlement Frais produit exactement)
+    const total_calcule = Number(lignes.reduce((s: number, l: any) => s + (l.amount_balanced || 0), 0).toFixed(2))
+    const total_refunds = Number(refunds_lignes.reduce((s: number, l: any) => s + (l.amount_balanced || 0), 0).toFixed(2))
+    const frais_produit_settlement = fraisProduitTarget
 
     return NextResponse.json({
       settlement_id: s.settlement_id,
@@ -236,8 +247,14 @@ export async function GET(req: NextRequest) {
       balance_ok: Math.abs(total_calcule - frais_produit_settlement) < 0.01,
       ecart: Number((total_calcule - frais_produit_settlement).toFixed(2)),
       breakdown,   // décomposition par amount_description (aide au diagnostic)
-      lignes,              // Orders Principal brut par SKU
+      lignes,              // Orders Principal brut par SKU (avec prix arrondis balancés)
       refunds_lignes,      // Refunds Principal par SKU (note de crédit séparée)
+      balance_info: {
+        orders_adjustments: adjOrders,
+        orders_delta_residuel: deltaOrders,
+        refunds_adjustments: adjRef,
+        refunds_delta_residuel: deltaRef,
+      },
     })
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message || String(e) }, { status: 500 })
