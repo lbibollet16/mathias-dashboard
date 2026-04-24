@@ -385,6 +385,25 @@ ALTER TABLE amazon_settlements
   ADD COLUMN IF NOT EXISTS lautopak_reimb_invoice_date TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS lautopak_reimb_notes TEXT;
 
+-- Actions sur les SKU unsellable (étape 3 fermeture settlement)
+-- 'removal' = demande de retour au warehouse
+-- 'case'    = réclamation/case ouvert avec Amazon
+-- 'skip'    = pas d'action cette période (reporté)
+CREATE TABLE IF NOT EXISTS amazon_unsellable_actions (
+  id BIGSERIAL PRIMARY KEY,
+  settlement_id TEXT NOT NULL,
+  sku TEXT NOT NULL,
+  traction_code TEXT,
+  action_type TEXT,
+  amazon_ref TEXT,
+  notes TEXT,
+  action_le TIMESTAMPTZ,
+  action_par TEXT,
+  UNIQUE (settlement_id, sku)
+);
+CREATE INDEX IF NOT EXISTS idx_amz_unsell_settlement ON amazon_unsellable_actions(settlement_id);
+ALTER TABLE amazon_unsellable_actions DISABLE ROW LEVEL SECURITY;
+
 -- Multi-mapping : un SKU Amazon → plusieurs PKCodes Traction (sommés pour le stock)
 CREATE TABLE IF NOT EXISTS amazon_sku_pkcodes (
   id BIGSERIAL PRIMARY KEY,

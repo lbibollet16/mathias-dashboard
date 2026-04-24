@@ -5226,6 +5226,22 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     } catch {}
   }
 
+  async function saveUnsellableAction(settlementId: string, sku: string, tractionCode: string | null, patch: { action_type?: string|null; amazon_ref?: string; notes?: string }) {
+    try {
+      await fetch('/api/amazon/unsellable-actions', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          settlement_id: settlementId,
+          sku, traction_code: tractionCode,
+          ...patch,
+          employe: profil?.nom || profil?.email || 'Inconnu',
+        }),
+      })
+      if (closureActif) await chargerClosureDetail(closureActif)
+    } catch (e: any) { alert('Erreur : ' + e.message) }
+  }
+
   async function toggleAjustementReimbursement(reimbursementId: string, pkCode: string | null, dejaAjuste: boolean) {
     try {
       await fetch('/api/amazon/reimbursements', {
@@ -6070,26 +6086,64 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                           })()}
                         </>
                       ) : st.key==='3_unsellable' ? (
-                        <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
-                          <thead><tr style={{background:thBg}}>
-                            <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>SKU</th>
-                            <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Traction</th>
-                            <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Produit</th>
-                            <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Qté</th>
-                            <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Valeur</th>
-                          </tr></thead>
-                          <tbody>
-                            {st.items.map((u:any,i:number) => (
-                              <tr key={i}>
-                                <td style={{padding:'4px 10px',fontFamily:'monospace',borderBottom:`1px solid ${bdr}`}}>{u.sku}</td>
-                                <td style={{padding:'4px 10px',fontFamily:'monospace',color:u.traction_code?C.blue:C.red,borderBottom:`1px solid ${bdr}`}}>{u.traction_code||'—'}</td>
-                                <td style={{padding:'4px 10px',color:sub,borderBottom:`1px solid ${bdr}`,maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={u.product_name}>{u.product_name||'—'}</td>
-                                <td style={{padding:'4px 10px',textAlign:'right',fontWeight:700,color:C.red,borderBottom:`1px solid ${bdr}`}}>{u.qty}</td>
-                                <td style={{padding:'4px 10px',textAlign:'right',color:C.red,borderBottom:`1px solid ${bdr}`}}>{fmt$(u.valeur)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                        <>
+                          <div style={{padding:'8px 12px',background:dark?'#1a233a':'#e8f0fe',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,lineHeight:1.5}}>
+                            💡 Choisis une action pour chaque SKU : <strong>Removal</strong> (retour au warehouse), <strong>Case</strong> (réclamation Amazon), ou <strong>Skip</strong> (reporté). Inscris le n° de case/removal dans la colonne Réf. Tes choix sont sauvegardés par settlement + sku.
+                          </div>
+                          <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
+                            <thead><tr style={{background:thBg}}>
+                              <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>SKU</th>
+                              <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Traction</th>
+                              <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Produit</th>
+                              <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Qté</th>
+                              <th style={{padding:'6px 10px',textAlign:'right',fontSize:9,color:sub}}>Valeur</th>
+                              <th style={{padding:'6px 10px',textAlign:'center',fontSize:9,color:sub}}>Action</th>
+                              <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Réf. Amazon</th>
+                              <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Notes</th>
+                            </tr></thead>
+                            <tbody>
+                              {st.items.map((u:any,i:number) => {
+                                const a = u.action || {}
+                                return (
+                                  <tr key={i} style={{background:a.action_type?(dark?'#0d2a18':'#e6f4ea'):'transparent'}}>
+                                    <td style={{padding:'4px 10px',fontFamily:'monospace',borderBottom:`1px solid ${bdr}`}}>{u.sku}</td>
+                                    <td style={{padding:'4px 10px',fontFamily:'monospace',color:u.traction_code?C.blue:C.red,borderBottom:`1px solid ${bdr}`}}>{u.traction_code||'—'}</td>
+                                    <td style={{padding:'4px 10px',color:sub,borderBottom:`1px solid ${bdr}`,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={u.product_name}>{u.product_name||'—'}</td>
+                                    <td style={{padding:'4px 10px',textAlign:'right',fontWeight:700,color:C.red,borderBottom:`1px solid ${bdr}`}}>{u.qty}</td>
+                                    <td style={{padding:'4px 10px',textAlign:'right',color:C.red,borderBottom:`1px solid ${bdr}`}}>{fmt$(u.valeur)}</td>
+                                    <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                                      <select value={a.action_type || ''} onChange={e=>saveUnsellableAction(s.settlement_id, u.sku, u.traction_code, { action_type: e.target.value || null })}
+                                        style={{...S,fontSize:11,padding:'3px 6px',width:100}}>
+                                        <option value="">— Choisir</option>
+                                        <option value="removal">📦 Removal</option>
+                                        <option value="case">📋 Case</option>
+                                        <option value="skip">⏭ Skip</option>
+                                      </select>
+                                    </td>
+                                    <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`}}>
+                                      <input defaultValue={a.amazon_ref || ''} onBlur={(e:any)=>{ if (e.target.value !== (a.amazon_ref||'')) saveUnsellableAction(s.settlement_id, u.sku, u.traction_code, { amazon_ref: e.target.value }) }}
+                                        placeholder="case / removal ID" style={{...S,fontSize:11,padding:'3px 6px',width:130,fontFamily:'monospace'}}/>
+                                    </td>
+                                    <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`}}>
+                                      <input defaultValue={a.notes || ''} onBlur={(e:any)=>{ if (e.target.value !== (a.notes||'')) saveUnsellableAction(s.settlement_id, u.sku, u.traction_code, { notes: e.target.value }) }}
+                                        placeholder="notes..." style={{...S,fontSize:11,padding:'3px 6px',width:160}}/>
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                          {(() => {
+                            const fait = st.items.filter((u:any) => u.action?.action_type).length
+                            const total = st.items.length
+                            return (
+                              <div style={{padding:'8px 12px',background:dark?'#0f0f0f':'#fafbfc',borderTop:`1px solid ${bdr}`,fontSize:11,color:sub,display:'flex',justifyContent:'space-between'}}>
+                                <span>Actions enregistrées : <strong style={{color:fait===total?C.green:C.yellow}}>{fait}/{total}</strong></span>
+                                {fait === total && total > 0 && <span style={{color:C.green,fontWeight:700}}>✓ Toutes les actions unsellable sont enregistrées</span>}
+                              </div>
+                            )
+                          })()}
+                        </>
                       ) : st.key==='5_audit' ? (
                         <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
                           <thead><tr style={{background:thBg}}>
