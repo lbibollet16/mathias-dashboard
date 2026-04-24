@@ -78,42 +78,54 @@ export async function GET(req: NextRequest) {
       byPk.set(pk, entry)
     }
 
-    // Balance : prix unitaire arrondi à 0,10, ajustement pour matcher le total cash
+    // Balance en CENTS ENTIERS — garantit que amount_balanced = prix × qty EXACT
     const target = Number(cashOnly.reduce((s, r: any) => s + Number(r.amount_total || 0), 0).toFixed(2))
-    const roundToTenth = (n: number) => Math.round(n * 10) / 10
+    const toCents = (n: number) => Math.round(n * 100)
+    const toDollars = (c: number) => c / 100
     const groups = [...byPk.values()]
     for (const g of groups) {
       const divQty = g.qty_lautopak_total || g.qty_amazon_total
-      const raw = divQty !== 0 ? g.amount / divQty : 0
-      g.prix_unitaire = roundToTenth(raw)
-      g.amount_balanced = Number((g.prix_unitaire * divQty).toFixed(2))
+      if (divQty === 0) { g.prix_unitaire = 0; g.amount_balanced = 0; continue }
+      const rawCents = (g.amount * 100) / divQty
+      const roundedTenCents = Math.round(rawCents / 10) * 10
+      g.prix_unitaire = toDollars(roundedTenCents)
+      g.amount_balanced = toDollars(divQty * roundedTenCents)
     }
-    let delta = Number((target - groups.reduce((s, g) => s + g.amount_balanced, 0)).toFixed(2))
+    const sumCents = groups.reduce((s, g) => s + toCents(g.amount_balanced || 0), 0)
+    const targetCents = toCents(target)
+    let deltaCents = targetCents - sumCents
     let adjustments = 0
-    if (Math.abs(delta) >= 0.005) {
-      const direction = delta > 0 ? 1 : -1
-      let remaining = Math.abs(delta)
+    if (deltaCents !== 0) {
+      const direction = deltaCents > 0 ? 1 : -1
+      let remainingCents = Math.abs(deltaCents)
       const sorted = [...groups].filter(g => (g.qty_lautopak_total || g.qty_amazon_total) > 0)
         .sort((a, b) => (b.qty_lautopak_total || b.qty_amazon_total) - (a.qty_lautopak_total || a.qty_amazon_total))
       for (const g of sorted) {
-        if (remaining < 0.005) break
+        if (remainingCents <= 0) break
         const divQty = g.qty_lautopak_total || g.qty_amazon_total
-        const stepValue = divQty * 0.10
-        if (stepValue === 0) continue
-        const maxSteps = Math.floor(remaining / stepValue)
-        if (maxSteps <= 0) continue
-        const steps = Math.min(maxSteps, 20)
-        g.prix_unitaire = Number((g.prix_unitaire + direction * steps * 0.10).toFixed(2))
-        g.amount_balanced = Number((g.prix_unitaire * divQty).toFixed(2))
-        remaining = Number((remaining - steps * stepValue).toFixed(2))
-        adjustments++
+        const stepCents = divQty * 10
+        const maxSteps = Math.floor(remainingCents / stepCents)
+        if (maxSteps > 0) {
+          const steps = Math.min(maxSteps, 30)
+          const newPriceCents = toCents(g.prix_unitaire) + direction * steps * 10
+          g.prix_unitaire = toDollars(newPriceCents)
+          g.amount_balanced = toDollars(divQty * newPriceCents)
+          remainingCents -= steps * stepCents
+          adjustments++
+        }
       }
-      if (remaining >= 0.005 && sorted.length > 0) {
+      if (remainingCents > 0 && sorted.length > 0) {
         const biggest = sorted[0]
         const divQty = biggest.qty_lautopak_total || biggest.qty_amazon_total
-        biggest.amount_balanced = Number((biggest.amount_balanced + direction * remaining).toFixed(2))
-        biggest.prix_unitaire = Number((biggest.amount_balanced / divQty).toFixed(2))
-        adjustments++
+        if (divQty > 0) {
+          const priceCentsChange = Math.round(remainingCents / divQty)
+          if (priceCentsChange > 0) {
+            const newPriceCents = toCents(biggest.prix_unitaire) + direction * priceCentsChange
+            biggest.prix_unitaire = toDollars(newPriceCents)
+            biggest.amount_balanced = toDollars(divQty * newPriceCents)
+            adjustments++
+          }
+        }
       }
     }
 

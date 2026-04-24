@@ -191,44 +191,75 @@ export async function GET(req: NextRequest) {
       return byPk
     }
 
+    // Balance en CENTS ENTIERS pour éviter toute imprécision flottante.
+    // Invariant garanti : amount_balanced (en dollars) = prix_unitaire × qty
+    // → quand l'utilisateur tape prix_unitaire dans LAUTOPAK, LAUTOPAK calcule
+    //   qty × prix_unitaire et obtient EXACTEMENT amount_balanced.
     const balanceGroupLines = (lines: GroupLine[], targetTotal: number) => {
-      // Étape 1 : prix unitaire brut = amount / qty_lautopak (ou qty_amazon si 0)
+      const toCents = (n: number) => Math.round(n * 100)
+      const toDollars = (c: number) => c / 100
+
+      // Étape 1 : prix unitaire au 0,10 près (= 10 cents entiers)
       for (const l of lines) {
         const divQty = l.qty_lautopak_total || l.qty_amazon_total
-        const raw = divQty !== 0 ? l.amount / divQty : 0
-        l.prix_unitaire = roundToTenth(raw)
-        l.amount_balanced = Number((l.prix_unitaire * divQty).toFixed(2))
+        if (divQty === 0) { l.prix_unitaire = 0; l.amount_balanced = 0; continue }
+        const rawCents = (l.amount * 100) / divQty   // prix unitaire brut en cents
+        const roundedTenCents = Math.round(rawCents / 10) * 10  // arrondi à 10 cents
+        // prix × qty en cents = produit exact entier
+        l.prix_unitaire = toDollars(roundedTenCents)
+        l.amount_balanced = toDollars(divQty * roundedTenCents)
       }
-      const sumRounded = Number(lines.reduce((s, l) => s + (l.amount_balanced || 0), 0).toFixed(2))
-      let remaining = Number((targetTotal - sumRounded).toFixed(2))
-      if (Math.abs(remaining) < 0.005) return { adjustments: 0, delta_residuel: 0 }
-      const direction = remaining > 0 ? 1 : -1
-      remaining = Math.abs(remaining)
+
+      // Étape 2 : delta en cents entiers
+      const sumCents = lines.reduce((s, l) => s + toCents(l.amount_balanced || 0), 0)
+      const targetCents = toCents(targetTotal)
+      let deltaCents = targetCents - sumCents
+      if (deltaCents === 0) return { adjustments: 0, delta_residuel: 0 }
+
+      const direction = deltaCents > 0 ? 1 : -1
+      let remainingCents = Math.abs(deltaCents)
+      let adjustments = 0
       const sorted = [...lines].filter(l => (l.qty_lautopak_total || l.qty_amazon_total) > 0)
         .sort((a, b) => (b.qty_lautopak_total || b.qty_amazon_total) - (a.qty_lautopak_total || a.qty_amazon_total))
-      let adjustments = 0
+
+      // Étape 3 : steps de 10 cents (= 0,10) sur lignes à plus grande qty
       for (const l of sorted) {
-        if (remaining < 0.005) break
+        if (remainingCents <= 0) break
         const divQty = l.qty_lautopak_total || l.qty_amazon_total
-        const stepValue = divQty * 0.10
-        if (stepValue === 0) continue
-        const maxSteps = Math.floor(remaining / stepValue)
-        if (maxSteps <= 0) continue
-        const steps = Math.min(maxSteps, 20)
-        l.prix_unitaire = Number((l.prix_unitaire + direction * steps * 0.10).toFixed(2))
-        l.amount_balanced = Number((l.prix_unitaire * divQty).toFixed(2))
-        remaining = Number((remaining - steps * stepValue).toFixed(2))
-        adjustments++
+        const stepCents = divQty * 10   // cents ajoutés par step de 0,10
+        const maxSteps = Math.floor(remainingCents / stepCents)
+        if (maxSteps > 0) {
+          const steps = Math.min(maxSteps, 30)
+          const newPriceCents = toCents(l.prix_unitaire) + direction * steps * 10
+          l.prix_unitaire = toDollars(newPriceCents)
+          l.amount_balanced = toDollars(divQty * newPriceCents)
+          remainingCents -= steps * stepCents
+          adjustments++
+        }
       }
-      if (remaining >= 0.005 && sorted.length > 0) {
+
+      // Étape 4 : résiduel < stepCents (= 10 × qty). On passe en cents sur la
+      // plus grande ligne. Chaque +1 cent sur le prix ajoute divQty cents au montant.
+      // On cherche le nombre entier de cents sur le prix qui rapproche le plus du target.
+      if (remainingCents > 0 && sorted.length > 0) {
         const biggest = sorted[0]
         const divQty = biggest.qty_lautopak_total || biggest.qty_amazon_total
-        biggest.amount_balanced = Number((biggest.amount_balanced + direction * remaining).toFixed(2))
-        biggest.prix_unitaire = Number((biggest.amount_balanced / divQty).toFixed(2))
-        remaining = 0
-        adjustments++
+        if (divQty > 0) {
+          // Combien de cents sur le prix pour absorber ≈ remainingCents ?
+          const priceCentsChange = Math.round(remainingCents / divQty)
+          if (priceCentsChange > 0) {
+            const newPriceCents = toCents(biggest.prix_unitaire) + direction * priceCentsChange
+            biggest.prix_unitaire = toDollars(newPriceCents)
+            biggest.amount_balanced = toDollars(divQty * newPriceCents)
+            adjustments++
+          }
+        }
       }
-      return { adjustments, delta_residuel: remaining }
+
+      // Résiduel final (peut être ± divQty/2 cents si pas divisible)
+      const finalSumCents = lines.reduce((s, l) => s + toCents(l.amount_balanced || 0), 0)
+      const finalResiduel = toDollars(Math.abs(targetCents - finalSumCents))
+      return { adjustments, delta_residuel: finalResiduel }
     }
 
     // ── Orders (Principal brut = Frais produit settlement) ──
