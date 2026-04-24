@@ -4956,7 +4956,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
 // ── Amazon Tab (Phase 1) ─────────────────────────────────────────────────────
 function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
-  const [vue, setVue] = useState<'fermeture'|'import'|'settlements'|'inventaire'|'consolide'|'audit'|'mapping'|'multimapping'|'archives'|'rapport'>('fermeture')
+  const [vue, setVue] = useState<'fermeture'|'import'|'settlements'|'inventaire'|'consolide'|'audit'|'mapping'|'multimapping'|'archives'|'rapport'|'unsellable_suivi'>('fermeture')
   // États de la vue Fermeture (nouvelle vue principale)
   const [closureList, setClosureList] = useState<any[]>([])
   const [closureActif, setClosureActif] = useState<string | null>(null)
@@ -4965,6 +4965,8 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [rapportData, setRapportData] = useState<any>(null)
   const [archivesList, setArchivesList] = useState<any[]>([])
   const [multimappingList, setMultimappingList] = useState<any[]>([])
+  const [unsellableSuivi, setUnsellableSuivi] = useState<any>(null)
+  const [filtUnsellableStatut, setFiltUnsellableStatut] = useState<'tous'|'en_attente'|'resolu'>('tous')
   const [newMappingSku, setNewMappingSku] = useState('')
   const [newMappingPk, setNewMappingPk] = useState('')
   const [searchMultimapping, setSearchMultimapping] = useState('')
@@ -5224,6 +5226,14 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         setRapportData(j)
         setVue('rapport')
       }
+    } catch {}
+  }
+
+  async function chargerUnsellableSuivi() {
+    try {
+      const r = await fetch('/api/amazon/unsellable-suivi')
+      const j = await r.json()
+      if (!j.erreur) setUnsellableSuivi(j)
     } catch {}
   }
 
@@ -5775,6 +5785,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         <button onClick={()=>{setVue('multimapping'); chargerMultimapping()}}
           style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='multimapping'?C.blue:bdr}`,background:vue==='multimapping'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='multimapping'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
           🔗 Multi-mapping SKU
+        </button>
+        <button onClick={()=>{setVue('unsellable_suivi'); chargerUnsellableSuivi()}}
+          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='unsellable_suivi'?C.red:bdr}`,background:vue==='unsellable_suivi'?(dark?'#2b1113':'#fce8e6'):'transparent',color:vue==='unsellable_suivi'?C.red:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+          🔥 Suivi unsellable
         </button>
         <button onClick={()=>{setVue('archives'); chargerArchives()}}
           style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='archives'?sub:bdr}`,background:'transparent',color:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
@@ -7033,6 +7047,137 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     ))}
                   </tbody>
                 </table>
+              )}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ═══ Vue SUIVI UNSELLABLE ═══ */}
+      {vue === 'unsellable_suivi' && (() => {
+        const data = unsellableSuivi
+        if (!data) return <div style={{textAlign:'center',padding:40,color:sub}}>⏳ Chargement...</div>
+        const actions = data.actions || []
+        const stats = data.stats || {}
+        const filtered = actions.filter((a:any) => {
+          if (filtUnsellableStatut === 'en_attente' && a.statut !== 'en_attente') return false
+          if (filtUnsellableStatut === 'resolu' && !['resolu','resolu_reimb'].includes(a.statut)) return false
+          return true
+        })
+        const statutBadge: Record<string, {label: string; color: string}> = {
+          resolu:        {label:'✅ Résolu',          color:C.green},
+          resolu_reimb:  {label:'✅ Reimbursé',       color:C.green},
+          partiel_reimb: {label:'⚠ Partiel remb.',    color:C.yellow},
+          en_attente:    {label:'⏳ En attente',      color:C.red},
+        }
+        const fmtDate = (d:string|null) => d ? String(d).split('T')[0] : '—'
+        const fmt$ = (n:number) => `${Number(n||0).toLocaleString('fr-CA',{minimumFractionDigits:2,maximumFractionDigits:2})} $`
+        return (
+          <div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:12,padding:'14px 16px',marginBottom:12}}>
+              <div style={{fontSize:14,fontWeight:800,marginBottom:6}}>🔥 Suivi historique des unsellable (toutes périodes)</div>
+              <div style={{fontSize:11,color:sub,lineHeight:1.5}}>
+                Liste de toutes les actions enregistrées à l'étape 3 de chaque fermeture de settlement.
+                Statut déduit automatiquement :
+                <strong style={{color:C.green}}> ✅ Résolu</strong> si plus d'unsellable dans le dernier snapshot FBA,
+                <strong style={{color:C.green}}> ✅ Reimbursé</strong> si Amazon a remboursé après l'action,
+                <strong style={{color:C.yellow}}> ⚠ Partiel</strong> si remboursement partiel,
+                <strong style={{color:C.red}}> ⏳ En attente</strong> sinon.
+                {data.last_snapshot_date && <> Dernier snapshot FBA : <strong>{data.last_snapshot_date}</strong>.</>}
+              </div>
+            </div>
+
+            {/* Stats cards */}
+            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(5,1fr)',gap:8,marginBottom:12}}>
+              <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
+                <div style={{fontSize:10,fontWeight:700,color:sub,textTransform:'uppercase'}}>Total actions</div>
+                <div style={{fontSize:20,fontWeight:900}}>{stats.total||0}</div>
+              </div>
+              <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.green}`}}>
+                <div style={{fontSize:10,fontWeight:700,color:sub,textTransform:'uppercase'}}>Résolus</div>
+                <div style={{fontSize:20,fontWeight:900,color:C.green}}>{stats.resolu||0}</div>
+              </div>
+              <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.red}`}}>
+                <div style={{fontSize:10,fontWeight:700,color:sub,textTransform:'uppercase'}}>En attente</div>
+                <div style={{fontSize:20,fontWeight:900,color:C.red}}>{stats.en_attente||0}</div>
+              </div>
+              <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
+                <div style={{fontSize:10,fontWeight:700,color:sub,textTransform:'uppercase'}}>Type d'actions</div>
+                <div style={{fontSize:12,fontWeight:700}}>📦 {stats.par_action?.removal||0} · 📋 {stats.par_action?.case||0} · ⏭ {stats.par_action?.skip||0}</div>
+              </div>
+              <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.green}`}}>
+                <div style={{fontSize:10,fontWeight:700,color:sub,textTransform:'uppercase'}}>$ remboursé cumulé</div>
+                <div style={{fontSize:16,fontWeight:900,color:C.green}}>{fmt$(stats.total_reimb_cumule||0)}</div>
+              </div>
+            </div>
+
+            {/* Filtres */}
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 14px',marginBottom:10,display:'flex',gap:6,flexWrap:'wrap'}}>
+              {[
+                {id:'tous', label:`Tous (${actions.length})`, color:sub},
+                {id:'en_attente', label:`⏳ En attente (${stats.en_attente||0})`, color:C.red},
+                {id:'resolu', label:`✅ Résolus (${stats.resolu||0})`, color:C.green},
+              ].map((f:any) => (
+                <button key={f.id} onClick={()=>setFiltUnsellableStatut(f.id)}
+                  style={{padding:'6px 11px',borderRadius:14,border:`1px solid ${filtUnsellableStatut===f.id?f.color:bdr}`,background:filtUnsellableStatut===f.id?f.color+'22':'transparent',color:filtUnsellableStatut===f.id?f.color:sub,fontWeight:700,cursor:'pointer',fontSize:11}}>
+                  {f.label}
+                </button>
+              ))}
+              <button onClick={chargerUnsellableSuivi}
+                style={{padding:'6px 11px',borderRadius:14,border:`1px solid ${bdr}`,background:'transparent',color:sub,fontWeight:700,cursor:'pointer',fontSize:11,marginLeft:'auto'}}>
+                🔄 Rafraîchir
+              </button>
+            </div>
+
+            {/* Tableau */}
+            <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+              {filtered.length === 0 ? (
+                <div style={{padding:30,textAlign:'center',color:sub,fontSize:13}}>Aucune action unsellable enregistrée</div>
+              ) : (
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                    <thead><tr style={{background:thBg}}>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Statut</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Settlement</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>SKU</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Traction</th>
+                      <th style={{padding:'8px 10px',textAlign:'center',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Action</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Réf. Amazon</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Date action</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Qté encore unsell.</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:C.green,borderBottom:`1px solid ${bdr}`}}>$ reimbursé</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Notes</th>
+                    </tr></thead>
+                    <tbody>
+                      {filtered.map((a:any,i:number) => {
+                        const b = statutBadge[a.statut] || statutBadge.en_attente
+                        const iconAction = a.action_type==='removal'?'📦':a.action_type==='case'?'📋':a.action_type==='skip'?'⏭':'—'
+                        return (
+                          <tr key={i} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`}}>
+                              <span style={{background:b.color+'22',color:b.color,padding:'2px 7px',borderRadius:8,fontSize:10,fontWeight:700,whiteSpace:'nowrap'}}>{b.label}</span>
+                            </td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:10}}>
+                              {a.settlement_id}
+                              {a.settlement_end && <div style={{fontSize:9,color:sub}}>{fmtDate(a.settlement_end)}</div>}
+                            </td>
+                            <td onClick={()=>copyToClipboard(a.sku)} title="Cliquer pour copier"
+                                style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,cursor:'pointer',background:copiedCode===a.sku?C.green+'33':'transparent'}}>
+                              {copiedCode===a.sku ? '✓ copié' : a.sku}
+                            </td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',color:a.traction_code?C.blue:sub,fontSize:10}}>{a.traction_code||'—'}</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{iconAction} {a.action_type||'—'}</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:10,color:sub}}>{a.amazon_ref||'—'}</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:10}}>{fmtDate(a.action_le)}{a.action_par && <div style={{fontSize:9}}>{a.action_par}</div>}</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:a.still_unsellable_qty>0?C.red:C.green}}>{a.still_unsellable_qty||0}</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:a.total_reimb_ulterieur>0?C.green:sub}}>{a.total_reimb_ulterieur>0?fmt$(a.total_reimb_ulterieur):'—'}</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:10,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={a.notes}>{a.notes||'—'}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </div>
