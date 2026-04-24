@@ -136,8 +136,20 @@ export async function GET(req: NextRequest) {
     // ── Étape 2 : Reimbursements matchés + ajustements Traction ──────
     const { data: reimbs } = await supabaseAdmin
       .from('amazon_reimbursements')
-      .select('id, reimbursement_id, sku, fnsku, traction_code, amount_total, amount_per_unit, quantity_reimbursed_cash, quantity_reimbursed_inventory, reason, product_name, settlement_id, inventaire_ajuste_le, inventaire_ajuste_par, inventaire_pk_code')
+      .select('id, reimbursement_id, sku, fnsku, traction_code, amount_total, amount_per_unit, quantity_reimbursed_cash, quantity_reimbursed_inventory, reason, product_name, settlement_id, case_id, inventaire_ajuste_le, inventaire_ajuste_par, inventaire_pk_code')
       .eq('settlement_id', s.settlement_id)
+
+    // Matching automatique case_id ↔ actions unsellable précédentes
+    const caseIds = Array.from(new Set((reimbs || []).map((r: any) => r.case_id).filter(Boolean)))
+    const caseMatches = new Map<string, any>()  // case_id -> unsellable_action info
+    if (caseIds.length > 0) {
+      const { data: unsAct } = await supabaseAdmin
+        .from('amazon_unsellable_actions')
+        .select('settlement_id, sku, amazon_ref, action_type, action_le, action_par, notes')
+        .in('amazon_ref', caseIds)
+        .eq('action_type', 'case')
+      for (const u of unsAct || []) caseMatches.set(u.amazon_ref, u)
+    }
     const reimbsCount = (reimbs || []).length
     const { data: reimbTx } = await supabaseAdmin
       .from('amazon_transactions')
@@ -187,9 +199,12 @@ export async function GET(req: NextRequest) {
         const { pk, mult, manual } = resolvePk(r.sku, r.traction_code)
         const fbaLine = pk ? fbaByPk.get(pk) : null
         const qtyCash = Number(r.quantity_reimbursed_cash || 0)
+        const caseMatch = r.case_id ? caseMatches.get(r.case_id) : null
         ajustementsFba.push({
           reimbursement_id: r.reimbursement_id,
           sku: r.sku,
+          case_id: r.case_id,
+          case_matched_action: caseMatch || null,
           product_name: r.product_name,
           traction_code: r.traction_code,
           reason: r.reason,

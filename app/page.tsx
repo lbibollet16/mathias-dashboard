@@ -6264,6 +6264,12 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                     <td onClick={()=>copyToClipboard(r.sku)} title={r.product_name ? r.product_name + ' · Cliquer pour copier' : 'Cliquer pour copier'}
                                         style={{padding:'4px 10px',fontFamily:'monospace',borderBottom:`1px solid ${bdr}`,color:deja?sub:'inherit',cursor:'pointer',background:copiedCode===r.sku?C.green+'33':'transparent',transition:'background .2s'}}>
                                       {copiedCode===r.sku ? '✓ copié' : r.sku}
+                                      {r.case_matched_action && (
+                                        <div style={{fontSize:9,color:C.green,fontWeight:700,marginTop:2}}
+                                             title={`Match automatique : case ${r.case_id} ouvert le ${String(r.case_matched_action.action_le||'').split('T')[0]} par ${r.case_matched_action.action_par||'?'} dans settlement ${r.case_matched_action.settlement_id}`}>
+                                          🔗 Case {r.case_id} matché
+                                        </div>
+                                      )}
                                     </td>
                                     <td onClick={()=>r.pk_code_to_adjust && copyToClipboard(r.pk_code_to_adjust)}
                                         title={r.pk_code_to_adjust ? 'Cliquer pour copier' : ''}
@@ -7065,10 +7071,11 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           return true
         })
         const statutBadge: Record<string, {label: string; color: string}> = {
-          resolu:        {label:'✅ Résolu',          color:C.green},
-          resolu_reimb:  {label:'✅ Reimbursé',       color:C.green},
-          partiel_reimb: {label:'⚠ Partiel remb.',    color:C.yellow},
-          en_attente:    {label:'⏳ En attente',      color:C.red},
+          resolu_case_match: {label:'✅ Case matché',   color:C.green},
+          resolu:            {label:'✅ Résolu',         color:C.green},
+          resolu_reimb:      {label:'✅ Reimbursé',      color:C.green},
+          partiel_reimb:     {label:'⚠ Partiel remb.',  color:C.yellow},
+          en_attente:        {label:'⏳ En attente',     color:C.red},
         }
         const fmtDate = (d:string|null) => d ? String(d).split('T')[0] : '—'
         const fmt$ = (n:number) => `${Number(n||0).toLocaleString('fr-CA',{minimumFractionDigits:2,maximumFractionDigits:2})} $`
@@ -7167,7 +7174,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                             </td>
                             <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',color:a.traction_code?C.blue:sub,fontSize:10}}>{a.traction_code||'—'}</td>
                             <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{iconAction} {a.action_type||'—'}</td>
-                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:10,color:sub}}>{a.amazon_ref||'—'}</td>
+                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:10,color:sub}}>
+                              {a.amazon_ref||'—'}
+                              {a.has_case_match && <div style={{fontSize:9,color:C.green,fontWeight:700,marginTop:2}}>🔗 Case matché</div>}
+                            </td>
                             <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:10}}>{fmtDate(a.action_le)}{a.action_par && <div style={{fontSize:9}}>{a.action_par}</div>}</td>
                             <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:a.still_unsellable_qty>0?C.red:C.green}}>{a.still_unsellable_qty||0}</td>
                             <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:a.total_reimb_ulterieur>0?C.green:sub}}>{a.total_reimb_ulterieur>0?fmt$(a.total_reimb_ulterieur):'—'}</td>

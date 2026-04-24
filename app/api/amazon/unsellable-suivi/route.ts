@@ -23,13 +23,30 @@ export async function GET(_req: NextRequest) {
       for (const s of sData || []) settlementsMap.set(s.settlement_id, s)
     }
 
-    // Pour chaque SKU, chercher s'il y a eu un reimbursement dans les reimbursements (après la date de l'action)
+    // Match 1 : exact par case_id (priorité haute) — matching explicite
+    // Match 2 : par SKU + date postérieure à l'action (heuristique)
+    const caseIds = Array.from(new Set((actions || [])
+      .filter((a: any) => a.action_type === 'case' && a.amazon_ref)
+      .map((a: any) => a.amazon_ref.trim())))
+    const reimbByCaseId = new Map<string, any[]>()
+    if (caseIds.length > 0) {
+      const { data: rByCase } = await supabaseAdmin
+        .from('amazon_reimbursements')
+        .select('reimbursement_id, sku, case_id, approval_date, amount_total, quantity_reimbursed_cash, quantity_reimbursed_inventory, reason, settlement_id')
+        .in('case_id', caseIds)
+      for (const r of rByCase || []) {
+        const list = reimbByCaseId.get(r.case_id) || []
+        list.push(r)
+        reimbByCaseId.set(r.case_id, list)
+      }
+    }
+
     const skus = Array.from(new Set((actions || []).map((a: any) => a.sku)))
     const reimbBySku = new Map<string, any[]>()
     if (skus.length > 0) {
       const { data: rData } = await supabaseAdmin
         .from('amazon_reimbursements')
-        .select('reimbursement_id, sku, approval_date, amount_total, quantity_reimbursed_cash, quantity_reimbursed_inventory, reason, settlement_id')
+        .select('reimbursement_id, sku, case_id, approval_date, amount_total, quantity_reimbursed_cash, quantity_reimbursed_inventory, reason, settlement_id')
         .in('sku', skus)
       for (const r of rData || []) {
         const list = reimbBySku.get(r.sku) || []
@@ -57,13 +74,25 @@ export async function GET(_req: NextRequest) {
 
     const enriched = (actions || []).map((a: any) => {
       const settlement = settlementsMap.get(a.settlement_id)
-      const reimbs = reimbBySku.get(a.sku) || []
-      // Filtrer reimbursements qui ont eu lieu APRÈS l'action (date)
-      const relevantReimbs = a.action_le
-        ? reimbs.filter((r: any) => r.approval_date && r.approval_date >= a.action_le)
-        : reimbs
+      // Match prioritaire par case_id si disponible (plus fiable)
+      let matchedByCaseId: any[] = []
+      if (a.action_type === 'case' && a.amazon_ref) {
+        matchedByCaseId = reimbByCaseId.get(a.amazon_ref.trim()) || []
+      }
+      // Fallback : match par SKU + date postérieure à l'action
+      const bySku = reimbBySku.get(a.sku) || []
+      const matchedBySku = a.action_le
+        ? bySku.filter((r: any) => r.approval_date && r.approval_date >= a.action_le)
+        : bySku
+      // Fusionner sans doublons (case_id prime)
+      const seenIds = new Set(matchedByCaseId.map((r: any) => r.reimbursement_id))
+      const relevantReimbs = [
+        ...matchedByCaseId.map((r: any) => ({ ...r, match_type: 'case_id' })),
+        ...matchedBySku.filter((r: any) => !seenIds.has(r.reimbursement_id)).map((r: any) => ({ ...r, match_type: 'sku_date' })),
+      ]
       const totalReimb = relevantReimbs.reduce((s: number, r: any) => s + Number(r.amount_total || 0), 0)
       const stillUnsellableQty = stillUnsellableMap.get(a.sku) || 0
+      const hasCaseMatch = matchedByCaseId.length > 0
       return {
         ...a,
         settlement_start: settlement?.settlement_start,
@@ -71,8 +100,10 @@ export async function GET(_req: NextRequest) {
         settlement_closed: !!settlement?.closed_at,
         reimbursements_ultérieurs: relevantReimbs,
         total_reimb_ulterieur: Number(totalReimb.toFixed(2)),
+        has_case_match: hasCaseMatch,
         still_unsellable_qty: stillUnsellableQty,
-        statut: stillUnsellableQty === 0 && relevantReimbs.length > 0 ? 'resolu_reimb'
+        statut: hasCaseMatch ? 'resolu_case_match'
+          : stillUnsellableQty === 0 && relevantReimbs.length > 0 ? 'resolu_reimb'
           : stillUnsellableQty === 0 ? 'resolu'
           : relevantReimbs.length > 0 ? 'partiel_reimb'
           : 'en_attente',
