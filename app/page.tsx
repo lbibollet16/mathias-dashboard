@@ -6117,7 +6117,12 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                     <td style={{padding:'4px 10px',textAlign:'right',fontWeight:700,color:deja?sub:C.red,borderBottom:`1px solid ${bdr}`}}>{r.qty_cash || ''}</td>
                                     <td style={{padding:'4px 10px',textAlign:'right',color:sub,borderBottom:`1px solid ${bdr}`}}>{fmt$(r.amount)}</td>
                                     <td style={{padding:'4px 10px',fontFamily:'monospace',fontWeight:700,color:deja?sub:(r.found_in_traction?C.red:sub),borderBottom:`1px solid ${bdr}`}}>
-                                      {r.pk_code_to_adjust ? (<>−{r.qty_cash} × <strong>{r.pk_code_to_adjust}</strong>{!r.found_in_traction && <span style={{color:sub,fontSize:9}}> (introuvable)</span>}</>) : <span style={{color:sub}}>— (non mappé)</span>}
+                                      {r.pk_code_to_adjust ? (<>
+                                        {r.manual_mapping && <span style={{fontSize:9,color:C.green,marginRight:4}}>🔗</span>}
+                                        −{r.qty_cash_lautopak || r.qty_cash} × <strong style={{color:r.manual_mapping?C.green:'inherit'}}>{r.pk_code_to_adjust}</strong>
+                                        {r.multiplier > 1 && <span style={{color:sub,fontSize:9,marginLeft:3}}>(= {r.qty_cash}×{r.multiplier})</span>}
+                                        {!r.found_in_traction && <span style={{color:sub,fontSize:9}}> (introuvable)</span>}
+                                      </>) : <span style={{color:sub}}>— (non mappé)</span>}
                                     </td>
                                     <td style={{padding:'4px 10px',textAlign:'right',color:sub,borderBottom:`1px solid ${bdr}`}}>{r.current_traction_qty != null ? r.current_traction_qty : '—'}</td>
                                   </tr>

@@ -43,32 +43,42 @@ export async function GET(req: NextRequest) {
       .eq('settlement_id', s.settlement_id)
 
     // Ajustements Traction FBA requis (reimbursements cash = unités disparues)
+    // Priorité au multi-mapping manuel, sinon auto-strip.
+    const { loadManualMappings } = await import('@/lib/amazon-mapping')
+    const manualMappings = await loadManualMappings()
+    const resolveReportPk = (sku: string, tc: string | null): { pk: string | null; mult: number; manual: boolean } => {
+      const manual = manualMappings.get(sku)
+      if (manual && manual.length > 0) return { pk: manual[0].pk_code, mult: manual[0].multiplier, manual: true }
+      const code = tc || ''
+      const stripped = code.replace(/^[A]/, '').replace(/^(HUB|FBA|FBM)-/i, '').replace(/-(HUB|FBA|FBM)\d*$/i, '')
+      return { pk: stripped ? `FBA-${stripped}` : null, mult: 1, manual: false }
+    }
     const reimbCash = (reimbs || []).filter((r: any) => Number(r.quantity_reimbursed_cash || 0) > 0)
     const ajustements_fba: any[] = []
     if (reimbCash.length > 0) {
-      const bases = reimbCash.map((r: any) => {
-        const tc = r.traction_code || ''
-        const stripped = tc.replace(/^[A]/, '').replace(/^(HUB|FBA|FBM)-/i, '').replace(/-(HUB|FBA|FBM)\d*$/i, '')
-        return { reimb: r, base: stripped, fba_pk: stripped ? `FBA-${stripped}` : null }
-      })
-      const fbaPkCodes = bases.map(b => b.fba_pk).filter(Boolean)
+      const resolved = reimbCash.map((r: any) => ({ reimb: r, ...resolveReportPk(r.sku, r.traction_code) }))
+      const fbaPkCodes = Array.from(new Set(resolved.map(x => x.pk).filter(Boolean) as string[]))
       const { data: fbaLines } = fbaPkCodes.length
-        ? await supabaseAdmin.from('traction_amazon_lignes').select('pk_code, qty_minus_reserved').in('pk_code', fbaPkCodes as string[])
+        ? await supabaseAdmin.from('traction_amazon_lignes').select('pk_code, qty_minus_reserved').in('pk_code', fbaPkCodes)
         : { data: [] }
       const fbaByPk = new Map<string, any>()
       for (const f of fbaLines || []) fbaByPk.set(f.pk_code, f)
-      for (const b of bases) {
-        const r = b.reimb
+      for (const x of resolved) {
+        const r = x.reimb
+        const qtyCash = Number(r.quantity_reimbursed_cash || 0)
         ajustements_fba.push({
           reimbursement_id: r.reimbursement_id,
           sku: r.sku,
           product_name: r.product_name,
           traction_code: r.traction_code,
           reason: r.reason,
-          qty_cash: Number(r.quantity_reimbursed_cash || 0),
+          qty_cash: qtyCash,
+          qty_cash_lautopak: qtyCash * x.mult,
+          multiplier: x.mult,
+          manual_mapping: x.manual,
           amount: Number(r.amount_total || 0),
-          pk_code_to_adjust: b.fba_pk,
-          current_traction_qty: b.fba_pk && fbaByPk.has(b.fba_pk) ? Number(fbaByPk.get(b.fba_pk).qty_minus_reserved || 0) : null,
+          pk_code_to_adjust: x.pk,
+          current_traction_qty: x.pk && fbaByPk.has(x.pk) ? Number(fbaByPk.get(x.pk).qty_minus_reserved || 0) : null,
         })
       }
     }

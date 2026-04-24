@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { detectVariant } from '@/lib/amazon-inventory'
+import { loadManualMappings } from '@/lib/amazon-mapping'
 
 // GET /api/amazon/closure
 //   Retourne la liste de tous les settlements avec leur statut des 6 étapes.
@@ -151,37 +152,47 @@ export async function GET(req: NextRequest) {
     const step2_done = matchOk && (!hasCashReimb || hasReimbInvoice)
 
     // Pour chaque reimbursement CASH : calculer la ligne Traction à décrémenter.
-    // On cherche le pk_code "FBA-<base>" dans traction_amazon_lignes.
+    // Priorité au multi-mapping manuel (amazon_sku_pkcodes) sinon auto-strip.
     const reimbCashItems = (reimbs || []).filter((r: any) => Number(r.quantity_reimbursed_cash || 0) > 0)
     const ajustementsFba: any[] = []
     if (reimbCashItems.length > 0) {
-      const tractionCodes = Array.from(new Set(reimbCashItems.map((r: any) => r.traction_code).filter(Boolean)))
-      // Chercher les pk_codes FBA-xxx correspondants (strip A/HUB/FBA-/FBM- → base, ajoute préfixe FBA-)
-      const bases = tractionCodes.map((tc: string) => {
-        const stripped = tc.replace(/^[A]/, '').replace(/^(HUB|FBA|FBM)-/i, '').replace(/-(HUB|FBA|FBM)\d*$/i, '')
-        return { traction_code: tc, base: stripped, fba_pk: `FBA-${stripped}` }
-      })
-      const fbaPkCodes = bases.map(b => b.fba_pk)
-      const { data: fbaLines } = await supabaseAdmin
-        .from('traction_amazon_lignes')
-        .select('pk_code, qty, qty_minus_reserved, code_ligne')
-        .in('pk_code', fbaPkCodes)
+      const manualMappings = await loadManualMappings()
+      const resolvePk = (sku: string, tc: string | null): { pk: string | null; mult: number; manual: boolean } => {
+        const manual = manualMappings.get(sku)
+        if (manual && manual.length > 0) return { pk: manual[0].pk_code, mult: manual[0].multiplier, manual: true }
+        const code = tc || ''
+        const stripped = code.replace(/^[A]/, '').replace(/^(HUB|FBA|FBM)-/i, '').replace(/-(HUB|FBA|FBM)\d*$/i, '')
+        return { pk: stripped ? `FBA-${stripped}` : null, mult: 1, manual: false }
+      }
+      const pkCodesToLookup = Array.from(new Set(
+        reimbCashItems.map((r: any) => resolvePk(r.sku, r.traction_code).pk).filter(Boolean) as string[]
+      ))
+      const { data: fbaLines } = pkCodesToLookup.length
+        ? await supabaseAdmin
+            .from('traction_amazon_lignes')
+            .select('pk_code, qty, qty_minus_reserved, code_ligne')
+            .in('pk_code', pkCodesToLookup)
+        : { data: [] }
       const fbaByPk = new Map<string, any>()
       for (const f of fbaLines || []) fbaByPk.set(f.pk_code, f)
 
       for (const r of reimbCashItems) {
-        const b = bases.find(x => x.traction_code === r.traction_code)
-        const fbaLine = b ? fbaByPk.get(b.fba_pk) : null
+        const { pk, mult, manual } = resolvePk(r.sku, r.traction_code)
+        const fbaLine = pk ? fbaByPk.get(pk) : null
+        const qtyCash = Number(r.quantity_reimbursed_cash || 0)
         ajustementsFba.push({
           reimbursement_id: r.reimbursement_id,
           sku: r.sku,
           product_name: r.product_name,
           traction_code: r.traction_code,
           reason: r.reason,
-          qty_cash: Number(r.quantity_reimbursed_cash || 0),
+          qty_cash: qtyCash,
+          qty_cash_lautopak: qtyCash * mult,   // qté à décrémenter avec multiplier
           qty_inventory: Number(r.quantity_reimbursed_inventory || 0),
           amount: Number(r.amount_total || 0),
-          pk_code_to_adjust: b?.fba_pk || null,
+          pk_code_to_adjust: pk,
+          multiplier: mult,
+          manual_mapping: manual,
           current_traction_qty: fbaLine ? Number(fbaLine.qty_minus_reserved || 0) : null,
           found_in_traction: !!fbaLine,
           inventaire_ajuste_le: r.inventaire_ajuste_le,
