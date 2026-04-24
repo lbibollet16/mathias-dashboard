@@ -64,6 +64,64 @@ export async function GET(req: NextRequest) {
     if (!s) return NextResponse.json({ erreur: 'Settlement introuvable' }, { status: 404 })
 
     // ── Étape 1 : LAUTOPAK ─────────────────────────────────────────────
+    // ── Check des 3 fichiers requis pour ce settlement ───────────────
+    // 1. Payments TSV (implicite : le settlement existe)
+    // 2. FBA Inventory (snapshot dont la date est dans la période OU la plus proche)
+    // 3. Reimbursements CSV (toutes les lignes liées à ce settlement_id)
+    const startDate = s.settlement_start ? String(s.settlement_start).split('T')[0] : null
+    const endDate = s.settlement_end ? String(s.settlement_end).split('T')[0] : null
+    // Compter transactions payments
+    const { count: paymentsCount } = await supabaseAdmin
+      .from('amazon_transactions')
+      .select('id', { count: 'exact', head: true })
+      .eq('settlement_id', s.settlement_id)
+    // Snapshot FBA dans la période (ou le plus proche avant end)
+    let fbaSnapshotDate: string | null = null
+    let fbaSnapshotRows = 0
+    if (endDate) {
+      const { data: snaps } = await supabaseAdmin
+        .from('amazon_fba_inventory')
+        .select('snapshot_date')
+        .lte('snapshot_date', endDate)
+        .order('snapshot_date', { ascending: false })
+        .limit(1)
+      fbaSnapshotDate = snaps && snaps[0]?.snapshot_date || null
+      if (fbaSnapshotDate) {
+        const { count: fbaCount } = await supabaseAdmin
+          .from('amazon_fba_inventory')
+          .select('id', { count: 'exact', head: true })
+          .eq('snapshot_date', fbaSnapshotDate)
+        fbaSnapshotRows = fbaCount || 0
+      }
+    }
+    // Reimbursements liés
+    const { count: reimbsCountTotal } = await supabaseAdmin
+      .from('amazon_reimbursements')
+      .select('id', { count: 'exact', head: true })
+      .eq('settlement_id', s.settlement_id)
+
+    const fichiers_importes = {
+      payments: {
+        imported: (paymentsCount || 0) > 0,
+        count: paymentsCount || 0,
+        file_name: s.file_name,
+        label: 'Payments (settlement TSV)',
+      },
+      fba_inventory: {
+        imported: !!fbaSnapshotDate,
+        snapshot_date: fbaSnapshotDate,
+        count: fbaSnapshotRows,
+        dans_periode: !!(fbaSnapshotDate && startDate && fbaSnapshotDate >= startDate && fbaSnapshotDate <= endDate!),
+        label: 'FBA Inventory',
+      },
+      reimbursements: {
+        imported: (reimbsCountTotal || 0) > 0,
+        count: reimbsCountTotal || 0,
+        label: 'Reimbursements CSV',
+      },
+    }
+
+    // ── Étape 1 : LAUTOPAK ─────────────────────────────────────────────
     const step1_done = !!s.lautopak_invoice_ref && !!s.lautopak_invoice_date
     const step1: StepStatus = {
       key: '1_lautopak',
@@ -325,6 +383,7 @@ export async function GET(req: NextRequest) {
         audit_nb_total: nb_total,
       },
       steps: [step1, step2, step3, step4, step5, step6],
+      fichiers_importes,
       can_close: allDone && !isClosed,
       is_closed: isClosed,
     })

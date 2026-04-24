@@ -5926,6 +5926,35 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               </div>
             </div>
 
+            {/* Bandeau "📁 Fichiers importés" — les 3 fichiers requis pour ce settlement */}
+            {closureDetail.fichiers_importes && (() => {
+              const f = closureDetail.fichiers_importes
+              const card = (label: string, ok: boolean, detail: string, sublabel?: string) => (
+                <div style={{flex:1,minWidth:180,background:ok?(dark?'#0d2a18':'#e6f4ea'):(dark?'#2b1113':'#fce8e6'),border:`2px solid ${ok?C.green:C.red}`,borderRadius:8,padding:'10px 12px'}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>{sublabel||label}</div>
+                  <div style={{fontSize:13,fontWeight:900,color:ok?C.green:C.red,marginTop:2}}>
+                    {ok ? '✅ Importé' : '❌ Manquant'}
+                  </div>
+                  <div style={{fontSize:10,color:sub,marginTop:2}}>{detail}</div>
+                </div>
+              )
+              return (
+                <div style={{background:dark?'#0f0f0f':'#fafbfc',border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',marginBottom:10}}>
+                  <div style={{fontSize:11,fontWeight:800,color:sub,textTransform:'uppercase',marginBottom:8}}>📁 Fichiers importés pour ce settlement</div>
+                  <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                    {card('Payments', f.payments.imported, f.payments.imported ? `${f.payments.count} lignes de transactions` : 'Aucune transaction — réimporte le settlement TSV', '1️⃣ Payments (TSV)')}
+                    {card('FBA Inv.', f.fba_inventory.imported, f.fba_inventory.imported ? `Snapshot ${f.fba_inventory.snapshot_date} • ${f.fba_inventory.count} SKU${f.fba_inventory.dans_periode ? '' : ' ⚠ hors période'}` : 'Aucun snapshot FBA — importe le CSV "FBA Inventory"', '2️⃣ FBA Inventory')}
+                    {card('Reimb.', f.reimbursements.imported, f.reimbursements.imported ? `${f.reimbursements.count} remboursements liés` : 'Aucun reimbursement attribué — importe le CSV "Reimbursements"', '3️⃣ Reimbursements (CSV)')}
+                  </div>
+                  {(!f.payments.imported || !f.fba_inventory.imported || !f.reimbursements.imported) && (
+                    <div style={{marginTop:8,fontSize:11,color:C.yellow}}>
+                      💡 Va dans 📥 Import pour charger les fichiers manquants. Toutes les étapes du workflow reposent sur ces 3 fichiers.
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+
             {/* Bandeau info sur LAUTOPAK */}
             <div style={{background:dark?'#1a233a':'#e8f0fe',border:`1px solid ${C.blue}`,borderRadius:10,padding:'10px 14px',marginBottom:10,fontSize:11,color:C.blue,lineHeight:1.5}}>
               💡 <strong>LAUTOPAK = ta source de vérité comptable (DSM)</strong>. Traction importe l'inventaire LAUTOPAK tous les jours — tout ajustement doit se faire dans LAUTOPAK, sinon il sera écrasé à la prochaine sync.
