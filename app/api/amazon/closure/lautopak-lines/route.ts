@@ -123,48 +123,76 @@ export async function GET(req: NextRequest) {
       if (!ex.traction_code && t.traction_code) ex.traction_code = t.traction_code
     }
 
-    // 5) Lignes finales (Orders uniquement, brut)
-    const lignes = [...bySku.values()].map(a => ({
-      sku: a.sku,
-      traction_code: a.traction_code,
-      product_name: a.product_name,
-      qty: a.qty,
-      amount: Number(a.amount.toFixed(2)),
-      prix_unitaire: a.qty !== 0 ? Number((a.amount / a.qty).toFixed(2)) : 0,
-    }))
-      .filter(l => l.qty !== 0 || l.amount !== 0)
-      .sort((a, b) => b.amount - a.amount)
-
-    const refunds_lignes = [...refundsBySku.values()].map(a => ({
-      sku: a.sku,
-      traction_code: a.traction_code,
-      product_name: a.product_name,
-      qty: a.qty,
-      amount: Number(a.amount.toFixed(2)),
-      prix_unitaire: a.qty !== 0 ? Number((a.amount / a.qty).toFixed(2)) : 0,
-    }))
-      .filter(l => l.qty !== 0 || l.amount !== 0)
-      .sort((a, b) => a.amount - b.amount)
-
-    // Appliquer les multi-mappings manuels : si un SKU a un mapping, utiliser
-    // les pk_codes définis par l'utilisateur plutôt que le traction_code auto-résolu.
+    // 5) Re-groupement par pk_code CIBLE (après multi-mapping)
+    // Exemple: AU6913023 (2 ventes) + FBA-U6913023 (9 ventes) tous deux mappés
+    // à pk_code FBA-U6913023 → 1 seule ligne FBA-U6913023 avec 11 ventes.
+    // Si pas de mapping manuel, on garde traction_code auto-résolu comme clé.
     const manualMappings = await loadManualMappings()
-    for (const l of lignes as any[]) {
-      const manual = manualMappings.get(l.sku)
-      if (manual && manual.length > 0) {
-        l.traction_code = manual.map(m => m.multiplier > 1 ? `${m.pk_code}×${m.multiplier}` : m.pk_code).join(' + ')
-        l.manual_mapping = true
-      }
+    type PkLine = {
+      pk_code: string
+      amazon_skus: string[]
+      product_name: string | null
+      qty: number
+      amount: number
+      has_manual_mapping: boolean
     }
-    for (const l of refunds_lignes as any[]) {
-      const manual = manualMappings.get(l.sku)
-      if (manual && manual.length > 0) {
-        l.traction_code = manual.map(m => m.multiplier > 1 ? `${m.pk_code}×${m.multiplier}` : m.pk_code).join(' + ')
-        l.manual_mapping = true
+    const groupByPkCode = (aggs: Iterable<Agg>, isRefund: boolean) => {
+      const byPk = new Map<string, PkLine>()
+      for (const a of aggs) {
+        const manual = manualMappings.get(a.sku)
+        if (manual && manual.length > 0) {
+          const share = 1 / manual.length
+          for (const m of manual) {
+            const entry = byPk.get(m.pk_code) || {
+              pk_code: m.pk_code, amazon_skus: [],
+              product_name: a.product_name, qty: 0, amount: 0,
+              has_manual_mapping: true,
+            }
+            // multiplier : packs Amazon → unités physiques Traction
+            entry.qty += (isRefund ? Math.abs(a.qty) : a.qty) * m.multiplier
+            entry.amount += a.amount * share
+            if (!entry.amazon_skus.includes(a.sku)) entry.amazon_skus.push(a.sku)
+            if (!entry.product_name && a.product_name) entry.product_name = a.product_name
+            byPk.set(m.pk_code, entry)
+          }
+        } else {
+          const pk = a.traction_code || a.sku
+          const entry = byPk.get(pk) || {
+            pk_code: pk, amazon_skus: [],
+            product_name: a.product_name, qty: 0, amount: 0,
+            has_manual_mapping: false,
+          }
+          entry.qty += isRefund ? Math.abs(a.qty) : a.qty
+          entry.amount += a.amount
+          if (!entry.amazon_skus.includes(a.sku)) entry.amazon_skus.push(a.sku)
+          if (!entry.product_name && a.product_name) entry.product_name = a.product_name
+          byPk.set(pk, entry)
+        }
       }
+      return byPk
     }
 
-    // Enrichir avec l'état "facturée" (checkbox persistante)
+    const toFinal = (pkMap: Map<string, PkLine>, sortDesc: boolean) =>
+      [...pkMap.values()].map(a => ({
+        pk_code: a.pk_code,
+        amazon_skus: a.amazon_skus,
+        sku: a.amazon_skus.length === 1 ? a.amazon_skus[0] : `${a.amazon_skus.length} SKU`,  // backward compat champ sku
+        traction_code: a.pk_code,   // backward compat : la colonne "Code Traction" = pk_code
+        product_name: a.product_name,
+        qty: a.qty,
+        amount: Number(a.amount.toFixed(2)),
+        prix_unitaire: a.qty !== 0 ? Number((a.amount / a.qty).toFixed(2)) : 0,
+        manual_mapping: a.has_manual_mapping,
+      }))
+        .filter(l => l.qty !== 0 || l.amount !== 0)
+        .sort((a, b) => sortDesc ? b.amount - a.amount : a.amount - b.amount)
+
+    const lignes = toFinal(groupByPkCode(bySku.values(), false), true)
+    const refunds_lignes = toFinal(groupByPkCode(refundsBySku.values(), true), false)
+
+    // Enrichir avec l'état "facturée" (checkbox persistante, keyée par pk_code)
+    // NB: la colonne DB s'appelle "sku" mais on y stocke le pk_code cible pour
+    // que la case reste cohérente avec le regroupement par pk_code.
     const { data: facturees } = await supabaseAdmin
       .from('amazon_lautopak_lines_facturees')
       .select('sku, facturee_le, facturee_par')
@@ -172,7 +200,7 @@ export async function GET(req: NextRequest) {
     const facturSet = new Map<string, any>()
     for (const f of facturees || []) facturSet.set(f.sku, f)
     for (const l of lignes as any[]) {
-      const f = facturSet.get(l.sku)
+      const f = facturSet.get(l.pk_code)
       l.facturee = !!f
       l.facturee_le = f?.facturee_le || null
       l.facturee_par = f?.facturee_par || null

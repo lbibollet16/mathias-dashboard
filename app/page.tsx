@@ -5244,26 +5244,26 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     } catch {}
   }
 
-  async function toggleLautopakFacturee(settlementId: string, sku: string, dejaFacturee: boolean) {
-    // Mise à jour optimiste : la ligne bouge immédiatement
+  async function toggleLautopakFacturee(settlementId: string, pkCodeKey: string, dejaFacturee: boolean) {
+    // Mise à jour optimiste : la ligne bouge immédiatement (match par pk_code)
     const nowIso = new Date().toISOString()
     const employe = profil?.nom || profil?.email || 'Inconnu'
     setLautopakLines((prev: any) => {
       if (!prev) return prev
       const newLignes = prev.lignes.map((l: any) =>
-        l.sku === sku
+        l.pk_code === pkCodeKey
           ? { ...l, facturee: !dejaFacturee, facturee_le: !dejaFacturee ? nowIso : null, facturee_par: !dejaFacturee ? employe : null }
           : l
       )
       return { ...prev, lignes: newLignes }
     })
-    // Sauvegarde en arrière-plan
+    // Sauvegarde en arrière-plan (on stocke pkCodeKey dans la colonne sku de la table)
     try {
       const r = await fetch('/api/amazon/lautopak-facturees', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
-          settlement_id: settlementId, sku, employe,
+          settlement_id: settlementId, sku: pkCodeKey, employe,
           action: dejaFacturee ? 'uncheck' : 'check',
         }),
       })
@@ -5273,16 +5273,16 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         throw new Error(msg)
       }
     } catch (e: any) {
-      // Rollback en cas d'erreur
+      // Rollback
       setLautopakLines((prev: any) => {
         if (!prev) return prev
         const newLignes = prev.lignes.map((l: any) =>
-          l.sku === sku ? { ...l, facturee: dejaFacturee } : l
+          l.pk_code === pkCodeKey ? { ...l, facturee: dejaFacturee } : l
         )
         return { ...prev, lignes: newLignes }
       })
       console.error('[lautopak-facturees]', e)
-      alert('Erreur de sauvegarde : ' + e.message + '\n\nSi le message mentionne "relation ... does not exist", exécute le SQL de création de la table amazon_lautopak_lines_facturees.')
+      alert('Erreur de sauvegarde : ' + e.message)
     }
   }
 
@@ -6390,23 +6390,28 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                             <tbody>
                               {sorted.map((l:any, i:number) => {
                                 const fact = !!l.facturee
+                                const skus = l.amazon_skus || [l.sku]
+                                const skuDisplay = skus.length === 1 ? skus[0] : `${skus.length} SKU`
                                 return (
-                                  <tr key={l.sku+i} style={{background:fact?(dark?'#0d2a18':'#e6f4ea'):'transparent',opacity:fact?.7:1}}>
+                                  <tr key={l.pk_code+i} style={{background:fact?(dark?'#0d2a18':'#e6f4ea'):'transparent',opacity:fact?.7:1}}>
                                     <td style={{padding:'4px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                                       <input type="checkbox" checked={fact}
-                                        onChange={()=>toggleLautopakFacturee(lautopakLines.settlement_id, l.sku, fact)}
+                                        onChange={()=>toggleLautopakFacturee(lautopakLines.settlement_id, l.pk_code, fact)}
                                         title={fact ? `Facturée le ${String(l.facturee_le||'').split('T')[0]} par ${l.facturee_par||'?'}` : 'Marquer comme saisie dans LAUTOPAK'}
                                         style={{accentColor:C.green,width:16,height:16,cursor:'pointer'}}/>
                                     </td>
-                                    <td onClick={()=>copyToClipboard(l.sku)} title="Cliquer pour copier"
-                                        style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11,textDecoration:fact?'line-through':'none',cursor:'pointer',background:copiedCode===l.sku?C.green+'33':'transparent',transition:'background .2s'}}>
-                                      {copiedCode===l.sku ? '✓ copié' : l.sku}
+                                    <td onClick={()=>skus.length===1 && copyToClipboard(skus[0])} title={skus.length===1 ? 'Cliquer pour copier' : `SKUs regroupés : ${skus.join(', ')}`}
+                                        style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11,textDecoration:fact?'line-through':'none',cursor:skus.length===1?'pointer':'help',background:copiedCode===skus[0]?C.green+'33':'transparent',transition:'background .2s'}}>
+                                      {copiedCode===skus[0] && skus.length===1 ? '✓ copié' : (<>
+                                        {skus.length > 1 && <span style={{fontSize:9,color:C.yellow,marginRight:4}}>⛙</span>}
+                                        {skuDisplay}
+                                      </>)}
                                     </td>
-                                    <td onClick={()=>l.traction_code && copyToClipboard(l.traction_code)} title={l.traction_code ? (l.manual_mapping ? 'Multi-mapping manuel · Cliquer pour copier' : 'Cliquer pour copier') : ''}
-                                        style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:l.traction_code?C.blue:C.red,cursor:l.traction_code?'pointer':'default',background:copiedCode===l.traction_code?C.green+'33':'transparent',transition:'background .2s'}}>
-                                      {copiedCode===l.traction_code && l.traction_code ? '✓ copié' : (<>
+                                    <td onClick={()=>l.pk_code && copyToClipboard(l.pk_code)} title={l.pk_code ? (l.manual_mapping ? 'Multi-mapping manuel · Cliquer pour copier' : 'Cliquer pour copier') : ''}
+                                        style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:l.pk_code?C.blue:C.red,cursor:l.pk_code?'pointer':'default',background:copiedCode===l.pk_code?C.green+'33':'transparent',transition:'background .2s'}}>
+                                      {copiedCode===l.pk_code && l.pk_code ? '✓ copié' : (<>
                                         {l.manual_mapping && <span style={{fontSize:9,color:C.green,marginRight:4}}>🔗</span>}
-                                        {l.traction_code||'— non mappé'}
+                                        {l.pk_code||'— non mappé'}
                                       </>)}
                                     </td>
                                     <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11,maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name}>{l.product_name||'—'}</td>
