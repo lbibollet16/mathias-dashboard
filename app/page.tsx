@@ -6402,9 +6402,12 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                         style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11,textDecoration:fact?'line-through':'none',cursor:'pointer',background:copiedCode===l.sku?C.green+'33':'transparent',transition:'background .2s'}}>
                                       {copiedCode===l.sku ? '✓ copié' : l.sku}
                                     </td>
-                                    <td onClick={()=>l.traction_code && copyToClipboard(l.traction_code)} title={l.traction_code ? 'Cliquer pour copier' : ''}
+                                    <td onClick={()=>l.traction_code && copyToClipboard(l.traction_code)} title={l.traction_code ? (l.manual_mapping ? 'Multi-mapping manuel · Cliquer pour copier' : 'Cliquer pour copier') : ''}
                                         style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:l.traction_code?C.blue:C.red,cursor:l.traction_code?'pointer':'default',background:copiedCode===l.traction_code?C.green+'33':'transparent',transition:'background .2s'}}>
-                                      {copiedCode===l.traction_code && l.traction_code ? '✓ copié' : (l.traction_code||'— non mappé')}
+                                      {copiedCode===l.traction_code && l.traction_code ? '✓ copié' : (<>
+                                        {l.manual_mapping && <span style={{fontSize:9,color:C.green,marginRight:4}}>🔗</span>}
+                                        {l.traction_code||'— non mappé'}
+                                      </>)}
                                     </td>
                                     <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11,maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name}>{l.product_name||'—'}</td>
                                     <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:fact?sub:C.green}}>{l.qty}</td>
@@ -6447,9 +6450,12 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                     style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11,cursor:'pointer',background:copiedCode===l.sku?C.green+'33':'transparent',transition:'background .2s'}}>
                                   {copiedCode===l.sku ? '✓ copié' : l.sku}
                                 </td>
-                                <td onClick={()=>l.traction_code && copyToClipboard(l.traction_code)} title={l.traction_code ? 'Cliquer pour copier' : ''}
+                                <td onClick={()=>l.traction_code && copyToClipboard(l.traction_code)} title={l.traction_code ? (l.manual_mapping ? 'Multi-mapping manuel · Cliquer pour copier' : 'Cliquer pour copier') : ''}
                                     style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:l.traction_code?C.blue:C.red,cursor:l.traction_code?'pointer':'default',background:copiedCode===l.traction_code?C.green+'33':'transparent',transition:'background .2s'}}>
-                                  {copiedCode===l.traction_code && l.traction_code ? '✓ copié' : (l.traction_code||'— non mappé')}
+                                  {copiedCode===l.traction_code && l.traction_code ? '✓ copié' : (<>
+                                    {l.manual_mapping && <span style={{fontSize:9,color:C.green,marginRight:4}}>🔗</span>}
+                                    {l.traction_code||'— non mappé'}
+                                  </>)}
                                 </td>
                                 <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11,maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name}>{l.product_name||'—'}</td>
                                 <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:C.red}}>-{l.qty}</td>

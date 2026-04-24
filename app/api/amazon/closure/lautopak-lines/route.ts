@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { loadManualMappings } from '@/lib/amazon-mapping'
 
 // GET /api/amazon/closure/lautopak-lines?id=XXX
 //
@@ -144,6 +145,24 @@ export async function GET(req: NextRequest) {
     }))
       .filter(l => l.qty !== 0 || l.amount !== 0)
       .sort((a, b) => a.amount - b.amount)
+
+    // Appliquer les multi-mappings manuels : si un SKU a un mapping, utiliser
+    // les pk_codes définis par l'utilisateur plutôt que le traction_code auto-résolu.
+    const manualMappings = await loadManualMappings()
+    for (const l of lignes as any[]) {
+      const manual = manualMappings.get(l.sku)
+      if (manual && manual.length > 0) {
+        l.traction_code = manual.map(m => m.multiplier > 1 ? `${m.pk_code}×${m.multiplier}` : m.pk_code).join(' + ')
+        l.manual_mapping = true
+      }
+    }
+    for (const l of refunds_lignes as any[]) {
+      const manual = manualMappings.get(l.sku)
+      if (manual && manual.length > 0) {
+        l.traction_code = manual.map(m => m.multiplier > 1 ? `${m.pk_code}×${m.multiplier}` : m.pk_code).join(' + ')
+        l.manual_mapping = true
+      }
+    }
 
     // Enrichir avec l'état "facturée" (checkbox persistante)
     const { data: facturees } = await supabaseAdmin
