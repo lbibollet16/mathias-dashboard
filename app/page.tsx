@@ -4973,6 +4973,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [lautopakReimbLines, setLautopakReimbLines] = useState<any>(null)
   const [reimbInvoiceRef, setReimbInvoiceRef] = useState('')
   const [reimbInvoiceDate, setReimbInvoiceDate] = useState('')
+  const [releveRembStock, setReleveRembStock] = useState<Record<string,string>>({})  // saisie par settlement_id
   const [releveMatch, setReleveMatch] = useState<any>(null)
   const [releveSaisi, setReleveSaisi] = useState<Record<string, string>>({})
   const [releveExpanded, setReleveExpanded] = useState<Record<string, boolean>>({})
@@ -6021,10 +6022,49 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                           {(() => {
                             const fait = st.items.filter((r:any) => r.inventaire_ajuste_le).length
                             const total = st.items.length
+                            const totalMontant = st.items.reduce((s:number, r:any) => s + Number(r.amount || 0), 0)
+                            const totalFait = st.items.filter((r:any) => r.inventaire_ajuste_le).reduce((s:number, r:any) => s + Number(r.amount || 0), 0)
+                            const saisiKey = s.settlement_id
+                            const saisiStr = releveRembStock[saisiKey] || ''
+                            const saisiNum = parseFloat(saisiStr.replace(',', '.'))
+                            const ecart = !isNaN(saisiNum) ? Number((totalMontant - saisiNum).toFixed(2)) : null
                             return (
-                              <div style={{padding:'8px 12px',background:dark?'#0f0f0f':'#fafbfc',borderTop:`1px solid ${bdr}`,fontSize:11,color:sub,display:'flex',justifyContent:'space-between'}}>
-                                <span>Progression : <strong style={{color:fait===total?C.green:C.yellow}}>{fait}/{total}</strong> ajustements faits</span>
-                                {fait === total && total > 0 && <span style={{color:C.green,fontWeight:700}}>✓ Tous les reimbursements sont traités</span>}
+                              <div style={{borderTop:`2px solid ${bdr}`}}>
+                                {/* Totaux */}
+                                <div style={{padding:'10px 12px',background:dark?'#0d1829':'#e8f0fe',borderBottom:`1px solid ${bdr}`,fontSize:12,display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(3,1fr)',gap:10}}>
+                                  <div>
+                                    <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase'}}>Total montant reimbursements</div>
+                                    <div style={{fontSize:16,fontWeight:900,color:C.blue}}>{fmt$(totalMontant)}</div>
+                                    <div style={{fontSize:10,color:sub}}>{total} ligne{total>1?'s':''} cash</div>
+                                  </div>
+                                  <div>
+                                    <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase'}}>Progression ajustements</div>
+                                    <div style={{fontSize:16,fontWeight:900,color:fait===total?C.green:C.yellow}}>{fait}/{total}</div>
+                                    <div style={{fontSize:10,color:sub}}>{fmt$(totalFait)} traité{fait>1?'s':''}</div>
+                                  </div>
+                                  <div>
+                                    <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase'}}>Rapprochement relevé</div>
+                                    <div style={{display:'flex',alignItems:'center',gap:6,marginTop:2}}>
+                                      <input type="text" value={saisiStr}
+                                        onChange={e=>setReleveRembStock(p=>({...p,[saisiKey]:e.target.value}))}
+                                        placeholder="saisir..."
+                                        style={{...S,textAlign:'right',fontSize:12,padding:'4px 6px',width:100,fontFamily:'monospace'}}/>
+                                      {ecart !== null ? (
+                                        <span style={{fontSize:13,fontWeight:800,color:Math.abs(ecart)<0.01?C.green:C.red}}>
+                                          {Math.abs(ecart)<0.01 ? '✓' : fmt$(ecart)}
+                                        </span>
+                                      ) : (
+                                        <span style={{fontSize:10,color:sub}}>vs relevé</span>
+                                      )}
+                                    </div>
+                                    <div style={{fontSize:10,color:sub,marginTop:2}}>= "Remb. de stock (FBA)" du relevé</div>
+                                  </div>
+                                </div>
+                                {fait === total && total > 0 && (
+                                  <div style={{padding:'6px 12px',background:dark?'#0d2a18':'#e6f4ea',fontSize:11,color:C.green,fontWeight:700,textAlign:'center'}}>
+                                    ✓ Tous les reimbursements sont traités dans LAUTOPAK
+                                  </div>
+                                )}
                               </div>
                             )
                           })()}
