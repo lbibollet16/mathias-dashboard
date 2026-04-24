@@ -5267,7 +5267,11 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           action: dejaFacturee ? 'uncheck' : 'check',
         }),
       })
-      if (!r.ok) throw new Error('HTTP ' + r.status)
+      if (!r.ok) {
+        let msg = 'HTTP ' + r.status
+        try { const j = await r.json(); msg += ' — ' + (j.erreur || JSON.stringify(j)) } catch {}
+        throw new Error(msg)
+      }
     } catch (e: any) {
       // Rollback en cas d'erreur
       setLautopakLines((prev: any) => {
@@ -5277,7 +5281,8 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         )
         return { ...prev, lignes: newLignes }
       })
-      alert('Erreur de sauvegarde : ' + e.message)
+      console.error('[lautopak-facturees]', e)
+      alert('Erreur de sauvegarde : ' + e.message + '\n\nSi le message mentionne "relation ... does not exist", exécute le SQL de création de la table amazon_lautopak_lines_facturees.')
     }
   }
 
