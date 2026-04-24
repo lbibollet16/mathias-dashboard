@@ -5180,7 +5180,17 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     try {
       const r = await fetch(`/api/amazon/closure?id=${encodeURIComponent(settlementId)}`)
       const j = await r.json()
-      if (!j.erreur) setClosureDetail(j)
+      if (!j.erreur) {
+        setClosureDetail(j)
+        // Auto-charger les lignes reimb pour l'affichage inline dans l'étape 2
+        if (j.steps?.some((st: any) => st.key === '2_reimbursements' && st.items?.length > 0)) {
+          try {
+            const r2 = await fetch(`/api/amazon/closure/lautopak-reimb-lines?id=${encodeURIComponent(settlementId)}`)
+            const j2 = await r2.json()
+            if (!j2.erreur) setLautopakReimbLines(j2)
+          } catch {}
+        }
+      }
     } catch {}
     setClosureLoading(false)
   }
@@ -6086,8 +6096,63 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                               </div>
                             )
                           })()}
+                          {/* ─── Lignes de facture LAUTOPAK (inline, regroupées par pk_code) ─── */}
+                          {lautopakReimbLines && lautopakReimbLines.lignes && lautopakReimbLines.lignes.length > 0 && (
+                            <div style={{padding:'10px 12px',background:dark?'#0d1829':'#e8f0fe',borderBottom:`1px solid ${bdr}`}}>
+                              <div style={{fontSize:11,fontWeight:800,color:C.blue,marginBottom:6,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
+                                <span>📋 Lignes à entrer dans la 2e facture LAUTOPAK ({lautopakReimbLines.nb_lignes} lignes regroupées par PKCode)</span>
+                                <span style={{fontSize:10,color:sub,fontWeight:400}}>
+                                  Total : <strong style={{color:lautopakReimbLines.balance_ok===false?C.red:C.green,fontSize:13}}>{fmt$(lautopakReimbLines.total_facture)} {lautopakReimbLines.balance_ok ? '✓' : ''}</strong>
+                                  {lautopakReimbLines.target_settlement != null && <> vs cible {fmt$(lautopakReimbLines.target_settlement)}</>}
+                                </span>
+                              </div>
+                              <div style={{overflow:'auto',maxHeight:260,border:`1px solid ${bdr}`,borderRadius:6}}>
+                                <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                                  <thead style={{position:'sticky',top:0,background:thBg}}><tr>
+                                    <th style={{padding:'6px 8px',textAlign:'left',fontSize:9,color:C.green,borderBottom:`1px solid ${bdr}`}}>PKCode</th>
+                                    <th style={{padding:'6px 8px',textAlign:'left',fontSize:9,color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon (variantes)</th>
+                                    <th style={{padding:'6px 8px',textAlign:'right',fontSize:9,color:C.yellow,borderBottom:`1px solid ${bdr}`}}>Qté Amz</th>
+                                    <th style={{padding:'6px 8px',textAlign:'right',fontSize:9,color:C.green,borderBottom:`1px solid ${bdr}`}}>Qté LAUTOPAK</th>
+                                    <th style={{padding:'6px 8px',textAlign:'right',fontSize:9,color:sub,borderBottom:`1px solid ${bdr}`}}>Prix unit.</th>
+                                    <th style={{padding:'6px 8px',textAlign:'right',fontSize:9,color:C.blue,borderBottom:`1px solid ${bdr}`}}>Montant</th>
+                                  </tr></thead>
+                                  <tbody>
+                                    {lautopakReimbLines.lignes.map((ll:any, li:number) => (
+                                      <tr key={li} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
+                                        <td onClick={()=>ll.pk_code && copyToClipboard(ll.pk_code)} title={ll.pk_code ? 'Cliquer pour copier' : ''}
+                                            style={{padding:'4px 8px',fontFamily:'monospace',fontWeight:800,fontSize:11,color:ll.manual_mapping?C.green:C.red,cursor:ll.pk_code?'pointer':'default',background:copiedCode===ll.pk_code?C.green+'33':'transparent',borderBottom:`1px solid ${bdr}`}}>
+                                          {copiedCode===ll.pk_code && ll.pk_code ? '✓ copié' : (<>
+                                            {ll.manual_mapping && <span style={{fontSize:9,color:C.green,marginRight:3}}>🔗</span>}
+                                            {ll.pk_code || '—'}
+                                          </>)}
+                                        </td>
+                                        <td style={{padding:'4px 8px',fontFamily:'monospace',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>
+                                          {(ll.variantes||[]).map((v:any, vi:number) => (
+                                            <span key={vi} style={{marginRight:vi<(ll.variantes.length-1)?5:0}}>
+                                              <strong onClick={()=>copyToClipboard(v.amazon_sku)} title="Cliquer pour copier"
+                                                style={{color:dark?'#e0e0e0':'#333',cursor:'pointer',background:copiedCode===v.amazon_sku?C.green+'33':'transparent',padding:'0 2px',borderRadius:3}}>
+                                                {copiedCode===v.amazon_sku ? '✓' : v.amazon_sku}
+                                              </strong>
+                                              <span style={{color:C.yellow,marginLeft:2}}>({v.qty})</span>
+                                              {v.multiplier > 1 && <span style={{color:sub,fontSize:9}}>×{v.multiplier}</span>}
+                                              {vi<(ll.variantes.length-1) && <span style={{color:sub,margin:'0 2px'}}>+</span>}
+                                            </span>
+                                          ))}
+                                        </td>
+                                        <td style={{padding:'4px 8px',textAlign:'right',color:C.yellow,borderBottom:`1px solid ${bdr}`}}>{ll.qty}</td>
+                                        <td style={{padding:'4px 8px',textAlign:'right',fontWeight:700,color:C.green,borderBottom:`1px solid ${bdr}`}}>{ll.qty_lautopak || ll.qty}</td>
+                                        <td style={{padding:'4px 8px',textAlign:'right',color:sub,fontSize:10,borderBottom:`1px solid ${bdr}`}}>{Number(ll.prix_unitaire||0).toFixed(2)} $</td>
+                                        <td style={{padding:'4px 8px',textAlign:'right',fontWeight:800,color:C.blue,borderBottom:`1px solid ${bdr}`}}>{fmt$(ll.amount)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
+
                           <div style={{padding:'8px 12px',background:dark?'#2b2411':'#fdf6e3',borderBottom:`1px solid ${bdr}`,fontSize:11,fontWeight:700,color:C.yellow}}>
-                            ⚠️ Reimbursements cash = unité physiquement perdue → à facturer dans LAUTOPAK via la facture reimb ci-dessus + cocher chaque ligne quand l'ajustement est passé.
+                            ⚠️ Tableau ci-dessous : coche chaque reimbursement individuel quand tu fais l'ajustement dans LAUTOPAK (suivi par reimbursement_id).
                           </div>
                           <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
                             <thead><tr style={{background:thBg}}>
