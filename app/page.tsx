@@ -5245,20 +5245,40 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   }
 
   async function toggleLautopakFacturee(settlementId: string, sku: string, dejaFacturee: boolean) {
+    // Mise à jour optimiste : la ligne bouge immédiatement
+    const nowIso = new Date().toISOString()
+    const employe = profil?.nom || profil?.email || 'Inconnu'
+    setLautopakLines((prev: any) => {
+      if (!prev) return prev
+      const newLignes = prev.lignes.map((l: any) =>
+        l.sku === sku
+          ? { ...l, facturee: !dejaFacturee, facturee_le: !dejaFacturee ? nowIso : null, facturee_par: !dejaFacturee ? employe : null }
+          : l
+      )
+      return { ...prev, lignes: newLignes }
+    })
+    // Sauvegarde en arrière-plan
     try {
-      await fetch('/api/amazon/lautopak-facturees', {
+      const r = await fetch('/api/amazon/lautopak-facturees', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
-          settlement_id: settlementId,
-          sku,
-          employe: profil?.nom || profil?.email || 'Inconnu',
+          settlement_id: settlementId, sku, employe,
           action: dejaFacturee ? 'uncheck' : 'check',
         }),
       })
-      // Recharger les lignes pour mettre à jour l'ordre
-      await chargerLautopakLines(settlementId)
-    } catch (e: any) { alert('Erreur : ' + e.message) }
+      if (!r.ok) throw new Error('HTTP ' + r.status)
+    } catch (e: any) {
+      // Rollback en cas d'erreur
+      setLautopakLines((prev: any) => {
+        if (!prev) return prev
+        const newLignes = prev.lignes.map((l: any) =>
+          l.sku === sku ? { ...l, facturee: dejaFacturee } : l
+        )
+        return { ...prev, lignes: newLignes }
+      })
+      alert('Erreur de sauvegarde : ' + e.message)
+    }
   }
 
   async function saveUnsellableAction(settlementId: string, sku: string, tractionCode: string | null, patch: { action_type?: string|null; amazon_ref?: string; notes?: string }) {
@@ -6310,7 +6330,12 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   {/* Tableau Orders (pour facture LAUTOPAK) — non cochées en haut, cochées en bas */}
                   <div style={{overflow:'auto',flex:1}}>
                     {(() => {
-                      const sorted = [...lautopakLines.lignes].sort((a:any,b:any) => (a.facturee?1:0) - (b.facturee?1:0))
+                      const sorted = [...lautopakLines.lignes].sort((a:any,b:any) => {
+                        const fa = a.facturee ? 1 : 0
+                        const fb = b.facturee ? 1 : 0
+                        if (fa !== fb) return fa - fb  // non cochées d'abord
+                        return b.amount - a.amount     // puis par montant décroissant
+                      })
                       const faitCount = sorted.filter((l:any) => l.facturee).length
                       return (
                         <>
