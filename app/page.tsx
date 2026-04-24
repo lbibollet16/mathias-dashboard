@@ -6112,17 +6112,22 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                         title={deja ? `Fait le ${String(r.inventaire_ajuste_le).split('T')[0]} par ${r.inventaire_ajuste_par}` : 'Marquer comme ajusté dans LAUTOPAK'}/>
                                     </td>
                                     <td style={{padding:'4px 10px',fontFamily:'monospace',fontSize:10,borderBottom:`1px solid ${bdr}`,textDecoration:deja?'line-through':'none',color:deja?sub:'inherit'}}>{r.reimbursement_id}</td>
-                                    <td style={{padding:'4px 10px',fontFamily:'monospace',borderBottom:`1px solid ${bdr}`,color:deja?sub:'inherit'}} title={r.product_name}>{r.sku}</td>
+                                    <td onClick={()=>copyToClipboard(r.sku)} title={r.product_name ? r.product_name + ' · Cliquer pour copier' : 'Cliquer pour copier'}
+                                        style={{padding:'4px 10px',fontFamily:'monospace',borderBottom:`1px solid ${bdr}`,color:deja?sub:'inherit',cursor:'pointer',background:copiedCode===r.sku?C.green+'33':'transparent',transition:'background .2s'}}>
+                                      {copiedCode===r.sku ? '✓ copié' : r.sku}
+                                    </td>
                                     <td style={{padding:'4px 10px',color:sub,borderBottom:`1px solid ${bdr}`,fontSize:10}}>{r.reason}</td>
                                     <td style={{padding:'4px 10px',textAlign:'right',fontWeight:700,color:deja?sub:C.red,borderBottom:`1px solid ${bdr}`}}>{r.qty_cash || ''}</td>
                                     <td style={{padding:'4px 10px',textAlign:'right',color:sub,borderBottom:`1px solid ${bdr}`}}>{fmt$(r.amount)}</td>
-                                    <td style={{padding:'4px 10px',fontFamily:'monospace',fontWeight:700,color:deja?sub:(r.found_in_traction?C.red:sub),borderBottom:`1px solid ${bdr}`}}>
-                                      {r.pk_code_to_adjust ? (<>
+                                    <td onClick={()=>r.pk_code_to_adjust && copyToClipboard(r.pk_code_to_adjust)}
+                                        title={r.pk_code_to_adjust ? 'Cliquer pour copier le pk_code' : ''}
+                                        style={{padding:'4px 10px',fontFamily:'monospace',fontWeight:700,color:deja?sub:(r.found_in_traction?C.red:sub),borderBottom:`1px solid ${bdr}`,cursor:r.pk_code_to_adjust?'pointer':'default',background:copiedCode===r.pk_code_to_adjust?C.green+'33':'transparent',transition:'background .2s'}}>
+                                      {copiedCode===r.pk_code_to_adjust && r.pk_code_to_adjust ? '✓ copié' : (r.pk_code_to_adjust ? (<>
                                         {r.manual_mapping && <span style={{fontSize:9,color:C.green,marginRight:4}}>🔗</span>}
                                         −{r.qty_cash_lautopak || r.qty_cash} × <strong style={{color:r.manual_mapping?C.green:'inherit'}}>{r.pk_code_to_adjust}</strong>
                                         {r.multiplier > 1 && <span style={{color:sub,fontSize:9,marginLeft:3}}>(= {r.qty_cash}×{r.multiplier})</span>}
                                         {!r.found_in_traction && <span style={{color:sub,fontSize:9}}> (introuvable)</span>}
-                                      </>) : <span style={{color:sub}}>— (non mappé)</span>}
+                                      </>) : <span style={{color:sub}}>— (non mappé)</span>)}
                                     </td>
                                     <td style={{padding:'4px 10px',textAlign:'right',color:sub,borderBottom:`1px solid ${bdr}`}}>{r.current_traction_qty != null ? r.current_traction_qty : '—'}</td>
                                   </tr>
@@ -6428,7 +6433,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                       <span style={{color:sub}}>
                                         {variantes.map((v:any, vi:number) => (
                                           <span key={vi} style={{marginRight:vi<variantes.length-1?6:0}}>
-                                            <strong style={{color:dark?'#e0e0e0':'#333'}}>{v.amazon_sku}</strong>
+                                            <strong onClick={()=>copyToClipboard(v.amazon_sku)} title="Cliquer pour copier"
+                                              style={{color:dark?'#e0e0e0':'#333',cursor:'pointer',background:copiedCode===v.amazon_sku?C.green+'33':'transparent',padding:'1px 3px',borderRadius:3}}>
+                                              {copiedCode===v.amazon_sku ? '✓' : v.amazon_sku}
+                                            </strong>
                                             <span style={{color:C.yellow,marginLeft:2}}>({v.qty_amazon})</span>
                                             {v.multiplier > 1 && <span style={{color:sub,fontSize:9}}>×{v.multiplier}</span>}
                                             {vi<variantes.length-1 && <span style={{color:sub,margin:'0 2px'}}> + </span>}
@@ -6593,14 +6601,20 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                         const hasManual = !!l.manual_mapping
                         return (
                           <tr key={i} onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr} onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}>
-                            <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:800,fontSize:12,color:hasManual?C.green:C.red}}>
-                              {hasManual && <span style={{fontSize:9,color:C.green,marginRight:4}}>🔗</span>}
-                              {l.pk_code || '—'}
+                            <td onClick={()=>l.pk_code && copyToClipboard(l.pk_code)} title={l.pk_code ? 'Cliquer pour copier' : ''}
+                                style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:800,fontSize:12,color:hasManual?C.green:C.red,cursor:l.pk_code?'pointer':'default',background:copiedCode===l.pk_code?C.green+'33':'transparent',transition:'background .2s'}}>
+                              {copiedCode===l.pk_code && l.pk_code ? '✓ copié' : (<>
+                                {hasManual && <span style={{fontSize:9,color:C.green,marginRight:4}}>🔗</span>}
+                                {l.pk_code || '—'}
+                              </>)}
                             </td>
                             <td style={{padding:'4px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:10,color:sub}}>
                               {variantes.map((v:any, vi:number) => (
                                 <span key={vi} style={{marginRight:vi<variantes.length-1?6:0}}>
-                                  <strong style={{color:dark?'#e0e0e0':'#333'}}>{v.amazon_sku}</strong>
+                                  <strong onClick={()=>copyToClipboard(v.amazon_sku)} title="Cliquer pour copier"
+                                    style={{color:dark?'#e0e0e0':'#333',cursor:'pointer',background:copiedCode===v.amazon_sku?C.green+'33':'transparent',padding:'1px 3px',borderRadius:3}}>
+                                    {copiedCode===v.amazon_sku ? '✓' : v.amazon_sku}
+                                  </strong>
                                   <span style={{color:C.yellow,marginLeft:2}}>({v.qty})</span>
                                   {v.multiplier > 1 && <span style={{color:sub,fontSize:9}}>×{v.multiplier}</span>}
                                   {vi<variantes.length-1 && <span style={{color:sub,margin:'0 2px'}}> + </span>}
