@@ -8769,13 +8769,19 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                 <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{c.base_code}</td>
                                 <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={c.description}>{c.description||'—'}</td>
                                 {/* FBA bloc */}
-                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:fbaT>0?C.blue:sub}} title={fbaT>0?`FBA-${c.base_code} × qty`:''}>{fbaT||''}</td>
+                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:fbaT>0?C.blue:sub}} title="Stock théorique LAUTOPAK sous ce pk_code">
+                                  {fbaT>0 && <div style={{fontSize:9,fontFamily:'monospace',color:sub,fontWeight:400,lineHeight:1}}>FBA-{c.base_code}</div>}
+                                  <div style={{fontSize:14}}>{fbaT||''}</div>
+                                </td>
                                 <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:fbaA>0?C.blue:sub}} title="Ce qu'Amazon déclare avoir physiquement">{fbaA||''}</td>
                                 <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,fontSize:13,color:Math.abs(fbaEcart)<=1?C.green:C.red}}>
                                   {fbaT===0&&fbaA===0?'—':(fbaEcart>0?'+':'')+fbaEcart}
                                 </td>
                                 {/* FBM bloc */}
-                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:fbmT>0?C.yellow:sub}} title={fbmT>0?`FBM-${c.base_code} × qty`:''}>{fbmT||''}</td>
+                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:fbmT>0?C.yellow:sub}} title="Stock théorique LAUTOPAK sous ce pk_code">
+                                  {fbmT>0 && <div style={{fontSize:9,fontFamily:'monospace',color:sub,fontWeight:400,lineHeight:1}}>FBM-{c.base_code}</div>}
+                                  <div style={{fontSize:14}}>{fbmT||''}</div>
+                                </td>
                                 <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                                   {fbmT>0 ? (
                                     <input type="number" disabled={termine} value={input.fbm ?? ''}
@@ -8786,7 +8792,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                   {c.fbm_ecart!=null && c.fbm_ecart !== 0 && <div style={{fontSize:9,color:C.red,fontWeight:700}}>{c.fbm_ecart>0?'+':''}{c.fbm_ecart}</div>}
                                 </td>
                                 {/* HUB bloc */}
-                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:hubT>0?C.blue:sub}} title={hubT>0?`HUB-${c.base_code} × qty`:''}>{hubT||''}</td>
+                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:hubT>0?C.blue:sub}} title="Stock théorique LAUTOPAK sous ce pk_code">
+                                  {hubT>0 && <div style={{fontSize:9,fontFamily:'monospace',color:sub,fontWeight:400,lineHeight:1}}>HUB-{c.base_code}</div>}
+                                  <div style={{fontSize:14}}>{hubT||''}</div>
+                                </td>
                                 <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                                   {(hubT>0 || spT>0) ? (
                                     <input type="number" disabled={termine} value={input.warehouse ?? ''}
