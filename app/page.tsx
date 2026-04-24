@@ -6381,8 +6381,8 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                           <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
                             <thead style={{position:'sticky',top:0,background:thBg,zIndex:1}}><tr>
                               <th style={{padding:'8px 10px',textAlign:'center',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`,width:30}}>✓</th>
-                              <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
                               <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:C.green,borderBottom:`1px solid ${bdr}`}}>PKCode (mapping)</th>
+                              <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon (variantes)</th>
                               <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Produit</th>
                               <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.yellow,borderBottom:`1px solid ${bdr}`}}>Qté Amz</th>
                               <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:C.green,borderBottom:`1px solid ${bdr}`}}>Qté LAUTOPAK</th>
@@ -6392,45 +6392,93 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                             <tbody>
                               {sorted.map((l:any, i:number) => {
                                 const fact = !!l.facturee
-                                const pkList = l.pk_codes_mapping || []
-                                const hasMapping = pkList.length > 0
-                                const pkDisplay = hasMapping
-                                  ? pkList.map((p:any) => p.multiplier > 1 ? `${p.pk_code}×${p.multiplier}` : p.pk_code).join(' + ')
-                                  : (l.traction_code || '— non mappé')
-                                const copyKey = l.sku + '|sku'
-                                const copyPkKey = l.sku + '|pk'
-                                const montantShown = l.amount_balanced ?? l.amount
-                                return (
-                                  <tr key={l.sku+i} style={{background:fact?(dark?'#0d2a18':'#e6f4ea'):'transparent',opacity:fact?.7:1}}>
+                                const variantes = l.variantes || []
+                                const hasManual = !!l.manual_mapping
+                                const hasMultiplePrices = variantes.length > 1 || variantes.some((v:any) => v.multiplier > 1)
+                                const expanded = !!expandedPk[l.pk_code]
+                                return (<React.Fragment key={l.pk_code+i}>
+                                  <tr style={{background:fact?(dark?'#0d2a18':'#e6f4ea'):'transparent',opacity:fact?.7:1}}>
                                     <td style={{padding:'4px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
                                       <input type="checkbox" checked={fact}
-                                        onChange={()=>toggleLautopakFacturee(lautopakLines.settlement_id, l.sku, fact)}
+                                        onChange={()=>toggleLautopakFacturee(lautopakLines.settlement_id, l.pk_code, fact)}
                                         title={fact ? `Facturée le ${String(l.facturee_le||'').split('T')[0]} par ${l.facturee_par||'?'}` : 'Marquer comme saisie dans LAUTOPAK'}
                                         style={{accentColor:C.green,width:16,height:16,cursor:'pointer'}}/>
                                     </td>
-                                    <td onClick={()=>copyToClipboard(l.sku)} title="Cliquer pour copier"
-                                        style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700,fontSize:11,textDecoration:fact?'line-through':'none',cursor:'pointer',background:copiedCode===l.sku?C.green+'33':'transparent',transition:'background .2s'}}>
-                                      {copiedCode===l.sku ? '✓ copié' : l.sku}
+                                    {/* PKCode */}
+                                    <td onClick={()=>copyToClipboard(l.pk_code)} title="Cliquer pour copier"
+                                        style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:800,fontSize:12,color:hasManual?C.green:C.blue,cursor:'pointer',textDecoration:fact?'line-through':'none',background:copiedCode===l.pk_code?C.green+'33':'transparent',transition:'background .2s'}}>
+                                      {copiedCode===l.pk_code ? '✓ copié' : (<>
+                                        {hasManual && <span style={{fontSize:9,color:C.green,marginRight:4}}>🔗</span>}
+                                        {l.pk_code}
+                                      </>)}
                                     </td>
-                                    <td onClick={()=>hasMapping && pkList[0] && copyToClipboard(pkList[0].pk_code)} title={hasMapping ? 'Multi-mapping · Cliquer pour copier pk_code' : (l.traction_code ? 'Cliquer pour copier' : '')}
-                                        style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:11,color:hasMapping?C.green:(l.traction_code?C.blue:C.red),cursor:(hasMapping||l.traction_code)?'pointer':'default',background:copiedCode===(pkList[0]?.pk_code||l.traction_code)?C.green+'33':'transparent',transition:'background .2s'}}>
-                                      {hasMapping && <span style={{fontSize:9,color:C.green,marginRight:4}}>🔗</span>}
-                                      {pkDisplay}
+                                    {/* SKU Amazon variantes — inline + dépliable */}
+                                    <td style={{padding:'4px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:10}}>
+                                      {hasMultiplePrices && (
+                                        <button onClick={()=>setExpandedPk(p=>({...p,[l.pk_code]:!expanded}))}
+                                          style={{background:'transparent',border:'none',color:sub,cursor:'pointer',padding:'0 4px 0 0',fontSize:9}}>
+                                          {expanded ? '▼' : '▶'}
+                                        </button>
+                                      )}
+                                      <span style={{color:sub}}>
+                                        {variantes.map((v:any, vi:number) => (
+                                          <span key={vi} style={{marginRight:vi<variantes.length-1?6:0}}>
+                                            <strong style={{color:dark?'#e0e0e0':'#333'}}>{v.amazon_sku}</strong>
+                                            <span style={{color:C.yellow,marginLeft:2}}>({v.qty_amazon})</span>
+                                            {v.multiplier > 1 && <span style={{color:sub,fontSize:9}}>×{v.multiplier}</span>}
+                                            {vi<variantes.length-1 && <span style={{color:sub,margin:'0 2px'}}> + </span>}
+                                          </span>
+                                        ))}
+                                      </span>
                                     </td>
-                                    <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name}>{l.product_name||'—'}</td>
+                                    <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,color:sub,fontSize:11,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name}>{l.product_name||'—'}</td>
                                     <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:C.yellow,fontSize:11}}>{l.qty}</td>
                                     <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:fact?sub:C.green}}>
                                       {l.qty_lautopak || l.qty}
-                                      {hasMapping && pkList.some((p:any)=>p.multiplier>1) && (
+                                      {hasManual && variantes.some((v:any)=>v.multiplier>1) && (
                                         <div style={{fontSize:9,color:sub,fontWeight:400}}>
-                                          = {l.qty} × {pkList.map((p:any)=>p.multiplier).join('+')}
+                                          = {variantes.map((v:any) => v.multiplier > 1 ? `${v.qty_amazon}×${v.multiplier}` : `${v.qty_amazon}`).join(' + ')}
                                         </div>
                                       )}
                                     </td>
                                     <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub,fontSize:11}}>{Number(l.prix_unitaire || 0).toFixed(2)} $</td>
-                                    <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:fact?sub:C.blue}}>{fmt$(montantShown)}</td>
+                                    <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:fact?sub:C.blue}}>{fmt$(l.amount)}</td>
                                   </tr>
-                                )
+                                  {hasMultiplePrices && expanded && (
+                                    <tr style={{background:dark?'#0a0a0a':'#f5f7fa'}}>
+                                      <td colSpan={8} style={{padding:'6px 18px',borderBottom:`1px solid ${bdr}`}}>
+                                        <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase',marginBottom:4}}>Détail des ventes par variante Amazon :</div>
+                                        <table style={{width:'100%',fontSize:10,borderCollapse:'collapse'}}>
+                                          <thead><tr>
+                                            <th style={{padding:'3px 8px',textAlign:'left',color:sub,fontSize:9}}>SKU Amazon</th>
+                                            <th style={{padding:'3px 8px',textAlign:'right',color:sub,fontSize:9}}>Ventes Amazon</th>
+                                            <th style={{padding:'3px 8px',textAlign:'center',color:sub,fontSize:9}}>×Mult.</th>
+                                            <th style={{padding:'3px 8px',textAlign:'right',color:sub,fontSize:9}}>Qté LAUTOPAK</th>
+                                            <th style={{padding:'3px 8px',textAlign:'right',color:sub,fontSize:9}}>Montant source</th>
+                                          </tr></thead>
+                                          <tbody>
+                                            {variantes.map((v:any, vi:number) => (
+                                              <tr key={vi}>
+                                                <td style={{padding:'3px 8px',fontFamily:'monospace',fontWeight:700}}>{v.amazon_sku}</td>
+                                                <td style={{padding:'3px 8px',textAlign:'right',fontWeight:700,color:C.yellow}}>{v.qty_amazon}</td>
+                                                <td style={{padding:'3px 8px',textAlign:'center',color:v.multiplier>1?C.yellow:sub,fontWeight:v.multiplier>1?700:400}}>×{v.multiplier}</td>
+                                                <td style={{padding:'3px 8px',textAlign:'right',fontWeight:700,color:C.green}}>{v.qty_lautopak}</td>
+                                                <td style={{padding:'3px 8px',textAlign:'right',color:sub}}>{fmt$(v.amount_source)}</td>
+                                              </tr>
+                                            ))}
+                                            <tr style={{fontWeight:800,borderTop:`1px solid ${bdr}`}}>
+                                              <td style={{padding:'3px 8px',textAlign:'right',color:sub}}>Total :</td>
+                                              <td style={{padding:'3px 8px',textAlign:'right',color:C.yellow}}>{l.qty} ventes</td>
+                                              <td></td>
+                                              <td style={{padding:'3px 8px',textAlign:'right',color:C.green}}>{l.qty_lautopak} unités</td>
+                                              <td style={{padding:'3px 8px',textAlign:'right',color:C.blue}}>{fmt$(l.amount)}</td>
+                                            </tr>
+                                          </tbody>
+                                        </table>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </React.Fragment>)
                               })}
                             </tbody>
                             <tfoot>
