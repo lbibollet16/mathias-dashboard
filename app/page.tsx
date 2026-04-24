@@ -8679,15 +8679,18 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                       <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
                         {(() => {
                           const colInfos: Record<string, string> = {
-                            base: "Code de base du produit — obtenu en retirant les préfixes/suffixes HUB, FBA, FBM du SKU Traction pour regrouper les variantes d'un même produit physique sous une seule ligne.",
-                            description: "Nom du produit tel qu'il est dans Traction (champ DescFra). S'affiche tronqué, le nom complet apparaît au survol.",
-                            warehouse_attendu: "Warehouse attendu = (HUB records + records sans préfixe) − stock physiquement chez Amazon FBA. Unifie HUB et SP parce que tout est physiquement au même endroit (ton entrepôt). La déduction Amazon évite de chercher des unités fantômes. La note '(−X Amz)' indique combien a été retiré.",
-                            warehouse_compte: "Quantité physique que tu comptes à l'entrepôt — un seul chiffre à entrer, pour toutes les pièces du base product (peu importe si elles sont taggées HUB- ou pas). Auto-save au blur. L'écart avec l'attendu s'affiche en rouge.",
-                            oubli: "🏷 Indique qu'il y a des records Traction sans préfixe pour ce base product (oublis à retagger en HUB-xxx ou FBA-xxx après l'audit). C'est juste un signal visuel, pas un champ à remplir.",
-                            fbm_theo: "Quantité théorique en FBM = somme QTYMINUSRESERVED des records dont le PKCode contient FBM. Stock FBM chez toi (prêt à être expédié manuellement).",
-                            fbm_compte: "Quantité physique que tu comptes pour les pièces FBM chez toi. Auto-save au blur.",
-                            ecart: "Valeur monétaire de l'écart total = (écart Warehouse + écart FBM) × coût unitaire Traction. En rouge si non nulle. Représente ce que tu as 'perdu' ou 'gagné' en valeur.",
-                            fba_amz: "Quantité déclarée par Amazon FBA (fulfillable + inbound + reserved) au moment du dernier snapshot importé. Référence seulement — sert à déduire le Warehouse attendu.",
+                            base: "Base SKU produit — obtenu en retirant les préfixes FBA-/FBM-/HUB-/A pour regrouper les variantes d'un même produit physique sous une seule ligne.",
+                            description: "Nom du produit dans Traction (DescFra).",
+                            fba_traction: "📦 Ce que ton inventaire LAUTOPAK/Traction dit avoir au FBA Amazon — somme des pk_codes FBA-xxx de ce base SKU.",
+                            fba_amz: "Ce qu'Amazon DIT avoir dans ses entrepôts (fulfillable + inbound + reserved), applique les multi-mappings avec multiplier (pack). La différence avec FBA théo révèle les unités perdues/trouvées par Amazon.",
+                            fba_ecart: "Δ FBA = FBA Amazon − FBA théo Traction. 0 = parfait sync. Rouge si écart → réclamer à Amazon ou ajuster LAUTOPAK.",
+                            fbm_theo: "🏠 Ce que LAUTOPAK/Traction dit avoir en FBM chez toi — somme des pk_codes FBM-xxx. Stock prêt à être expédié manuellement (Fulfilled By Merchant).",
+                            fbm_compte: "Quantité physique comptée des FBM-xxx chez toi. Auto-save au blur. Écart avec FBM théo → manque ou surplus.",
+                            hub_theo: "🏭 Ce que LAUTOPAK/Traction dit avoir en HUB chez toi — somme des pk_codes HUB-xxx. Ton overstock / sécurité.",
+                            hub_compte: "Quantité physique comptée des HUB-xxx chez toi. Auto-save au blur.",
+                            oubli: "🏷 SP = Sans Préfixe. Records Traction sans préfixe FBA/FBM/HUB pour ce base. À retagger après l'audit dans LAUTOPAK. Le chiffre = qté brute SP à ne pas oublier pendant le comptage warehouse.",
+                            total_match: "✓ si Total Traction (FBA+FBM+HUB+SP) = Total physique (FBA Amazon + FBM compté + HUB compté). Idéal = balance parfaite.",
+                            ecart: "Valeur $ de l'écart total. Calcul : (écart FBM + écart HUB+SP) × coût unitaire Traction.",
                           }
                           const IHeader = ({id, label, align, color}: {id: string, label: React.ReactNode, align?: any, color?: string}) => {
                             const open = auditInfoCol === id
@@ -8706,20 +8709,27 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                           return (
                             <thead>
                               <tr style={{background:thBg}}>
-                                <IHeader id="base" label="Base" />
+                                <IHeader id="base" label="Base SKU" />
                                 <IHeader id="description" label="Description" />
-                                <IHeader id="warehouse_attendu" label="🏭 Warehouse attendu" align="right" color={C.blue} />
-                                <IHeader id="warehouse_compte" label="Warehouse compté" align="center" color={C.green} />
-                                <IHeader id="oubli" label="🏷 Oubli" align="center" color={C.yellow} />
-                                <IHeader id="fbm_theo" label="FBM théo" align="right" color={C.yellow} />
+                                {/* FBA (côté Amazon) */}
+                                <IHeader id="fba_traction" label="📦 FBA théo (Traction)" align="right" color={C.blue} />
+                                <IHeader id="fba_amz" label="FBA Amazon" align="right" color={C.blue} />
+                                <IHeader id="fba_ecart" label="ΔFBA" align="right" color={C.red} />
+                                {/* FBM (warehouse, vendu FBM) */}
+                                <IHeader id="fbm_theo" label="🏠 FBM théo (Traction)" align="right" color={C.yellow} />
                                 <IHeader id="fbm_compte" label="FBM compté" align="center" color={C.green} />
+                                {/* HUB (warehouse, over-stock) */}
+                                <IHeader id="hub_theo" label="🏭 HUB théo (Traction)" align="right" color={C.blue} />
+                                <IHeader id="hub_compte" label="HUB compté" align="center" color={C.green} />
+                                <IHeader id="oubli" label="🏷 SP" align="center" color={C.yellow} />
+                                {/* Total + match */}
+                                <IHeader id="total_match" label="Match" align="center" color={C.green} />
                                 <IHeader id="ecart" label="Écart $" align="right" color={C.red} />
-                                <IHeader id="fba_amz" label="FBA Amz" align="right" />
                                 <th style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}></th>
                               </tr>
                               {auditInfoCol && (
                                 <tr>
-                                  <td colSpan={10} style={{padding:0,borderBottom:`2px solid ${C.blue}`}}>
+                                  <td colSpan={13} style={{padding:0,borderBottom:`2px solid ${C.blue}`}}>
                                     <div style={{background:dark?'#1a233a':'#e8f0fe',padding:'12px 16px',display:'flex',alignItems:'flex-start',gap:10,lineHeight:1.6}}>
                                       <div style={{fontSize:16,color:C.blue}}>ⓘ</div>
                                       <div style={{flex:1,fontSize:12,color:dark?'#e8e8e8':'#1a1a1a',whiteSpace:'normal',textTransform:'none',fontWeight:400}}>
@@ -8740,49 +8750,72 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                           {filteredCounts.map((c:any) => {
                             const input = auditInput[c.base_code] || {}
                             const valEcart = Math.abs(Number(c.valeur_warehouse_ecart||0)) + Math.abs(Number(c.valeur_fbm_ecart||0))
+                            const fbaT = Number(c.fba_traction_theorique||0)
+                            const fbaA = Number(c.fba_amazon_theorique||0)
+                            const fbaEcart = fbaA - fbaT
+                            const fbmT = Number(c.fbm_theorique||0)
+                            const hubT = Number(c.hub_theorique||0)
+                            const spT = Number(c.sans_prefix_theorique||0)
+                            // Total Traction = stock théorique total dans LAUTOPAK
+                            const totalTraction = fbaT + fbmT + hubT + spT
+                            // Total physique : FBA Amazon + FBM compté + HUB+SP compté (warehouse)
+                            const fbmCompte = c.fbm_compte != null ? Number(c.fbm_compte) : null
+                            const whseCompte = c.hub_compte != null ? Number(c.hub_compte) : null
+                            const totalPhysique = fbaA + (fbmCompte || 0) + (whseCompte || 0)
+                            const allCounted = fbmCompte != null && whseCompte != null
+                            const match = allCounted && Math.abs(totalTraction - totalPhysique) <= 1
                             return (
-                              <tr key={c.base_code} style={{background:c.has_ecart?(dark?'#2b1113':'#fce8e6'):c.compte?(dark?'#0d2a18':'#f4faf5'):'transparent'}}>
+                              <tr key={c.base_code} style={{background:match?(dark?'#0d2a18':'#e6f4ea'):(c.has_ecart?(dark?'#2b1113':'#fce8e6'):c.compte?(dark?'#1a1a1a':'#f8f9fa'):'transparent')}}>
                                 <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{c.base_code}</td>
-                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={c.description}>{c.description||'—'}</td>
-                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:Number(c.warehouse_theorique_net)>0?C.blue:sub}}
-                                    title={Number(c.warehouse_theorique_deducted)>0 ? `Brut HUB+SP ${Number(c.hub_theorique)+Number(c.sans_prefix_theorique)}, déduit ${c.warehouse_theorique_deducted} (chez Amazon)` : ''}>
-                                  {Number(c.warehouse_theorique_net)||''}
-                                  {Number(c.warehouse_theorique_deducted)>0 && (
-                                    <div style={{fontSize:9,color:sub,fontWeight:400,marginTop:1}}>
-                                      (−{c.warehouse_theorique_deducted} Amz)
-                                    </div>
-                                  )}
+                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={c.description}>{c.description||'—'}</td>
+                                {/* FBA bloc */}
+                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:fbaT>0?C.blue:sub}} title={fbaT>0?`FBA-${c.base_code} × qty`:''}>{fbaT||''}</td>
+                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:fbaA>0?C.blue:sub}} title="Ce qu'Amazon déclare avoir physiquement">{fbaA||''}</td>
+                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,fontSize:13,color:Math.abs(fbaEcart)<=1?C.green:C.red}}>
+                                  {fbaT===0&&fbaA===0?'—':(fbaEcart>0?'+':'')+fbaEcart}
                                 </td>
+                                {/* FBM bloc */}
+                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:fbmT>0?C.yellow:sub}} title={fbmT>0?`FBM-${c.base_code} × qty`:''}>{fbmT||''}</td>
                                 <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                                  {(Number(c.warehouse_theorique_net)>0 || Number(c.hub_theorique)>0 || Number(c.sans_prefix_theorique)>0) ? (
-                                    <input type="number" disabled={termine} value={input.warehouse ?? ''}
-                                      onChange={e=>setAuditInput(prev=>({...prev,[c.base_code]:{...prev[c.base_code],warehouse:e.target.value}}))}
-                                      onBlur={()=>sauvegarderComptage(c.base_code)}
-                                      style={{width:60,padding:'4px 6px',fontSize:12,border:`2px solid ${c.warehouse_ecart==null?bdr:c.warehouse_ecart===0?C.green:C.red}`,borderRadius:5,textAlign:'center',background:dark?'#1a1a1a':'#fff',color:dark?'#fff':'#000'}}/>
-                                  ) : <span style={{color:sub,fontSize:10}}>—</span>}
-                                  {c.warehouse_ecart!=null && c.warehouse_ecart !== 0 && <div style={{fontSize:9,color:C.red,fontWeight:700}}>{c.warehouse_ecart>0?'+':''}{c.warehouse_ecart}</div>}
-                                </td>
-                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                                  {c.has_oubli
-                                    ? <span title={`${c.sans_prefix_theorique} unités sans préfixe — à retagger HUB-xxx ou FBA-xxx dans Traction`}
-                                            style={{background:C.yellow+'22',color:C.yellow,padding:'3px 8px',borderRadius:10,fontSize:10,fontWeight:700,whiteSpace:'nowrap'}}>
-                                        🏷 {Number(c.sans_prefix_theorique)}
-                                      </span>
-                                    : <span style={{color:sub,fontSize:10}}>—</span>}
-                                </td>
-                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:Number(c.fbm_theorique)>0?C.yellow:sub}}>{Number(c.fbm_theorique)||''}</td>
-                                <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                                  {Number(c.fbm_theorique)>0 ? (
+                                  {fbmT>0 ? (
                                     <input type="number" disabled={termine} value={input.fbm ?? ''}
                                       onChange={e=>setAuditInput(prev=>({...prev,[c.base_code]:{...prev[c.base_code],fbm:e.target.value}}))}
                                       onBlur={()=>sauvegarderComptage(c.base_code)}
-                                      style={{width:60,padding:'4px 6px',fontSize:12,border:`2px solid ${c.fbm_ecart==null?bdr:c.fbm_ecart===0?C.green:C.red}`,borderRadius:5,textAlign:'center',background:dark?'#1a1a1a':'#fff',color:dark?'#fff':'#000'}}/>
+                                      style={{width:55,padding:'4px 6px',fontSize:12,border:`2px solid ${c.fbm_ecart==null?bdr:c.fbm_ecart===0?C.green:C.red}`,borderRadius:5,textAlign:'center',background:dark?'#1a1a1a':'#fff',color:dark?'#fff':'#000'}}/>
                                   ) : <span style={{color:sub,fontSize:10}}>—</span>}
                                   {c.fbm_ecart!=null && c.fbm_ecart !== 0 && <div style={{fontSize:9,color:C.red,fontWeight:700}}>{c.fbm_ecart>0?'+':''}{c.fbm_ecart}</div>}
                                 </td>
-                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:valEcart>0?C.red:sub,fontSize:11}}>{valEcart>0?fmt$((c.valeur_warehouse_ecart||0)+(c.valeur_fbm_ecart||0)):'—'}</td>
-                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontSize:11,color:sub}}>{Number(c.fba_amazon_theorique)||'—'}</td>
-                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
+                                {/* HUB bloc */}
+                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:hubT>0?C.blue:sub}} title={hubT>0?`HUB-${c.base_code} × qty`:''}>{hubT||''}</td>
+                                <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                                  {(hubT>0 || spT>0) ? (
+                                    <input type="number" disabled={termine} value={input.warehouse ?? ''}
+                                      onChange={e=>setAuditInput(prev=>({...prev,[c.base_code]:{...prev[c.base_code],warehouse:e.target.value}}))}
+                                      onBlur={()=>sauvegarderComptage(c.base_code)}
+                                      placeholder={spT>0 ? `+${spT} SP` : ''}
+                                      style={{width:55,padding:'4px 6px',fontSize:12,border:`2px solid ${c.warehouse_ecart==null?bdr:c.warehouse_ecart===0?C.green:C.red}`,borderRadius:5,textAlign:'center',background:dark?'#1a1a1a':'#fff',color:dark?'#fff':'#000'}}/>
+                                  ) : <span style={{color:sub,fontSize:10}}>—</span>}
+                                  {c.warehouse_ecart!=null && c.warehouse_ecart !== 0 && <div style={{fontSize:9,color:C.red,fontWeight:700}}>{c.warehouse_ecart>0?'+':''}{c.warehouse_ecart}</div>}
+                                </td>
+                                {/* SP (oubli) */}
+                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                                  {c.has_oubli
+                                    ? <span title={`${spT} unités sans préfixe — à retagger HUB-xxx, FBM-xxx ou FBA-xxx dans LAUTOPAK après l'audit`}
+                                            style={{background:C.yellow+'22',color:C.yellow,padding:'2px 6px',borderRadius:8,fontSize:10,fontWeight:700,whiteSpace:'nowrap'}}>
+                                        🏷 {spT}
+                                      </span>
+                                    : <span style={{color:sub,fontSize:10}}>—</span>}
+                                </td>
+                                {/* Match indicator */}
+                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}
+                                    title={allCounted ? `Traction ${totalTraction} vs Physique ${totalPhysique} (FBA Amz ${fbaA} + FBM ${fbmCompte} + Whse ${whseCompte})` : 'Attend les comptes FBM + HUB'}>
+                                  {allCounted
+                                    ? (match ? <span style={{color:C.green,fontSize:14,fontWeight:900}}>✓</span>
+                                             : <span style={{color:C.red,fontSize:11,fontWeight:800}}>{totalTraction-totalPhysique>0?'+':''}{totalTraction-totalPhysique}</span>)
+                                    : <span style={{color:sub,fontSize:10}}>—</span>}
+                                </td>
+                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:valEcart>0?C.red:sub,fontSize:11}}>{valEcart>0?fmt$((c.valeur_warehouse_ecart||0)+(c.valeur_fbm_ecart||0)):'—'}</td>
+                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
                                   {c.compte && <span style={{color:C.green,fontSize:14}}>✓</span>}
                                 </td>
                               </tr>
