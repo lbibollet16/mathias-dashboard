@@ -146,10 +146,17 @@ export async function GET(req: NextRequest) {
       .ilike('amount_type', '%Reimbursement%')
     const txCount = (reimbTx || []).length
     const matchOk = reimbsCount > 0 ? reimbsCount === txCount : txCount === 0
-    // S'il y a des reimbursements cash → facture LAUTOPAK séparée obligatoire
     const hasCashReimb = (reimbs || []).some((r: any) => Number(r.quantity_reimbursed_cash || 0) > 0)
     const hasReimbInvoice = !!s.lautopak_reimb_invoice_ref && !!s.lautopak_reimb_invoice_date
-    const step2_done = matchOk && (!hasCashReimb || hasReimbInvoice)
+    // Étape 2 validée quand :
+    //   - s'il y a des cash reimbs : n° facture LAUTOPAK reimb rempli ET TOUS
+    //     les reimbursements cash sont marqués comme "ajustés" (checkbox cochée)
+    //   - s'il n'y a pas de cash reimbs : juste le match CSV↔payments suffit
+    const cashReimbs = (reimbs || []).filter((r: any) => Number(r.quantity_reimbursed_cash || 0) > 0)
+    const allAjuste = cashReimbs.length === 0 || cashReimbs.every((r: any) => !!r.inventaire_ajuste_le)
+    const step2_done = hasCashReimb
+      ? (hasReimbInvoice && allAjuste)
+      : matchOk   // sans cash → match CSV suffit
 
     // Pour chaque reimbursement CASH : calculer la ligne Traction à décrémenter.
     // Priorité au multi-mapping manuel (amazon_sku_pkcodes) sinon auto-strip.
@@ -203,16 +210,18 @@ export async function GET(req: NextRequest) {
     }
 
     let step2_detail: string
+    const nbAjuste = cashReimbs.filter((r: any) => !!r.inventaire_ajuste_le).length
+    const nbCash = cashReimbs.length
     if (reimbsCount === 0 && txCount === 0) {
       step2_detail = 'Aucun remboursement dans cette période (OK)'
-    } else if (!matchOk) {
-      step2_detail = `${reimbsCount} reimbursements ↔ ${txCount} payments — vérifier l'import CSV reimbursements`
-    } else if (hasCashReimb && !hasReimbInvoice) {
-      step2_detail = `⚠️ ${ajustementsFba.length} reimbursements cash → créer une facture LAUTOPAK pour les pièces perdues et inscrire son n° ici`
-    } else if (hasReimbInvoice) {
-      step2_detail = `Facture LAUTOPAK reimb ${s.lautopak_reimb_invoice_ref} du ${String(s.lautopak_reimb_invoice_date).split('T')[0]}`
+    } else if (!hasCashReimb) {
+      step2_detail = matchOk ? `${reimbsCount} reimbursements matchés (aucun cash)` : `${reimbsCount} ↔ ${txCount} — vérifier l'import CSV reimbursements`
+    } else if (!hasReimbInvoice) {
+      step2_detail = `⚠️ ${nbCash} reimbursements cash → créer une facture LAUTOPAK pour pièces perdues et inscrire son n° + date ici`
+    } else if (nbAjuste < nbCash) {
+      step2_detail = `Facture LAUTOPAK ${s.lautopak_reimb_invoice_ref} OK — reste ${nbCash - nbAjuste}/${nbCash} cases à cocher après ajustement LAUTOPAK`
     } else {
-      step2_detail = `${reimbsCount} reimbursements matchés (aucun cash)`
+      step2_detail = `✅ Facture LAUTOPAK ${s.lautopak_reimb_invoice_ref} + ${nbCash}/${nbCash} reimbursements cochés`
     }
 
     const step2: StepStatus = {

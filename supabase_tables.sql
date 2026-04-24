@@ -383,7 +383,9 @@ CREATE INDEX IF NOT EXISTS idx_amz_reimb_ajuste ON amazon_reimbursements(inventa
 ALTER TABLE amazon_settlements
   ADD COLUMN IF NOT EXISTS lautopak_reimb_invoice_ref TEXT,
   ADD COLUMN IF NOT EXISTS lautopak_reimb_invoice_date TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS lautopak_reimb_notes TEXT;
+  ADD COLUMN IF NOT EXISTS lautopak_reimb_notes TEXT,
+  ADD COLUMN IF NOT EXISTS step2_force_validated_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS step2_force_validated_by TEXT;
 
 -- Actions sur les SKU unsellable (étape 3 fermeture settlement)
 -- 'removal' = demande de retour au warehouse
