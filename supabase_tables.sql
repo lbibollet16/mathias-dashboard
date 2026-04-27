@@ -401,8 +401,12 @@ CREATE TABLE IF NOT EXISTS amazon_unsellable_actions (
   notes TEXT,
   action_le TIMESTAMPTZ,
   action_par TEXT,
+  traite_le TIMESTAMPTZ,
+  traite_par TEXT,
   UNIQUE (settlement_id, sku)
 );
+ALTER TABLE amazon_unsellable_actions ADD COLUMN IF NOT EXISTS traite_le TIMESTAMPTZ;
+ALTER TABLE amazon_unsellable_actions ADD COLUMN IF NOT EXISTS traite_par TEXT;
 CREATE INDEX IF NOT EXISTS idx_amz_unsell_settlement ON amazon_unsellable_actions(settlement_id);
 ALTER TABLE amazon_unsellable_actions DISABLE ROW LEVEL SECURITY;
 

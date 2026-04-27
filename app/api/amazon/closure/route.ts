@@ -269,19 +269,22 @@ export async function GET(req: NextRequest) {
       // Charger les actions déjà prises sur ces SKU pour ce settlement
       const { data: actions } = await supabaseAdmin
         .from('amazon_unsellable_actions')
-        .select('sku, action_type, amazon_ref, notes, action_le, action_par')
+        .select('sku, action_type, amazon_ref, notes, action_le, action_par, traite_le, traite_par')
         .eq('settlement_id', s.settlement_id)
       const actionsMap = new Map<string, any>()
       for (const a of actions || []) actionsMap.set(a.sku, a)
 
-      unsellableItems = (fbaSnap || []).map((f: any) => ({
-        sku: f.sku, traction_code: f.traction_code,
-        product_name: f.product_name,
-        qty: Number(f.afn_unsellable_quantity || 0),
-        unit_price: Number(f.your_price || 0),
-        valeur: Number(f.afn_unsellable_quantity || 0) * Number(f.your_price || 0),
-        action: actionsMap.get(f.sku) || null,
-      }))
+      unsellableItems = (fbaSnap || [])
+        .map((f: any) => ({
+          sku: f.sku, traction_code: f.traction_code,
+          product_name: f.product_name,
+          qty: Number(f.afn_unsellable_quantity || 0),
+          unit_price: Number(f.your_price || 0),
+          valeur: Number(f.afn_unsellable_quantity || 0) * Number(f.your_price || 0),
+          action: actionsMap.get(f.sku) || null,
+        }))
+        // Filtrer les items déjà "sortis de la liste" (traite_le défini)
+        .filter((u: any) => !u.action?.traite_le)
     }
     const step3_done = !!s.step3_unsellable_handled_at
     const step3: StepStatus = {

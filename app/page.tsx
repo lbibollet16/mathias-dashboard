@@ -5407,6 +5407,29 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     }
   }
 
+  async function marquerUnsellableTraite(settlementId: string, sku: string) {
+    if (!confirm(`Sortir ce SKU (${sku}) de la liste à traiter ?\n\nIl restera visible dans l'onglet 🔥 Suivi unsellable pour le suivi historique.`)) return
+    try {
+      const r = await fetch('/api/amazon/unsellable-actions', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          settlement_id: settlementId,
+          sku,
+          action: 'traiter',
+          employe: profil?.nom || profil?.email || 'Inconnu',
+        }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || j.erreur) {
+        alert('Erreur : ' + (j.erreur || `HTTP ${r.status}`))
+        return
+      }
+      if (closureActif) await chargerClosureDetail(closureActif)
+      chargerUnsellableSuivi()
+    } catch (e: any) { alert('Erreur : ' + e.message) }
+  }
+
   async function toggleAjustementReimbursement(reimbursementId: string, pkCode: string | null, dejaAjuste: boolean) {
     try {
       await fetch('/api/amazon/reimbursements', {
@@ -6438,6 +6461,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                               <th style={{padding:'6px 10px',textAlign:'center',fontSize:9,color:sub}}>Action</th>
                               <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Réf. Amazon</th>
                               <th style={{padding:'6px 10px',textAlign:'left',fontSize:9,color:sub}}>Notes</th>
+                              <th style={{padding:'6px 10px',textAlign:'center',fontSize:9,color:sub}}></th>
                             </tr></thead>
                             <tbody>
                               {st.items.map((u:any,i:number) => {
@@ -6465,6 +6489,17 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                     <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`}}>
                                       <input defaultValue={a.notes || ''} onBlur={(e:any)=>{ if (e.target.value !== (a.notes||'')) saveUnsellableAction(s.settlement_id, u.sku, u.traction_code, { notes: e.target.value }) }}
                                         placeholder="notes..." style={{...S,fontSize:11,padding:'3px 6px',width:160}}/>
+                                    </td>
+                                    <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                                      {a.action_type && a.amazon_ref ? (
+                                        <button onClick={()=>marquerUnsellableTraite(s.settlement_id, u.sku)}
+                                          title="Sortir de la liste — restera visible dans le Suivi unsellable"
+                                          style={{background:C.green,color:'#fff',border:'none',borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:10,whiteSpace:'nowrap'}}>
+                                          ✓ Sortir
+                                        </button>
+                                      ) : (
+                                        <span style={{fontSize:9,color:sub,fontStyle:'italic'}}>action + réf requis</span>
+                                      )}
                                     </td>
                                   </tr>
                                 )
