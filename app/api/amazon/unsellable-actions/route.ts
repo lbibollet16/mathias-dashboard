@@ -39,18 +39,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true })
     }
 
+    // Lire la ligne existante pour faire un vrai merge (sinon l'upsert écrase
+    // les champs absents du body avec null).
+    const { data: existing } = await supabaseAdmin
+      .from('amazon_unsellable_actions')
+      .select('*')
+      .eq('settlement_id', settlement_id)
+      .eq('sku', sku)
+      .maybeSingle()
+
+    const merged: any = {
+      settlement_id,
+      sku,
+      traction_code: traction_code !== undefined ? (traction_code || null) : (existing?.traction_code || null),
+      action_type: action_type !== undefined ? (action_type || null) : (existing?.action_type || null),
+      amazon_ref: amazon_ref !== undefined ? (amazon_ref || null) : (existing?.amazon_ref || null),
+      notes: notes !== undefined ? (notes || null) : (existing?.notes || null),
+      action_le: existing?.action_le || null,
+      action_par: existing?.action_par || null,
+      traite_le: existing?.traite_le || null,
+      traite_par: existing?.traite_par || null,
+    }
+    // Mettre à jour action_le/par seulement quand action_type change
+    if (action_type !== undefined) {
+      if (action_type) {
+        merged.action_le = new Date().toISOString()
+        merged.action_par = employe || 'Inconnu'
+      } else {
+        merged.action_le = null
+        merged.action_par = null
+      }
+    }
+
     const { error } = await supabaseAdmin
       .from('amazon_unsellable_actions')
-      .upsert({
-        settlement_id,
-        sku,
-        traction_code: traction_code || null,
-        action_type: action_type || null,
-        amazon_ref: amazon_ref || null,
-        notes: notes || null,
-        action_le: action_type ? new Date().toISOString() : null,
-        action_par: action_type ? (employe || 'Inconnu') : null,
-      }, { onConflict: 'settlement_id,sku' })
+      .upsert(merged, { onConflict: 'settlement_id,sku' })
     if (error) throw error
     return NextResponse.json({ success: true })
   } catch (e: any) {
