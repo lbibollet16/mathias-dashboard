@@ -5354,8 +5354,34 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   }
 
   async function saveUnsellableAction(settlementId: string, sku: string, tractionCode: string | null, patch: { action_type?: string|null; amazon_ref?: string; notes?: string }) {
+    // Optimistic update — applique immédiatement le changement sur l'item dans closureDetail
+    let snapshot: any = null
+    setClosureDetail((prev: any) => {
+      if (!prev?.steps) return prev
+      snapshot = prev
+      const newSteps = prev.steps.map((st: any) => {
+        if (st.key !== '3_unsellable' || !st.items) return st
+        const newItems = st.items.map((u: any) => {
+          if (u.sku !== sku) return u
+          const cur = u.action || {}
+          const next = {
+            ...cur,
+            ...patch,
+            action_le: patch.action_type !== undefined
+              ? (patch.action_type ? new Date().toISOString() : null)
+              : cur.action_le,
+            action_par: patch.action_type !== undefined
+              ? (patch.action_type ? (profil?.nom || profil?.email || 'Inconnu') : null)
+              : cur.action_par,
+          }
+          return { ...u, action: next }
+        })
+        return { ...st, items: newItems }
+      })
+      return { ...prev, steps: newSteps }
+    })
     try {
-      await fetch('/api/amazon/unsellable-actions', {
+      const r = await fetch('/api/amazon/unsellable-actions', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
@@ -5365,8 +5391,20 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           employe: profil?.nom || profil?.email || 'Inconnu',
         }),
       })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || j.erreur) {
+        if (snapshot) setClosureDetail(snapshot)
+        alert('Erreur sauvegarde unsellable : ' + (j.erreur || `HTTP ${r.status}`))
+        return
+      }
       if (closureActif) await chargerClosureDetail(closureActif)
-    } catch (e: any) { alert('Erreur : ' + e.message) }
+      // Rafraîchir le Suivi unsellable en arrière-plan pour qu'il soit à jour
+      // la prochaine fois que l'utilisateur ouvre cet onglet.
+      chargerUnsellableSuivi()
+    } catch (e: any) {
+      if (snapshot) setClosureDetail(snapshot)
+      alert('Erreur : ' + e.message)
+    }
   }
 
   async function toggleAjustementReimbursement(reimbursementId: string, pkCode: string | null, dejaAjuste: boolean) {
@@ -5552,6 +5590,21 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       })
       await chargerAudits()
       await chargerAuditDetail(openAudit.id)
+    } catch (e:any) { alert(e.message) }
+  }
+
+  async function rafraichirAudit() {
+    if (!openAudit) return
+    if (!confirm(`Rafraîchir les valeurs théoriques de l'audit "${openAudit.label}" ?\n\nLes quantités FBA Amazon, FBA Traction, HUB et FBM seront recalculées à partir du dernier snapshot + des mappings actuels.\n\nLes comptages physiques déjà saisis sont préservés.`)) return
+    try {
+      const r = await fetch(`/api/amazon/audits/${openAudit.id}/refresh`, { method: 'POST' })
+      const j = await r.json()
+      if (j.success) {
+        alert(`✓ Rafraîchi : ${j.updated} lignes mises à jour${j.inserted ? `, ${j.inserted} nouvelles lignes` : ''} (snapshot ${j.snapshot_date || 'n/a'})`)
+        await chargerAuditDetail(openAudit.id)
+      } else {
+        alert(j.erreur || 'Erreur')
+      }
     } catch (e:any) { alert(e.message) }
   }
 
@@ -6070,11 +6123,31 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                           )}
                         </>
                       )}
-                      {st.key==='5_audit' && st.status==='action' && s.audit_id && (
-                        <button onClick={()=>{setVue('audit'); chargerAuditDetail(s.audit_id)}}
-                          style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'6px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
-                          Ouvrir l'audit →
-                        </button>
+                      {st.key==='5_audit' && s.audit_id && (
+                        <>
+                          <button onClick={async()=>{
+                            if (!confirm(`Rafraîchir les valeurs théoriques de l'audit ?\n\nFBA Amazon, FBA Traction, HUB, FBM seront recalculés à partir du dernier snapshot + mappings actuels.\n\nLes comptages physiques déjà saisis sont préservés.`)) return
+                            try {
+                              const r = await fetch(`/api/amazon/audits/${s.audit_id}/refresh`, { method: 'POST' })
+                              const j = await r.json()
+                              if (j.success) {
+                                alert(`✓ Rafraîchi : ${j.updated} lignes mises à jour${j.inserted ? `, ${j.inserted} nouvelles lignes` : ''} (snapshot ${j.snapshot_date || 'n/a'})`)
+                              } else {
+                                alert(j.erreur || 'Erreur')
+                              }
+                            } catch (e:any) { alert(e.message) }
+                          }}
+                            title="Recalcule FBA Amazon, FBA Traction, HUB, FBM à partir du dernier snapshot sans toucher aux comptages déjà saisis"
+                            style={{background:'transparent',border:`1px solid ${C.blue}`,color:C.blue,borderRadius:8,padding:'6px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                            🔄 Rafraîchir théoriques
+                          </button>
+                          {st.status==='action' && (
+                            <button onClick={()=>{setVue('audit'); chargerAuditDetail(s.audit_id)}}
+                              style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'6px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                              Ouvrir l'audit →
+                            </button>
+                          )}
+                        </>
                       )}
                       {(st.key==='3_unsellable' || st.key==='4_ajustements' || st.key==='6_rapport') && st.status!=='locked' && !closureDetail.is_closed && (
                         st.status==='done' ? (
@@ -8578,6 +8651,11 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   <button onClick={exportAuditCsv}
                     style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
                     📥 Export CSV
+                  </button>
+                  <button onClick={rafraichirAudit}
+                    title="Recalcule FBA Amazon, FBA Traction, HUB, FBM à partir du dernier snapshot sans toucher aux comptages déjà saisis"
+                    style={{background:'transparent',border:`1px solid ${C.blue}`,color:C.blue,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                    🔄 Rafraîchir théoriques
                   </button>
                   {!termine ? (
                     <button onClick={finaliserAudit}

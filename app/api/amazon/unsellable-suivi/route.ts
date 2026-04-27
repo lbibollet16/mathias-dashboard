@@ -10,6 +10,7 @@ export async function GET(_req: NextRequest) {
     const { data: actions } = await supabaseAdmin
       .from('amazon_unsellable_actions')
       .select('*')
+      .not('action_type', 'is', null)
       .order('action_le', { ascending: false })
 
     // Enrichir avec : date du settlement, nom settlement, reimbursement ultérieur matchant
