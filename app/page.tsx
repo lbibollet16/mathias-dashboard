@@ -5407,6 +5407,29 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     }
   }
 
+  async function appliquerRemovalAuto(settlementId: string, sku: string, tractionCode: string|null, orderId: string) {
+    // Pré-remplit action_type='removal' + amazon_ref=order_id en un seul appel
+    try {
+      const r = await fetch('/api/amazon/unsellable-actions', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          settlement_id: settlementId, sku, traction_code: tractionCode,
+          action_type: 'removal',
+          amazon_ref: orderId,
+          employe: profil?.nom || profil?.email || 'Inconnu',
+        }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || j.erreur) {
+        alert('Erreur : ' + (j.erreur || `HTTP ${r.status}`))
+        return
+      }
+      if (closureActif) await chargerClosureDetail(closureActif)
+      chargerUnsellableSuivi()
+    } catch (e: any) { alert('Erreur : ' + e.message) }
+  }
+
   async function marquerUnsellableTraite(settlementId: string, sku: string) {
     if (!confirm(`Sortir ce SKU (${sku}) de la liste à traiter ?\n\nIl restera visible dans l'onglet 🔥 Suivi unsellable pour le suivi historique.`)) return
     try {
@@ -6450,6 +6473,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                         <>
                           <div style={{padding:'8px 12px',background:dark?'#1a233a':'#e8f0fe',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,lineHeight:1.5}}>
                             💡 Choisis une action pour chaque SKU : <strong>Removal</strong> (retour au warehouse), <strong>Case</strong> (réclamation Amazon), ou <strong>Skip</strong> (reporté). Inscris le n° de case/removal dans la colonne Réf. Tes choix sont sauvegardés par settlement + sku.
+                            <br/>🤖 Les SKU avec un <strong>removal "Completed"</strong> dans le rapport Amazon sont marqués <span style={{background:C.blue+'22',color:C.blue,padding:'1px 6px',borderRadius:4,fontWeight:700}}>Auto</span> — clique <strong>Appliquer</strong> pour pré-remplir.
                           </div>
                           <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
                             <thead><tr style={{background:thBg}}>
@@ -6496,6 +6520,12 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                           title="Sortir de la liste — restera visible dans le Suivi unsellable"
                                           style={{background:C.green,color:'#fff',border:'none',borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:10,whiteSpace:'nowrap'}}>
                                           ✓ Sortir
+                                        </button>
+                                      ) : u.has_removal_completed && u.latest_removal_order_id ? (
+                                        <button onClick={()=>appliquerRemovalAuto(s.settlement_id, u.sku, u.traction_code, u.latest_removal_order_id)}
+                                          title={`Removal automatique trouvé : ${u.latest_removal_order_id}`}
+                                          style={{background:C.blue,color:'#fff',border:'none',borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:10,whiteSpace:'nowrap'}}>
+                                          🤖 Appliquer
                                         </button>
                                       ) : (
                                         <span style={{fontSize:9,color:sub,fontStyle:'italic'}}>action + réf requis</span>
@@ -7561,8 +7591,9 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           {/* Dropzone upload */}
           <div style={{background:card,border:`2px dashed ${bdr}`,borderRadius:10,padding:'20px',marginBottom:12,textAlign:'center'}}>
             <div style={{fontSize:14,fontWeight:800,marginBottom:4}}>2️⃣ Importer les fichiers Amazon</div>
-            <div style={{fontSize:11,color:sub,marginBottom:14}}>
-              Détection automatique du type (settlement payments, FBA inventory, reimbursements). Tu peux sélectionner plusieurs fichiers à la fois.
+            <div style={{fontSize:11,color:sub,marginBottom:14,lineHeight:1.5}}>
+              Détection automatique du type. Tu peux sélectionner plusieurs fichiers à la fois.<br/>
+              Fichiers supportés : <strong>settlement payments (TSV)</strong>, <strong>FBA inventory (CSV)</strong>, <strong>reimbursements (CSV)</strong>, <strong>removal orders (CSV)</strong> 🆕.
             </div>
             <input ref={fileRef} type="file" multiple accept=".txt,.csv,.tsv"
               onChange={e=>onFiles(e.target.files)} disabled={importing}

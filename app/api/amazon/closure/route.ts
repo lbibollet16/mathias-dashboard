@@ -274,15 +274,41 @@ export async function GET(req: NextRequest) {
       const actionsMap = new Map<string, any>()
       for (const a of actions || []) actionsMap.set(a.sku, a)
 
+      // Charger les removal orders Amazon (auto-removals déjà déclenchés).
+      // Pour chaque SKU unsellable, on cherche un removal récent (≤90j avant
+      // settlement_end) pour pré-remplir l'action automatiquement.
+      const skuList = (fbaSnap || []).map((f: any) => f.sku).filter(Boolean)
+      const removalsBySku = new Map<string, any[]>()
+      if (skuList.length > 0) {
+        const { data: removals } = await supabaseAdmin
+          .from('amazon_removal_orders')
+          .select('order_id, sku, order_status, order_type, disposition, requested_quantity, shipped_quantity, cancelled_quantity, removal_fee, last_updated_date')
+          .in('sku', skuList)
+          .order('last_updated_date', { ascending: false })
+        for (const r of removals || []) {
+          const list = removalsBySku.get(r.sku) || []
+          list.push(r)
+          removalsBySku.set(r.sku, list)
+        }
+      }
+
       unsellableItems = (fbaSnap || [])
-        .map((f: any) => ({
-          sku: f.sku, traction_code: f.traction_code,
-          product_name: f.product_name,
-          qty: Number(f.afn_unsellable_quantity || 0),
-          unit_price: Number(f.your_price || 0),
-          valeur: Number(f.afn_unsellable_quantity || 0) * Number(f.your_price || 0),
-          action: actionsMap.get(f.sku) || null,
-        }))
+        .map((f: any) => {
+          const removals = removalsBySku.get(f.sku) || []
+          const hasCompleted = removals.some((r: any) => r.order_status === 'Completed')
+          const latestRemoval = removals[0] || null
+          return {
+            sku: f.sku, traction_code: f.traction_code,
+            product_name: f.product_name,
+            qty: Number(f.afn_unsellable_quantity || 0),
+            unit_price: Number(f.your_price || 0),
+            valeur: Number(f.afn_unsellable_quantity || 0) * Number(f.your_price || 0),
+            action: actionsMap.get(f.sku) || null,
+            removal_orders: removals,
+            has_removal_completed: hasCompleted,
+            latest_removal_order_id: latestRemoval?.order_id || null,
+          }
+        })
         // Filtrer les items déjà "sortis de la liste" (traite_le défini)
         .filter((u: any) => !u.action?.traite_le)
     }

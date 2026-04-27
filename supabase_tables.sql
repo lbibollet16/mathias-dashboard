@@ -410,6 +410,35 @@ ALTER TABLE amazon_unsellable_actions ADD COLUMN IF NOT EXISTS traite_par TEXT;
 CREATE INDEX IF NOT EXISTS idx_amz_unsell_settlement ON amazon_unsellable_actions(settlement_id);
 ALTER TABLE amazon_unsellable_actions DISABLE ROW LEVEL SECURITY;
 
+-- 13b. Removal Orders : rapport Amazon des unsellable auto-sortis de FBA.
+-- Une ligne par (order_id, sku). order-source typique = "Seller-configured
+-- Automated Unfulfillable Removal System" (SAURS).
+CREATE TABLE IF NOT EXISTS amazon_removal_orders (
+  id BIGSERIAL PRIMARY KEY,
+  order_id TEXT NOT NULL,
+  sku TEXT NOT NULL,
+  fnsku TEXT,
+  request_date TIMESTAMPTZ,
+  last_updated_date TIMESTAMPTZ,
+  order_source TEXT,
+  order_type TEXT,         -- Return | Disposal
+  order_status TEXT,       -- Completed | Pending | Cancelled
+  disposition TEXT,        -- Unsellable | Customer-Damaged | etc.
+  requested_quantity NUMERIC DEFAULT 0,
+  cancelled_quantity NUMERIC DEFAULT 0,
+  disposed_quantity NUMERIC DEFAULT 0,
+  shipped_quantity NUMERIC DEFAULT 0,
+  in_process_quantity NUMERIC DEFAULT 0,
+  removal_fee NUMERIC DEFAULT 0,
+  currency TEXT,
+  imported_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (order_id, sku)
+);
+CREATE INDEX IF NOT EXISTS idx_amz_removal_sku ON amazon_removal_orders(sku);
+CREATE INDEX IF NOT EXISTS idx_amz_removal_status ON amazon_removal_orders(order_status);
+CREATE INDEX IF NOT EXISTS idx_amz_removal_date ON amazon_removal_orders(last_updated_date);
+ALTER TABLE amazon_removal_orders DISABLE ROW LEVEL SECURITY;
+
 -- Cases à cocher persistantes pour les lignes de facture LAUTOPAK (étape 1)
 -- Permet de marquer "ligne saisie dans LAUTOPAK" par (settlement, sku).
 CREATE TABLE IF NOT EXISTS amazon_lautopak_lines_facturees (

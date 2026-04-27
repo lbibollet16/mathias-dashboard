@@ -77,13 +77,14 @@ function parseDate(v: any): string | null {
 }
 
 // ─── Détection du type de fichier ─────────────────────────────────────────
-type FileType = 'payments' | 'fba_inventory' | 'reimbursements' | 'unknown'
+type FileType = 'payments' | 'fba_inventory' | 'reimbursements' | 'removal_orders' | 'unknown'
 
 function detectType(headers: string[]): FileType {
   const h = new Set(headers.map(x => x.toLowerCase()))
   if (h.has('settlement-id') && h.has('transaction-type')) return 'payments'
   if (h.has('sku') && h.has('afn-warehouse-quantity')) return 'fba_inventory'
   if (h.has('reimbursement-id') && h.has('reason')) return 'reimbursements'
+  if (h.has('order-id') && h.has('disposition') && h.has('shipped-quantity')) return 'removal_orders'
   return 'unknown'
 }
 
@@ -319,6 +320,53 @@ async function handleReimbursements(objs: Record<string, string>[], fileName: st
   }
 }
 
+async function handleRemovalOrders(objs: Record<string, string>[], fileName: string) {
+  if (objs.length === 0) return { success: false, erreur: 'Fichier vide' }
+
+  // Dédoublonnage par (order-id, sku)
+  const rowsByKey = new Map<string, any>()
+  for (const o of objs) {
+    const order_id = o['order-id']
+    const sku = o['sku']
+    if (!order_id || !sku) continue
+    const row = {
+      order_id,
+      sku,
+      fnsku: o['fnsku'] || null,
+      request_date: parseDate(o['request-date']),
+      last_updated_date: parseDate(o['last-updated-date']),
+      order_source: o['order-source'] || null,
+      order_type: o['order-type'] || null,
+      order_status: o['order-status'] || null,
+      disposition: o['disposition'] || null,
+      requested_quantity: num(o['requested-quantity']),
+      cancelled_quantity: num(o['cancelled-quantity']),
+      disposed_quantity: num(o['disposed-quantity']),
+      shipped_quantity: num(o['shipped-quantity']),
+      in_process_quantity: num(o['in-process-quantity']),
+      removal_fee: num(o['removal-fee']),
+      currency: o['currency'] || null,
+    }
+    rowsByKey.set(`${order_id}|${sku}`, row)
+  }
+  const rows = Array.from(rowsByKey.values())
+
+  for (let i = 0; i < rows.length; i += 500) {
+    const batch = rows.slice(i, i + 500)
+    const { error } = await supabaseAdmin
+      .from('amazon_removal_orders')
+      .upsert(batch, { onConflict: 'order_id,sku' })
+    if (error) throw error
+  }
+
+  return {
+    success: true,
+    type: 'removal_orders',
+    rows_inserted: rows.length,
+    file_name: fileName,
+  }
+}
+
 // ─── Entry point ─────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
@@ -342,7 +390,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         erreur: 'Type de fichier non reconnu',
         headers_trouves: headers,
-        indices: 'Doit contenir: settlement-id+transaction-type (payments), sku+afn-warehouse-quantity (FBA inventory), ou reimbursement-id+reason (remboursements)',
+        indices: 'Doit contenir: settlement-id+transaction-type (payments), sku+afn-warehouse-quantity (FBA inventory), reimbursement-id+reason (remboursements), ou order-id+disposition+shipped-quantity (removal orders)',
       }, { status: 400 })
     }
 
@@ -354,6 +402,7 @@ export async function POST(req: NextRequest) {
     if (type === 'payments')           result = await handlePayments(objs, fileName, resolver)
     else if (type === 'fba_inventory') result = await handleFbaInventory(objs, fileName, resolver)
     else if (type === 'reimbursements')result = await handleReimbursements(objs, fileName, resolver)
+    else if (type === 'removal_orders')result = await handleRemovalOrders(objs, fileName)
     else                               result = { success: false, erreur: 'type inconnu' }
 
     // Sauvegarder les mappings auto appris pendant l'import
