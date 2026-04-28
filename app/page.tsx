@@ -5690,6 +5690,85 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     URL.revokeObjectURL(url)
   }
 
+  // Feuille de comptage simplifiée pour aller au warehouse.
+  //   mode='tout'   : tous les SKU avec stock attendu > 0 (W ou FBM)
+  //   mode='ecarts' : seulement ceux avec écart non nul (recomptage)
+  function exporterFeuilleComptage(mode: 'tout' | 'ecarts') {
+    if (!openAudit || !auditCounts.length) return
+    let rows = auditCounts.filter((c:any) => {
+      const w = Number(c.warehouse_theorique_net||0)
+      const fbm = Number(c.fbm_theorique||0)
+      // Toujours exclure les bases sans stock attendu nulle part
+      if (w === 0 && fbm === 0) return false
+      if (mode === 'ecarts') {
+        const wEcart = c.warehouse_ecart != null && Number(c.warehouse_ecart) !== 0
+        const fbmEcart = c.fbm_ecart != null && Number(c.fbm_ecart) !== 0
+        return wEcart || fbmEcart
+      }
+      return true
+    })
+    if (rows.length === 0) {
+      alert(mode === 'ecarts'
+        ? 'Aucun écart à recompter — tous les comptages saisis sont alignés avec le théorique.'
+        : 'Aucun base product à compter.')
+      return
+    }
+    // Tri : Warehouse en priorité, puis FBM, puis alphabétique
+    rows = rows.sort((a:any, b:any) => {
+      const aW = Number(a.warehouse_theorique_net||0) > 0 ? 0 : 1
+      const bW = Number(b.warehouse_theorique_net||0) > 0 ? 0 : 1
+      if (aW !== bW) return aW - bW
+      return String(a.base_code).localeCompare(String(b.base_code))
+    })
+
+    const headers = [
+      'Base', 'Description',
+      'Warehouse attendu', 'Warehouse compté', 'Écart W',
+      'FBM attendu', 'FBM compté', 'Écart FBM',
+      'Notes / commentaires comptage'
+    ]
+    const csvRows = rows.map((c:any) => {
+      const wAtt = Number(c.warehouse_theorique_net||0)
+      const fbmAtt = Number(c.fbm_theorique||0)
+      // Pour le recomptage, on pré-remplit le compté précédent pour comparaison
+      const wCompte = mode === 'ecarts' && c.warehouse_compte != null ? c.warehouse_compte : ''
+      const fbmCompte = mode === 'ecarts' && c.fbm_compte != null ? c.fbm_compte : ''
+      const wEcart = mode === 'ecarts' && c.warehouse_ecart != null ? c.warehouse_ecart : ''
+      const fbmEcart = mode === 'ecarts' && c.fbm_ecart != null ? c.fbm_ecart : ''
+      return [
+        c.base_code,
+        (c.description||'').replace(/"/g,'""'),
+        wAtt > 0 ? wAtt : '',
+        wCompte,
+        wEcart,
+        fbmAtt > 0 ? fbmAtt : '',
+        fbmCompte,
+        fbmEcart,
+        ''
+      ].map(v => `"${v}"`).join(',')
+    })
+    // Ligne titre + colonnes vides faciles à imprimer
+    const titre = mode === 'ecarts'
+      ? `Recomptage écarts — Audit ${openAudit.label||openAudit.mois} — ${rows.length} SKU à recompter`
+      : `Feuille de comptage — Audit ${openAudit.label||openAudit.mois} — ${rows.length} SKU`
+    const csv = [
+      `"${titre}"`,
+      `"Date impression : ${new Date().toLocaleDateString('fr-CA')} — Compté par : ___________________"`,
+      '',
+      headers.map(h => `"${h}"`).join(','),
+      ...csvRows
+    ].join('\n')
+    const blob = new Blob(['\ufeff' + csv], {type:'text/csv;charset=utf-8'})
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = mode === 'ecarts'
+      ? `recomptage_ecarts_${openAudit.mois}_${openAudit.id}.csv`
+      : `feuille_comptage_${openAudit.mois}_${openAudit.id}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   async function toggleWatchlist(amazon_sku: string, currently: boolean) {
     try {
       await fetch('/api/amazon/watchlist', {
@@ -8714,9 +8793,20 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     style={{background:'transparent',border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12,color:sub}}>
                     ← Retour
                   </button>
+                  <button onClick={()=>exporterFeuilleComptage('tout')}
+                    title="Génère un CSV avec colonnes vides pour comptage manuel — tous les SKU avec stock attendu"
+                    style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                    📋 Feuille comptage
+                  </button>
+                  <button onClick={()=>exporterFeuilleComptage('ecarts')}
+                    title="Génère un CSV avec uniquement les SKU qui ont un écart entre théorique et compté (recomptage)"
+                    style={{background:C.yellow,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                    🔄 Recompte écarts
+                  </button>
                   <button onClick={exportAuditCsv}
-                    style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
-                    📥 Export CSV
+                    title="Export complet pour analyse Excel (théorique, compté, écarts, valeurs)"
+                    style={{background:'transparent',border:`1px solid ${C.blue}`,color:C.blue,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                    📥 Export complet
                   </button>
                   <button onClick={rafraichirAudit}
                     title="Recalcule FBA Amazon, FBA Traction, HUB, FBM à partir du dernier snapshot sans toucher aux comptages déjà saisis"
