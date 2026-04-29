@@ -10,6 +10,8 @@ tsconfig.tsbuildinfo
 .claude/settings.local.json
 
 # Documents source comptables (ne pas commiter — données sensibles)
-Releve paiement/
-custumer return/
-fichier removal order/
+/Releve paiement/
+/custumer return/
+/fichier removal order/
+/settlement/
+/Amazon/

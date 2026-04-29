@@ -77,7 +77,7 @@ function parseDate(v: any): string | null {
 }
 
 // ─── Détection du type de fichier ─────────────────────────────────────────
-type FileType = 'payments' | 'fba_inventory' | 'reimbursements' | 'removal_orders' | 'unknown'
+type FileType = 'payments' | 'fba_inventory' | 'reimbursements' | 'removal_orders' | 'customer_returns' | 'unknown'
 
 function detectType(headers: string[]): FileType {
   const h = new Set(headers.map(x => x.toLowerCase()))
@@ -85,6 +85,8 @@ function detectType(headers: string[]): FileType {
   if (h.has('sku') && h.has('afn-warehouse-quantity')) return 'fba_inventory'
   if (h.has('reimbursement-id') && h.has('reason')) return 'reimbursements'
   if (h.has('order-id') && h.has('disposition') && h.has('shipped-quantity')) return 'removal_orders'
+  // Customer Returns : signature unique = detailed-disposition + license-plate-number
+  if (h.has('detailed-disposition') && h.has('license-plate-number')) return 'customer_returns'
   return 'unknown'
 }
 
@@ -367,6 +369,65 @@ async function handleRemovalOrders(objs: Record<string, string>[], fileName: str
   }
 }
 
+// ─── FBA Customer Returns Report (Phase v2) ─────────────────────────────
+// Source : Seller Central → Reports → FBA → Customer Concessions → Returns
+// Plage à exporter : 60 derniers jours glissants (capture les retours en transit
+// au-delà du settlement courant). Dédoublonnage par license-plate-number (LPN
+// = ID unique par retour physique chez Amazon).
+async function handleCustomerReturns(objs: Record<string, string>[], fileName: string) {
+  if (objs.length === 0) return { success: false, erreur: 'Fichier vide' }
+
+  const rowsByLpn = new Map<string, any>()
+  let skipped_no_lpn = 0
+  for (const o of objs) {
+    const lpn = (o['license-plate-number'] || '').trim()
+    if (!lpn) { skipped_no_lpn++; continue }
+    rowsByLpn.set(lpn, {
+      license_plate_number: lpn,
+      return_date: parseDate(o['return-date']),
+      order_id: o['order-id'] || null,
+      sku: o['sku'] || null,
+      asin: o['asin'] || null,
+      fnsku: o['fnsku'] || null,
+      product_name: o['product-name'] || null,
+      quantity: num(o['quantity']) || 1,
+      fulfillment_center_id: o['fulfillment-center-id'] || null,
+      detailed_disposition: o['detailed-disposition'] || null,
+      reason: o['reason'] || null,
+      status: o['status'] || null,
+      customer_comments: o['customer-comments'] || null,
+      source_file: fileName,
+    })
+  }
+  const rows = Array.from(rowsByLpn.values())
+
+  let inserted = 0
+  for (let i = 0; i < rows.length; i += 500) {
+    const batch = rows.slice(i, i + 500)
+    const { error } = await supabaseAdmin
+      .from('amazon_customer_returns')
+      .upsert(batch, { onConflict: 'license_plate_number' })
+    if (error) throw error
+    inserted += batch.length
+  }
+
+  // Stats par disposition pour le retour
+  const dispoCounts: Record<string, number> = {}
+  for (const r of rows) {
+    const d = r.detailed_disposition || '(null)'
+    dispoCounts[d] = (dispoCounts[d] || 0) + (r.quantity || 1)
+  }
+
+  return {
+    success: true,
+    type: 'customer_returns',
+    rows_inserted: inserted,
+    skipped_no_lpn,
+    dispositions: dispoCounts,
+    file_name: fileName,
+  }
+}
+
 // ─── Entry point ─────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
@@ -390,7 +451,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         erreur: 'Type de fichier non reconnu',
         headers_trouves: headers,
-        indices: 'Doit contenir: settlement-id+transaction-type (payments), sku+afn-warehouse-quantity (FBA inventory), reimbursement-id+reason (remboursements), ou order-id+disposition+shipped-quantity (removal orders)',
+        indices: 'Doit contenir: settlement-id+transaction-type (payments), sku+afn-warehouse-quantity (FBA inventory), reimbursement-id+reason (remboursements), order-id+disposition+shipped-quantity (removal orders), ou detailed-disposition+license-plate-number (customer returns).',
       }, { status: 400 })
     }
 
@@ -403,6 +464,7 @@ export async function POST(req: NextRequest) {
     else if (type === 'fba_inventory') result = await handleFbaInventory(objs, fileName, resolver)
     else if (type === 'reimbursements')result = await handleReimbursements(objs, fileName, resolver)
     else if (type === 'removal_orders')result = await handleRemovalOrders(objs, fileName)
+    else if (type === 'customer_returns')result = await handleCustomerReturns(objs, fileName)
     else                               result = { success: false, erreur: 'type inconnu' }
 
     // Sauvegarder les mappings auto appris pendant l'import

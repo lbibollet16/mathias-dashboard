@@ -467,4 +467,78 @@ ALTER TABLE amazon_sku_pkcodes ADD COLUMN IF NOT EXISTS multiplier NUMERIC DEFAU
 CREATE INDEX IF NOT EXISTS idx_amz_sku_pk_sku ON amazon_sku_pkcodes(amazon_sku);
 CREATE INDEX IF NOT EXISTS idx_amz_sku_pk_pk ON amazon_sku_pkcodes(pk_code);
 ALTER TABLE amazon_sku_pkcodes DISABLE ROW LEVEL SECURITY;
+
+-- ============================================================================
+-- REFONTE AMAZON v2 (2026-04-29) — workflow simplifié 5 étapes
+-- Logique : tout flux qui touche au stock = facture LAUTOPAK ; le reste =
+-- compte « Coût des ventes Amazon » comptable.
+-- ============================================================================
+
+-- 1. FBA Customer Returns Report — retours clients avec disposition physique
+-- Source : Seller Central → Reports → FBA → Customer Concessions → Returns
+-- Plage à exporter à chaque settlement : 60 derniers jours glissants
+CREATE TABLE IF NOT EXISTS amazon_customer_returns (
+  id BIGSERIAL PRIMARY KEY,
+  -- ID unique par retour physique chez Amazon (un colis = un LPN)
+  license_plate_number TEXT NOT NULL UNIQUE,
+  return_date TIMESTAMPTZ,
+  order_id TEXT,
+  sku TEXT,
+  asin TEXT,
+  fnsku TEXT,
+  product_name TEXT,
+  quantity INTEGER DEFAULT 1,
+  fulfillment_center_id TEXT,
+  -- Disposition physique réelle au moment de la réception du retour :
+  --   SELLABLE         → revenu en bon état, remis en stock FBA
+  --   CUSTOMER_DAMAGED → abîmé par le client → unsellable
+  --   CARRIER_DAMAGED  → abîmé pendant le retour → unsellable
+  --   DEFECTIVE        → défectueux → unsellable
+  --   DAMAGED          → autre dommage → unsellable
+  --   NO_DISPOSITION   → pas encore traité par Amazon
+  detailed_disposition TEXT,
+  reason TEXT,                       -- raison invoquée par le client
+  status TEXT,                        -- statut Amazon (ex: "Unit returned to inventory")
+  customer_comments TEXT,
+  -- Mémoire comptable : settlement où ce retour a été traité
+  processed_in_settlement_id TEXT,
+  imported_at TIMESTAMPTZ DEFAULT NOW(),
+  source_file TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_amz_returns_sku ON amazon_customer_returns(sku);
+CREATE INDEX IF NOT EXISTS idx_amz_returns_date ON amazon_customer_returns(return_date);
+CREATE INDEX IF NOT EXISTS idx_amz_returns_settlement ON amazon_customer_returns(processed_in_settlement_id);
+CREATE INDEX IF NOT EXISTS idx_amz_returns_dispo ON amazon_customer_returns(detailed_disposition);
+ALTER TABLE amazon_customer_returns DISABLE ROW LEVEL SECURITY;
+
+-- 2. Documents LAUTOPAK par settlement (4 docs : Ventes / Retours / Pertes / Ajust)
+-- L'utilisateur saisit manuellement les n° de factures LAUTOPAK qu'il a créés.
+CREATE TABLE IF NOT EXISTS amazon_lautopak_documents (
+  id BIGSERIAL PRIMARY KEY,
+  settlement_id TEXT NOT NULL,
+  doc_type TEXT NOT NULL,
+  -- Valeurs : ventes | note_credit_retours | note_credit_pertes | ajust_audit
+  numero_facture TEXT,            -- n° de facture/note LAUTOPAK saisi par utilisateur
+  date_facture DATE,
+  montant_total NUMERIC,          -- calculé par le système (référence comptable)
+  saisi_le TIMESTAMPTZ,
+  saisi_par TEXT,
+  notes TEXT,
+  UNIQUE(settlement_id, doc_type)
+);
+CREATE INDEX IF NOT EXISTS idx_amz_lpdoc_settlement ON amazon_lautopak_documents(settlement_id);
+ALTER TABLE amazon_lautopak_documents DISABLE ROW LEVEL SECURITY;
+
+-- 3. Type d'audit (extension de amazon_audits)
+-- Permet de distinguer les 3 contextes :
+--   mensuel_ama    : audit AMA mensuel (warehouse Mathias), 1× par mois
+--   settlement_fbm : comptage FBM physique pour un settlement (à chaque)
+--   settlement_fba : snapshot FBA Amazon (pas de comptage, mémoire seulement)
+ALTER TABLE amazon_audits ADD COLUMN IF NOT EXISTS audit_type TEXT DEFAULT 'mensuel_ama';
+CREATE INDEX IF NOT EXISTS idx_amz_audit_type ON amazon_audits(audit_type);
+
+-- 4. Champs settlement pour le nouveau workflow 5 étapes
+-- (étapes 3, 4, 6 de l'ancien workflow restent pour rétrocompat)
+ALTER TABLE amazon_settlements ADD COLUMN IF NOT EXISTS workflow_version INTEGER DEFAULT 1;
+-- v1 = ancien workflow 6 étapes ; v2 = nouveau workflow 5 étapes
 CREATE INDEX IF NOT EXISTS idx_amz_audit_settlement ON amazon_audits(settlement_id);
