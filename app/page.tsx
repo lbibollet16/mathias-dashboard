@@ -5015,7 +5015,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [openAudit, setOpenAudit] = useState<any>(null)
   const [auditCounts, setAuditCounts] = useState<any[]>([])
   const [auditStats, setAuditStats] = useState<any>({})
-  const [auditFiltre, setAuditFiltre] = useState<'tous'|'restants'|'comptes'|'ecarts'>('restants')
+  const [auditFiltre, setAuditFiltre] = useState<'tous'|'restants'|'comptes'|'ecarts'>('ecarts')
   const [auditSearch, setAuditSearch] = useState('')
   const [auditInput, setAuditInput] = useState<Record<string, {warehouse?:string, fbm?:string}>>({})
   const [newAuditMois, setNewAuditMois] = useState(() => {
@@ -5220,13 +5220,127 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 
   async function chargerRapport(settlementId: string) {
     try {
-      const r = await fetch(`/api/amazon/closure/report?id=${encodeURIComponent(settlementId)}`)
-      const j = await r.json()
-      if (!j.erreur) {
-        setRapportData(j)
+      const [r1, r2] = await Promise.all([
+        fetch(`/api/amazon/closure/report?id=${encodeURIComponent(settlementId)}`),
+        fetch(`/api/amazon/closure/releve-match?id=${encodeURIComponent(settlementId)}`),
+      ])
+      const [j1, j2] = await Promise.all([r1.json(), r2.json()])
+      if (!j1.erreur) {
+        setRapportData({ ...j1, releve: !j2?.erreur ? j2 : null })
         setVue('rapport')
       }
     } catch {}
+  }
+
+  async function exporterRapportXlsx(r: any) {
+    try {
+      const XLSX: any = await import('xlsx')
+      const wb = XLSX.utils.book_new()
+      const fmtDate = (d: string | null) => d ? String(d).split('T')[0] : ''
+      const num2 = (n: any) => Number(Number(n||0).toFixed(2))
+
+      // Sommaire
+      const sommaire: any[] = [
+        ['Settlement ID', r.settlement.settlement_id],
+        ['Période début', fmtDate(r.settlement.settlement_start)],
+        ['Période fin', fmtDate(r.settlement.settlement_end)],
+        ['Date de dépôt', fmtDate(r.settlement.deposit_date)],
+        ['Montant Amazon (CA$)', num2(r.settlement.total_amount)],
+        ['Facture LAUTOPAK', r.settlement.lautopak_invoice_ref || ''],
+        ['Date facture LAUTOPAK', fmtDate(r.settlement.lautopak_invoice_date)],
+        ['Statut', r.settlement.closed_at ? `Fermé le ${fmtDate(r.settlement.closed_at)} par ${r.settlement.closed_by}` : 'En cours'],
+        [],
+        ['Total dépôt Amazon', num2(r.totaux.total_depot_amazon)],
+        ['Total reimbursements (CSV pièces perdues)', num2(r.totaux.total_reimbursements)],
+        ['Ajustement inventaire net', num2(r.totaux.total_ajustement_inventaire_net)],
+        ['Ajustement inventaire absolu', num2(r.totaux.total_ajustement_inventaire_abs)],
+        ['Unsellable en attente', num2(r.totaux.total_unsellable)],
+        ['Audit base products comptés', `${r.audit_stats.nb_counted}/${r.audit_stats.nb_total}`],
+        ['Généré le', fmtDate(r.genere_le)],
+      ]
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sommaire), 'Sommaire')
+
+      // Relevé de paiement reconstitué
+      if (r.releve) {
+        const rv = r.releve
+        const aoa = [
+          ['Catégorie', 'Montant CA$'],
+          ['VENTES', num2(rv.ventes.total)],
+          ['  Frais produit', num2(rv.ventes.frais_produit)],
+          ['  Expédition', num2(rv.ventes.expedition)],
+          ['  Remboursements de stock (FBA)', num2(rv.ventes.remboursements_stock_fba)],
+          ['REMBOURSEMENTS', num2(rv.remboursements.total)],
+          ['  Dépenses remboursées', num2(rv.remboursements.depenses_rembourses)],
+          ['  Ventes remboursées (total)', num2(rv.remboursements.ventes_remboursees_total)],
+          ['    — Expédition', num2(rv.remboursements.ventes_remboursees_expedition)],
+          ['    — Frais produit', num2(rv.remboursements.ventes_remboursees_frais_produit)],
+          ['DÉPENSES', num2(rv.depenses.total)],
+          ['  Rabais promotionnels', num2(rv.depenses.rabais_promotionnels)],
+          ['  Frais Expédié par Amazon (total)', num2(rv.depenses.frais_fba_total)],
+          ['    — Frais de stockage mensuels', num2(rv.depenses.frais_fba_stockage)],
+          ['    — Autre', num2(rv.depenses.frais_fba_autre)],
+          ['  Prix de la publicité', num2(rv.depenses.publicite)],
+          ['  Commissions Amazon', num2(rv.depenses.commissions_amazon)],
+          ['  Remboursements inversés (FBA)', num2(rv.depenses.remboursements_inverses_fba)],
+          [],
+          ['PROFITS NETS (= dépôt bancaire)', num2(rv.profits_nets_calcules)],
+        ]
+        if (rv.reste_non_classe && Math.abs(rv.reste_non_classe) >= 0.01) {
+          aoa.push([], ['⚠ Reste non classé', num2(rv.reste_non_classe)])
+        }
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Releve reconstitue')
+      }
+
+      // Flux par amount type
+      const fluxRows = [['Amount type', 'Nb lignes', 'Total CA$'],
+        ...(r.flux || []).map((f: any) => [f.amount_type, f.count, num2(f.total)])]
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(fluxRows), 'Flux par type')
+
+      // Reimbursements (CSV pièces perdues)
+      const reimbHeader = ['Reimb. ID', 'SKU', 'FNSKU', 'Traction', 'Raison', 'Produit', 'Qty cash', 'Qty inv', 'Montant CA$', 'Case ID']
+      const reimbRows = [reimbHeader, ...(r.reimbursements || []).map((x: any) => [
+        x.reimbursement_id, x.sku || '', x.fnsku || '', x.traction_code || '', x.reason || '',
+        x.product_name || '', Number(x.quantity_reimbursed_cash || 0), Number(x.quantity_reimbursed_inventory || 0),
+        num2(x.amount_total), x.case_id || '',
+      ])]
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(reimbRows), 'Reimbursements')
+
+      // Ajustements FBA cash
+      const fbaHeader = ['Reimb. ID', 'SKU Amazon', 'Produit', 'Raison', 'Qté cash', 'Qté avec mult.', 'Mult.', 'Mapping manuel', 'Montant CA$', 'Pk_code Traction', 'Stock actuel', 'Nouveau stock']
+      const fbaRows = [fbaHeader, ...(r.ajustements_fba || []).map((a: any) => [
+        a.reimbursement_id, a.sku, a.product_name || '', a.reason || '',
+        Number(a.qty_cash || 0), Number(a.qty_cash_lautopak || 0), Number(a.multiplier || 1), a.manual_mapping ? 'Oui' : 'Non',
+        num2(a.amount), a.pk_code_to_adjust || '',
+        a.current_traction_qty != null ? a.current_traction_qty : '',
+        a.current_traction_qty != null ? a.current_traction_qty - Number(a.qty_cash || 0) : '',
+      ])]
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(fbaRows), 'Ajust. FBA cash')
+
+      // Ajustements audit physique
+      const ajHeader = ['Base code', 'Description', 'Whse théo (net)', 'Whse compté', 'Δ Whse', 'FBM théo', 'FBM compté', 'Δ FBM', 'Coût unit', 'Valeur écart CA$', 'SP à tagger']
+      const ajRows = [ajHeader, ...(r.ajustements || []).map((a: any) => [
+        a.base_code, a.description || '',
+        Number(a.warehouse_theorique_net || 0), a.warehouse_compte ?? '',
+        Number(a.warehouse_ecart || 0), Number(a.fbm_theorique || 0),
+        a.fbm_compte ?? '', Number(a.fbm_ecart || 0),
+        num2(a.coutant), num2(a.valeur_ecart),
+        a.has_oubli ? Number(a.sans_prefix_theorique || 0) : '',
+      ])]
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ajRows), 'Ajust. inventaire')
+
+      // Unsellable
+      const unsHeader = ['SKU', 'Traction', 'Produit', 'Qté', 'Valeur estimée CA$']
+      const unsRows = [unsHeader, ...(r.unsellable || []).map((u: any) => [
+        u.sku, u.traction_code || '', u.product_name || '',
+        Number(u.qty || 0), num2(u.valeur),
+      ])]
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(unsRows), 'Unsellable')
+
+      const fname = `Rapport_Amazon_${r.settlement.settlement_id}_${fmtDate(r.settlement.settlement_end)}.xlsx`
+      XLSX.writeFile(wb, fname)
+    } catch (e: any) {
+      alert('Erreur export Excel : ' + (e?.message || e))
+    }
   }
 
   async function chargerUnsellableSuivi() {
@@ -5813,7 +5927,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     }
   }
 
-  useEffect(() => { charger(); chargerClosureList() }, [])
+  useEffect(() => { charger(); chargerClosureList(); chargerAudits() }, [])
   // Lance l'auto-résolution dès qu'on ouvre la vue mapping (silencieux si rien à faire)
   useEffect(() => {
     if (vue === 'mapping' && unresolved.length > 0) autoResolve(true)
@@ -5909,6 +6023,46 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const counts = data.counts || {}
   const settlements = data.settlements || []
 
+  // Avertissement audit mensuel manquant — visible à partir du 1er jour ouvrable du mois
+  const moisCourant = (() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })()
+  const auditMoisCourant = audits.find((a: any) => a.mois === moisCourant)
+  const showAuditWarning = (() => {
+    if (auditMoisCourant) return false
+    const today = new Date()
+    let premier = new Date(today.getFullYear(), today.getMonth(), 1)
+    while (premier.getDay() === 0 || premier.getDay() === 6) premier.setDate(premier.getDate() + 1)
+    today.setHours(0, 0, 0, 0)
+    return today >= premier
+  })()
+
+  async function demarrerAuditMois() {
+    setNewAuditMois(moisCourant)
+    setCreatingAudit(true)
+    try {
+      const r = await fetch('/api/amazon/audits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mois: moisCourant,
+          label: `Audit mensuel ${moisCourant}`,
+          started_by: profil?.email || profil?.nom || 'Inconnu',
+        }),
+      })
+      const j = await r.json()
+      if (j.success) {
+        await chargerAudits()
+        setVue('audit')
+        if (j.audit?.id) await chargerAuditDetail(j.audit.id)
+      } else {
+        alert(j.erreur || 'Erreur')
+      }
+    } catch (e: any) { alert(e.message) }
+    setCreatingAudit(false)
+  }
+
   return (
     <div>
       {/* Header */}
@@ -5921,6 +6075,23 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           {loading?'⏳':'🔄 Actualiser'}
         </button>
       </div>
+
+      {/* Avertissement audit mensuel manquant */}
+      {showAuditWarning && (
+        <div style={{background:dark?'#2b2411':'#fff8e1',border:`1px solid ${C.yellow}`,borderRadius:10,padding:'12px 16px',marginBottom:12,display:'flex',alignItems:'center',gap:14,flexWrap:'wrap'}}>
+          <div style={{fontSize:24}}>⚠️</div>
+          <div style={{flex:1,minWidth:200}}>
+            <div style={{fontSize:13,fontWeight:800,color:C.yellow}}>Audit physique mensuel à faire</div>
+            <div style={{fontSize:11,color:sub,marginTop:2,lineHeight:1.5}}>
+              Aucun audit créé pour <strong>{moisCourant}</strong>. L'audit mensuel doit être démarré le 1<sup>er</sup> jour ouvrable du mois (compte tout le stock <strong>AMA</strong> dans Traction).
+            </div>
+          </div>
+          <button onClick={demarrerAuditMois} disabled={creatingAudit}
+            style={{background:creatingAudit?bdr:C.yellow,color:'#fff',border:'none',borderRadius:8,padding:'10px 16px',fontWeight:800,cursor:creatingAudit?'default':'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+            {creatingAudit ? '⏳ Création...' : `📋 Démarrer l'audit ${moisCourant}`}
+          </button>
+        </div>
+      )}
 
       {/* Stats cards */}
       <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(6,1fr)',gap:8,marginBottom:12}}>
@@ -6123,8 +6294,8 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
             valide: "MANUEL — clique ✓ Valider l'étape.",
           },
           '5_audit': {
-            quoi: "Audit physique mensuel : compter l'inventaire warehouse + FBM, comparer à ce que dit LAUTOPAK/Traction + ce que dit Amazon FBA. Équation de balance : Total LAUTOPAK AMA = Amazon FBA + Amazon FBM + Warehouse physique compté. Bloquant si écart > 1 unité.",
-            comment: "1) Clique 'Ouvrir l'audit →'. 2) Compte physiquement chaque base product (saisis Warehouse + FBM). 3) Si un produit affiche écart > 1, la ligne apparait ici dans le détail d'étape — ajuste LAUTOPAK et re-vérifie. 4) Finalise l'audit quand 100% compté et balance OK.",
+            quoi: "Audit physique mensuel : compter le stock chez Mathias (FBM prêt à expédier + Surplus HUB + à tagger), comparer à ce que dit la ligne AMA Traction + ce qu'Amazon dit avoir au FBA. Équation : Total AMA Traction = Chez Amazon FBA + FBM Mathias + Surplus HUB Mathias. Bloquant si écart > 1 unité.",
+            comment: "1) Clique 'Ouvrir l'audit →'. 2) Compte physiquement : champ FBM (chez Mathias prêt à expédier) + champ HUB (surplus chez Mathias, inclut le sans-préfixe à tagger). 3) La colonne Total compté s'ajuste en live et affiche Δ en rouge si écart. 4) Finalise quand 100% compté et balance OK.",
             valide: "AUTO — passe verte quand audit finalisé + 100% compté + balance OK (écart ≤ 1 sur tous les produits).",
           },
           '6_rapport': {
@@ -7488,10 +7659,16 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
                 ← Retour
               </button>
-              <button onClick={()=>window.print()}
-                style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
-                🖨 Imprimer / PDF
-              </button>
+              <div style={{display:'flex',gap:8}}>
+                <button onClick={()=>exporterRapportXlsx(r)}
+                  style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                  📊 Export Excel
+                </button>
+                <button onClick={()=>window.print()}
+                  style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                  🖨 Imprimer / PDF
+                </button>
+              </div>
             </div>
 
             {/* Contenu rapport */}
@@ -7508,7 +7685,56 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 <div><strong>Statut</strong>{r.settlement.closed_at ? `🔒 Fermé le ${fmtDate(r.settlement.closed_at)} par ${r.settlement.closed_by}` : '⏳ En cours'}</div>
               </div>
 
-              <h2>1. Totaux financiers</h2>
+              {r.releve && (() => {
+                const rv = r.releve
+                const Row = ({ label, val, bold, indent }: any) => (
+                  <tr style={bold?{borderTop:'1px solid #000',borderBottom:'1px solid #000'}:{}}>
+                    <td style={{paddingLeft:(indent||0)*16+8,fontWeight:bold?800:400}}>{label}</td>
+                    <td className="num" style={{fontWeight:bold?800:400}}>{fmt$(val)}</td>
+                  </tr>
+                )
+                return (
+                  <>
+                    <h2>1. Relevé de paiement Amazon (reconstitué)</h2>
+                    <div style={{fontSize:11,color:'#666',marginBottom:6}}>
+                      Recompose les 4 sections du relevé papier d'Amazon à partir des transactions du TSV settlement. Sert de pièce justificative pour le rapprochement bancaire.
+                    </div>
+                    <table>
+                      <tbody>
+                        <Row label="VENTES" val={rv.ventes.total} bold />
+                        <Row label="Frais produit" val={rv.ventes.frais_produit} indent={1} />
+                        <Row label="Expédition" val={rv.ventes.expedition} indent={1} />
+                        <Row label="Remboursements de stock (FBA)" val={rv.ventes.remboursements_stock_fba} indent={1} />
+
+                        <Row label="REMBOURSEMENTS" val={rv.remboursements.total} bold />
+                        <Row label="Dépenses remboursées" val={rv.remboursements.depenses_rembourses} indent={1} />
+                        <Row label="Ventes remboursées" val={rv.remboursements.ventes_remboursees_total} indent={1} />
+                        <Row label="— Expédition" val={rv.remboursements.ventes_remboursees_expedition} indent={2} />
+                        <Row label="— Frais produit" val={rv.remboursements.ventes_remboursees_frais_produit} indent={2} />
+
+                        <Row label="DÉPENSES" val={rv.depenses.total} bold />
+                        <Row label="Rabais promotionnels" val={rv.depenses.rabais_promotionnels} indent={1} />
+                        <Row label="Frais Expédié par Amazon" val={rv.depenses.frais_fba_total} indent={1} />
+                        <Row label="— Frais de stockage mensuels" val={rv.depenses.frais_fba_stockage} indent={2} />
+                        <Row label="— Autre" val={rv.depenses.frais_fba_autre} indent={2} />
+                        <Row label="Prix de la publicité" val={rv.depenses.publicite} indent={1} />
+                        <Row label="Commissions Amazon" val={rv.depenses.commissions_amazon} indent={1} />
+                        <Row label="Remboursements inversés (FBA)" val={rv.depenses.remboursements_inverses_fba} indent={1} />
+
+                        <tr><td colSpan={2} style={{padding:6,borderBottom:'none'}}></td></tr>
+                        <Row label="PROFITS NETS (= dépôt bancaire)" val={rv.profits_nets_calcules} bold />
+                      </tbody>
+                    </table>
+                    {rv.reste_non_classe && Math.abs(rv.reste_non_classe) >= 0.01 && (
+                      <div style={{fontSize:10,color:'#c00',marginTop:4}}>
+                        ⚠ Reste non classé : {fmt$(rv.reste_non_classe)} ({rv.non_classes_composants?.length || 0} amount_description non mappé)
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
+
+              <h2>2. Totaux financiers</h2>
               <table>
                 <tbody>
                   <tr><td>Dépôt Amazon</td><td className="num">{fmt$(r.totaux.total_depot_amazon)}</td></tr>
@@ -7518,7 +7744,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 </tbody>
               </table>
 
-              <h2>2. Flux du settlement par type</h2>
+              <h2>3. Flux du settlement par type</h2>
               <table>
                 <thead><tr><th>Amount type</th><th className="num">Nb lignes</th><th className="num">Total</th></tr></thead>
                 <tbody>
@@ -7528,7 +7754,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 </tbody>
               </table>
 
-              <h2>3. Remboursements matchés ({r.reimbursements.length})</h2>
+              <h2>4. Remboursements matchés ({r.reimbursements.length})</h2>
               {r.reimbursements.length === 0 ? <div style={{color:'#666'}}>Aucun remboursement attribué à ce settlement.</div> : (
                 <table>
                   <thead><tr><th>Reimb. ID</th><th>SKU</th><th>Traction</th><th>Raison</th><th className="num">Montant</th></tr></thead>
@@ -7548,7 +7774,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 
               {r.ajustements_fba && r.ajustements_fba.length > 0 && (
                 <>
-                  <h2>3b. Ajustements Traction FBA — Reimbursements cash</h2>
+                  <h2>4b. Ajustements Traction FBA — Reimbursements cash</h2>
                   <div style={{fontSize:11,color:'#666',marginBottom:6}}>
                     Amazon a remboursé ces unités en cash ($) → elles sont physiquement perdues.
                     Il faut <strong>décrémenter la ligne FBA-xxx correspondante</strong> dans Traction du nombre indiqué.
@@ -7578,7 +7804,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 </>
               )}
 
-              <h2>4. Ajustements d'inventaire ({r.ajustements.length})</h2>
+              <h2>5. Ajustements d'inventaire ({r.ajustements.length})</h2>
               {r.ajustements.length === 0 ? <div style={{color:'#666'}}>Aucun ajustement nécessaire — inventaire équilibré.</div> : (
                 <table>
                   <thead><tr><th>Base code</th><th>Description</th><th className="num">Whse théo</th><th className="num">Whse compté</th><th className="num">Δ Whse</th><th className="num">FBM théo</th><th className="num">FBM compté</th><th className="num">Δ FBM</th><th className="num">Coût unit</th><th className="num">Valeur</th></tr></thead>
@@ -7603,7 +7829,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 </table>
               )}
 
-              <h2>5. Unsellable à réclamer ({r.unsellable.length})</h2>
+              <h2>6. Unsellable à réclamer ({r.unsellable.length})</h2>
               {r.unsellable.length === 0 ? <div style={{color:'#666'}}>Aucun unsellable au snapshot de cette période.</div> : (
                 <table>
                   <thead><tr><th>SKU</th><th>Traction</th><th>Produit</th><th className="num">Qté</th><th className="num">Valeur estimée</th></tr></thead>
@@ -7622,7 +7848,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 </table>
               )}
 
-              <h2>6. Justification (audit physique)</h2>
+              <h2>7. Justification (audit physique)</h2>
               <div style={{fontSize:11,color:'#666'}}>
                 {r.audit_stats.nb_counted}/{r.audit_stats.nb_total} base products comptés. Valeur d'écart absolue totale : {fmt$(r.audit_stats.valeur_ecart_abs)}.
                 Chaque ligne ci-dessus a été comptée physiquement à l'entrepôt pendant cette période.
@@ -8915,15 +9141,16 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                           const colInfos: Record<string, string> = {
                             base: "Base SKU produit — obtenu en retirant les préfixes FBA-/FBM-/HUB-/A pour regrouper les variantes d'un même produit physique sous une seule ligne.",
                             description: "Nom du produit dans Traction (DescFra).",
-                            fba_traction: "📦 Ce que ton inventaire LAUTOPAK/Traction dit avoir au FBA Amazon — somme des pk_codes FBA-xxx de ce base SKU.",
-                            fba_amz: "Ce qu'Amazon DIT avoir dans ses entrepôts (fulfillable + inbound + reserved), applique les multi-mappings avec multiplier (pack). La différence avec FBA théo révèle les unités perdues/trouvées par Amazon.",
-                            fba_ecart: "Δ FBA = FBA Amazon − FBA théo Traction. 0 = parfait sync. Rouge si écart → réclamer à Amazon ou ajuster LAUTOPAK.",
-                            fbm_theo: "🏠 Ce que LAUTOPAK/Traction dit avoir en FBM chez toi — somme des pk_codes FBM-xxx. Stock prêt à être expédié manuellement (Fulfilled By Merchant).",
-                            fbm_compte: "Quantité physique comptée des FBM-xxx chez toi. Auto-save au blur. Écart avec FBM théo → manque ou surplus.",
-                            hub_theo: "🏭 Ce que LAUTOPAK/Traction dit avoir en HUB chez toi — somme des pk_codes HUB-xxx. Ton overstock / sécurité.",
-                            hub_compte: "Quantité physique comptée des HUB-xxx chez toi. Auto-save au blur.",
-                            oubli: "🏷 SP = Sans Préfixe. Records Traction sans préfixe FBA/FBM/HUB pour ce base. À retagger après l'audit dans LAUTOPAK. Le chiffre = qté brute SP à ne pas oublier pendant le comptage warehouse.",
-                            total_match: "✓ si Total Traction (FBA+FBM+HUB+SP) = Total physique (FBA Amazon + FBM compté + HUB compté). Idéal = balance parfaite.",
+                            fba_traction: "📦 Stock LAUTOPAK/Traction qui devrait être au FBA Amazon — somme des pk_codes FBA-xxx de ce base SKU.",
+                            fba_amz: "Chez Amazon FBA : ce qu'Amazon DIT avoir physiquement (fulfillable + inbound + reserved). Lecture seule, pas de comptage manuel.",
+                            fba_ecart: "Δ FBA = Chez Amazon − FBA théo Traction. 0 = parfait sync. Rouge si écart → réclamer à Amazon ou ajuster LAUTOPAK.",
+                            fbm_theo: "🏠 FBM prêt à expédier (Mathias) — stock Traction sous pk_codes FBM-xxx. À compter physiquement chez toi.",
+                            fbm_compte: "Quantité physique comptée des FBM-xxx chez Mathias. Auto-save au blur.",
+                            hub_theo: "🏭 Surplus HUB (Mathias) — stock Traction sous pk_codes HUB-xxx. Overstock à compter chez toi.",
+                            hub_compte: "Quantité physique comptée du HUB-xxx + sans-préfixe chez Mathias. Auto-save au blur.",
+                            oubli: "🏷 À tagger (oubli) — pk_codes Traction sans préfixe FBA/FBM/HUB. À retagger dans LAUTOPAK après l'audit. Compté avec le champ HUB.",
+                            total_theo: "Quantité totale dans le système (théorique) = FBA Amazon + FBM théo + HUB théo + SP théo. Ce que tu DEVRAIS avoir au total dans tous les emplacements physiques.",
+                            total_compte: "Quantité totale physique comptée = Chez Amazon FBA + FBM compté + HUB compté. S'ajuste en temps réel pendant que tu saisis. Δ = écart avec le total théo.",
                             ecart: "Valeur $ de l'écart total. Calcul : (écart FBM + écart HUB+SP) × coût unitaire Traction.",
                           }
                           const IHeader = ({id, label, align, color}: {id: string, label: React.ReactNode, align?: any, color?: string}) => {
@@ -8947,23 +9174,24 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                 <IHeader id="description" label="Description" />
                                 {/* FBA (côté Amazon) */}
                                 <IHeader id="fba_traction" label="📦 FBA théo (Traction)" align="right" color={C.blue} />
-                                <IHeader id="fba_amz" label="FBA Amazon" align="right" color={C.blue} />
+                                <IHeader id="fba_amz" label="Chez Amazon FBA" align="right" color={C.blue} />
                                 <IHeader id="fba_ecart" label="ΔFBA" align="right" color={C.red} />
-                                {/* FBM (warehouse, vendu FBM) */}
-                                <IHeader id="fbm_theo" label="🏠 FBM théo (Traction)" align="right" color={C.yellow} />
+                                {/* FBM (chez Mathias, prêt à expédier) */}
+                                <IHeader id="fbm_theo" label="🏠 FBM Mathias théo" align="right" color={C.yellow} />
                                 <IHeader id="fbm_compte" label="FBM compté" align="center" color={C.green} />
-                                {/* HUB (warehouse, over-stock) */}
-                                <IHeader id="hub_theo" label="🏭 HUB théo (Traction)" align="right" color={C.blue} />
+                                {/* HUB (surplus chez Mathias) */}
+                                <IHeader id="hub_theo" label="🏭 HUB Surplus théo" align="right" color={C.blue} />
                                 <IHeader id="hub_compte" label="HUB compté" align="center" color={C.green} />
-                                <IHeader id="oubli" label="🏷 SP" align="center" color={C.yellow} />
-                                {/* Total + match */}
-                                <IHeader id="total_match" label="Match" align="center" color={C.green} />
+                                <IHeader id="oubli" label="🏷 À tagger" align="center" color={C.yellow} />
+                                {/* Totaux + écarts */}
+                                <IHeader id="total_theo" label="Total théo" align="right" color={C.blue} />
+                                <IHeader id="total_compte" label="Total compté / Δ" align="center" color={C.green} />
                                 <IHeader id="ecart" label="Écart $" align="right" color={C.red} />
                                 <th style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}></th>
                               </tr>
                               {auditInfoCol && (
                                 <tr>
-                                  <td colSpan={13} style={{padding:0,borderBottom:`2px solid ${C.blue}`}}>
+                                  <td colSpan={14} style={{padding:0,borderBottom:`2px solid ${C.blue}`}}>
                                     <div style={{background:dark?'#1a233a':'#e8f0fe',padding:'12px 16px',display:'flex',alignItems:'flex-start',gap:10,lineHeight:1.6}}>
                                       <div style={{fontSize:16,color:C.blue}}>ⓘ</div>
                                       <div style={{flex:1,fontSize:12,color:dark?'#e8e8e8':'#1a1a1a',whiteSpace:'normal',textTransform:'none',fontWeight:400}}>
@@ -8990,14 +9218,25 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                             const fbmT = Number(c.fbm_theorique||0)
                             const hubT = Number(c.hub_theorique||0)
                             const spT = Number(c.sans_prefix_theorique||0)
-                            // Total Traction = stock théorique total dans LAUTOPAK
-                            const totalTraction = fbaT + fbmT + hubT + spT
-                            // Total physique : FBA Amazon + FBM compté + HUB+SP compté (warehouse)
-                            const fbmCompte = c.fbm_compte != null ? Number(c.fbm_compte) : null
-                            const whseCompte = c.hub_compte != null ? Number(c.hub_compte) : null
-                            const totalPhysique = fbaA + (fbmCompte || 0) + (whseCompte || 0)
-                            const allCounted = fbmCompte != null && whseCompte != null
-                            const match = allCounted && Math.abs(totalTraction - totalPhysique) <= 1
+                            // Total théorique = ce que le système attend physiquement à tous les emplacements
+                            const totalTheo = fbaA + fbmT + hubT + spT
+                            // Total compté physique : valeur live du formulaire (priorité) sinon valeur sauvée
+                            const fbmCompteSaved = c.fbm_compte != null ? Number(c.fbm_compte) : null
+                            const whseCompteSaved = c.hub_compte != null ? Number(c.hub_compte) : null
+                            const fbmInputVal = (input.fbm !== undefined && input.fbm !== '') ? Number(input.fbm) : null
+                            const whseInputVal = (input.warehouse !== undefined && input.warehouse !== '') ? Number(input.warehouse) : null
+                            const fbmCompte = fbmInputVal != null ? fbmInputVal : fbmCompteSaved
+                            const whseCompte = whseInputVal != null ? whseInputVal : whseCompteSaved
+                            const fbmTouched = fbmInputVal != null || fbmCompteSaved != null
+                            const whseTouched = whseInputVal != null || whseCompteSaved != null
+                            const totalCompte = fbaA + (fbmCompte || 0) + (whseCompte || 0)
+                            const deltaTotal = totalTheo - totalCompte
+                            // Lignes auto-validées : aucun stock warehouse à compter (FBA Amazon seulement)
+                            const noWhseToCount = fbmT === 0 && hubT === 0 && spT === 0
+                            const fullCounted = noWhseToCount || (
+                              (fbmT === 0 || fbmTouched) && ((hubT === 0 && spT === 0) || whseTouched)
+                            )
+                            const match = fullCounted && Math.abs(deltaTotal) <= 1
                             return (
                               <tr key={c.base_code} style={{background:match?(dark?'#0d2a18':'#e6f4ea'):(c.has_ecart?(dark?'#2b1113':'#fce8e6'):c.compte?(dark?'#1a1a1a':'#f8f9fa'):'transparent')}}>
                                 <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{c.base_code}</td>
@@ -9049,13 +9288,26 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                       </span>
                                     : <span style={{color:sub,fontSize:10}}>—</span>}
                                 </td>
-                                {/* Match indicator */}
+                                {/* Total théorique (ce que le système attend physiquement) */}
+                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,fontSize:14,color:totalTheo>0?C.blue:sub}}
+                                    title={`Chez Amazon FBA ${fbaA} + FBM Mathias ${fbmT} + HUB Surplus ${hubT} + À tagger ${spT}`}>
+                                  {totalTheo || '—'}
+                                </td>
+                                {/* Total compté physique (live) + Δ */}
                                 <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}
-                                    title={allCounted ? `Traction ${totalTraction} vs Physique ${totalPhysique} (FBA Amz ${fbaA} + FBM ${fbmCompte} + Whse ${whseCompte})` : 'Attend les comptes FBM + HUB'}>
-                                  {allCounted
-                                    ? (match ? <span style={{color:C.green,fontSize:14,fontWeight:900}}>✓</span>
-                                             : <span style={{color:C.red,fontSize:11,fontWeight:800}}>{totalTraction-totalPhysique>0?'+':''}{totalTraction-totalPhysique}</span>)
-                                    : <span style={{color:sub,fontSize:10}}>—</span>}
+                                    title={`Chez Amazon FBA ${fbaA} + FBM Mathias ${fbmCompte ?? 0} + HUB Surplus ${whseCompte ?? 0}`}>
+                                  {fullCounted ? (
+                                    match ? (
+                                      <span style={{color:C.green,fontWeight:900,fontSize:13}}>{totalCompte} ✓</span>
+                                    ) : (
+                                      <span>
+                                        <span style={{fontWeight:800,fontSize:13}}>{totalCompte}</span>
+                                        <span style={{marginLeft:6,padding:'2px 6px',background:C.red+'22',color:C.red,borderRadius:6,fontSize:11,fontWeight:800}}>{deltaTotal>0?'+':''}{deltaTotal}</span>
+                                      </span>
+                                    )
+                                  ) : (
+                                    <span style={{color:sub,fontSize:11}}>{totalCompte || '—'} <span style={{fontSize:9}}>(en cours)</span></span>
+                                  )}
                                 </td>
                                 <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:valEcart>0?C.red:sub,fontSize:11}}>{valEcart>0?fmt$((c.valeur_warehouse_ecart||0)+(c.valeur_fbm_ecart||0)):'—'}</td>
                                 <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>

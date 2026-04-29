@@ -53,14 +53,15 @@ export async function createAuditSnapshot(input: CreateAuditInput): Promise<Crea
     if (cErr) throw cErr
     const auditId = created.id
 
-    // Charger toutes les lignes Traction AMA/FBA/FBM
+    // Charger uniquement la ligne AMA (audit physique = stock comptable Amazon).
+    // FBA et FBM sont des sous-comptes, l'AMA contient le total à compter.
     const tractionRows: any[] = []
     let from = 0
     while (true) {
       const { data, error } = await supabaseAdmin
         .from('traction_amazon_lignes')
         .select('pk_code, qty_minus_reserved, prix_coutant, desc_fra')
-        .in('code_ligne', ['AMA', 'FBA', 'FBM'])
+        .eq('code_ligne', 'AMA')
         .range(from, from + 999)
       if (error) throw error
       tractionRows.push(...(data || []))

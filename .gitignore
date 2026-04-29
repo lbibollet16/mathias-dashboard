@@ -1,4 +1,15 @@
-node_modules 
-.next 
-.env.local 
+node_modules
+.next
+.env.local
 .vercel
+
+# Build cache TypeScript
+tsconfig.tsbuildinfo
+
+# Préférences locales Claude Code
+.claude/settings.local.json
+
+# Documents source comptables (ne pas commiter — données sensibles)
+Releve paiement/
+custumer return/
+fichier removal order/
