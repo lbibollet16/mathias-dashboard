@@ -100,6 +100,7 @@ export default function Dashboard() {
   const [alts, setAlts] = useState<Map<string,string[]>>(new Map())
   const [negsVerifies, setNegsVerifies] = useState<any[]>([])
   const [validationsCompta, setValidationsCompta] = useState<any[]>([])
+  const [retoursActifsGlobal, setRetoursActifsGlobal] = useState<any[]>([])
   const [fournituresData, setFournituresData] = useState<{catalogue:any[],demandes:any[]}>({catalogue:[],demandes:[]}) // principal -> [alternatifs]
   const [altReverse, setAltReverse] = useState<Map<string,string>>(new Map()) // alternatif -> principal
   const [iFile, setIFile]   = useState<File|null>(null)
@@ -161,7 +162,7 @@ export default function Dashboard() {
   async function fetchAll() {
     setLoading(true)
     try {
-      const [d, l, n, a, f, nv, vc] = await Promise.all([
+      const [d, l, n, a, f, nv, vc, ret] = await Promise.all([
         fetch('/api/calculateur').then(r=>r.json()),
         fetch('/api/lots').then(r=>r.json()),
         fetch('/api/negatifs').then(r=>r.json()),
@@ -169,11 +170,13 @@ export default function Dashboard() {
         fetch('/api/fournitures').then(r=>r.json()),
         fetch('/api/negatifs-verifies').then(r=>r.json()),
         fetch('/api/validations-comptables').then(r=>r.json()),
+        fetch('/api/comptabilite/retours?actifs=1').then(r=>r.json()).catch(()=>[]),
       ])
       setData(d); setLots(Array.isArray(l)?l:[]); setNegs(Array.isArray(n)?n:[])
       if(f&&f.catalogue) setFournituresData(f)
       if(Array.isArray(nv)) setNegsVerifies(nv)
       if(Array.isArray(vc)) setValidationsCompta(vc)
+      if(Array.isArray(ret)) setRetoursActifsGlobal(ret)
       // Construire les maps d'alternatives
       if (Array.isArray(a)) {
         const fwd = new Map<string,string[]>()
@@ -356,6 +359,45 @@ export default function Dashboard() {
       </div>
 
       <div style={{maxWidth:1700,margin:'0 auto',padding:isMobile?'10px 10px':'18px 16px'}}>
+
+        {/* Bandeau global — corrections demandées par la comptabilité */}
+        {(() => {
+          const moi = profil?.nom || profil?.email || ''
+          const mesRetours = (retoursActifsGlobal || []).filter((r:any) => r.demandeur_employe === moi)
+          if (mesRetours.length === 0) return null
+          const nbNeg = mesRetours.filter((r:any) => r.source === 'negatif').length
+          const nbCpt = mesRetours.filter((r:any) => r.source === 'comptage').length
+          // Ne pas afficher le bandeau global si on est déjà sur l'onglet concerné (le bandeau interne suffit)
+          const surBonOnglet = (tab === 'negatifs' && nbCpt === 0) || (tab === 'inventaire' && nbNeg === 0)
+          if (surBonOnglet) return null
+          return (
+            <div style={{background:'#fce8e6',border:'2px solid #d93025',borderRadius:10,padding:'12px 16px',marginBottom:14,display:'flex',alignItems:'center',gap:14,flexWrap:'wrap',animation:'pulseRet 2s ease-in-out infinite'}}>
+              <style>{`@keyframes pulseRet { 0%,100%{box-shadow:0 0 0 0 rgba(217,48,37,.4)} 50%{box-shadow:0 0 0 8px rgba(217,48,37,0)} }`}</style>
+              <span style={{fontSize:24}}>⚠️</span>
+              <div style={{flex:1,minWidth:200}}>
+                <div style={{fontSize:13,fontWeight:900,color:'#d93025'}}>
+                  {mesRetours.length === 1 ? '1 correction demandée par la comptabilité' : `${mesRetours.length} corrections demandées par la comptabilité`}
+                </div>
+                <div style={{fontSize:11,color:'#5f6368',marginTop:2}}>
+                  Clique sur un bouton pour voir les commentaires et corriger.
+                </div>
+              </div>
+              {nbNeg > 0 && (
+                <button onClick={()=>setTab('negatifs')}
+                  style={{background:'#d93025',color:'#fff',border:'none',borderRadius:8,padding:'9px 14px',fontWeight:800,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                  🔴 Voir Négatifs ({nbNeg})
+                </button>
+              )}
+              {nbCpt > 0 && (
+                <button onClick={()=>setTab('inventaire')}
+                  style={{background:'#d93025',color:'#fff',border:'none',borderRadius:8,padding:'9px 14px',fontWeight:800,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                  📦 Voir Inventaire ({nbCpt})
+                </button>
+              )}
+            </div>
+          )
+        })()}
+
 
         {/* ── CALCULATEUR ─────────────────────────────────────────── */}
         {tab==='calc' && <>
@@ -683,9 +725,9 @@ export default function Dashboard() {
         {tab==='booking' && <BookingTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} alts={alts}/>}
 
         {/* ── NÉGATIFS ────────────────────────────────────────────── */}
-        {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts} negsVerifies={negsVerifies} setNegsVerifies={setNegsVerifies} profil={profil} data={data} lancerSync={lancerSync} syncing={syncing} syncLog={syncLog} validationsCompta={validationsCompta}/>}
+        {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts} negsVerifies={negsVerifies} setNegsVerifies={setNegsVerifies} profil={profil} data={data} lancerSync={lancerSync} syncing={syncing} syncLog={syncLog} validationsCompta={validationsCompta} retoursActifs={retoursActifsGlobal} setRetoursActifs={setRetoursActifsGlobal}/>}
         {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts} fournituresData={fournituresData} setFournituresData={setFournituresData} profil={profil} validationsCompta={validationsCompta}/>}
-        {tab==='inventaire' && <InventaireTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} validationsCompta={validationsCompta}/>}
+        {tab==='inventaire' && <InventaireTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} validationsCompta={validationsCompta} retoursActifs={retoursActifsGlobal} setRetoursActifs={setRetoursActifsGlobal}/>}
         {tab==='comptabilite' && <ComptabiliteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} validationsCompta={validationsCompta} setValidationsCompta={setValidationsCompta}/>}
         {tab==='amazon' && <AmazonTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
         {tab==='scoa' && <ScoaTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
@@ -1488,9 +1530,22 @@ function FournituresTab({fournituresData, setFournituresData, dark, card, bdr, s
 }
 
 // ── Inventaire Cyclique Tab ───────────────────────────────────────────────────
-function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validationsCompta}: any) {
+function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validationsCompta, retoursActifs, setRetoursActifs}: any) {
   const employe = profil?.nom || profil?.email || 'Inconnu'
   const [sousOnglet, setSousOnglet] = useState<'compter'|'suivi'>('compter')
+
+  async function marquerRetourCorrigeCompt(retourId: number) {
+    try {
+      await fetch('/api/comptabilite/retours', {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ id: retourId, action: 'corrige', user_email: employe })
+      })
+      const r = await fetch('/api/comptabilite/retours?actifs=1')
+      const j = await r.json()
+      if (Array.isArray(j) && setRetoursActifs) setRetoursActifs(j)
+    } catch (e: any) { alert(e.message) }
+  }
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
@@ -2213,6 +2268,9 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
   const btnPrimary: any = {border:'none',borderRadius:12,fontWeight:800,cursor:'pointer',color:'#fff',width:'100%',padding:isMobile?'16px 0':'10px 0',fontSize:isMobile?17:14}
 
   return <>
+    {/* Bandeau de retours comptabilité — affiché en TÊTE si l'utilisateur a des comptages à corriger */}
+    <RetoursComptaBandeau retours={retoursActifs} source="comptage" employe={employe} dark={dark} card={card} bdr={bdr} sub={sub} C={C} onCorrige={marquerRetourCorrigeCompt}/>
+
     {/* Sous-onglets */}
     <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center',justifyContent:'space-between'}}>
       <div style={{display:'flex',gap:8}}>
@@ -3602,10 +3660,63 @@ function BookingTab({data,dark,card,bdr,sub,thBg,S,alts}: any) {
   </div>
 }
 
-function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVerifies, setNegsVerifies, profil, data, lancerSync, syncing, syncLog, validationsCompta}: any) {
+// ── Composant : bandeau de retour comptabilité ───────────────────────────────
+// Affiché en TÊTE de NegatifsTab et InventaireTab quand il y a des retours
+// actifs pour l'utilisateur courant.
+function RetoursComptaBandeau({ retours, source, employe, dark, card, bdr, sub, C, onCorrige }: any) {
+  const mesRetours = (retours || []).filter((r: any) => r.source === source && r.demandeur_employe === employe)
+  if (mesRetours.length === 0) return null
+  const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('fr-CA',{year:'2-digit',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'
+  return (
+    <div style={{background:dark?'#2b1113':'#fce8e6',border:`2px solid ${C.red}`,borderRadius:10,padding:'14px 16px',marginBottom:14}}>
+      <div style={{fontSize:14,fontWeight:900,color:C.red,marginBottom:8,display:'flex',alignItems:'center',gap:8}}>
+        <span style={{fontSize:20}}>⚠️</span>
+        {mesRetours.length === 1
+          ? '1 correction demandée par la comptabilité'
+          : `${mesRetours.length} corrections demandées par la comptabilité`}
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:8}}>
+        {mesRetours.map((r: any) => (
+          <div key={r.id} style={{background:card,border:`1px solid ${C.red}`,borderRadius:8,padding:'10px 12px'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10,flexWrap:'wrap',marginBottom:6}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:800,fontFamily:'monospace'}}>{r.code_piece || '(code inconnu)'}</div>
+                <div style={{fontSize:10,color:sub,marginTop:2}}>Retourné le {fmtDate(r.retourne_le)} par {r.comptable_email}</div>
+              </div>
+              <button onClick={()=>onCorrige(r.id)}
+                style={{background:C.green,color:'#fff',border:'none',borderRadius:6,padding:'7px 14px',fontWeight:700,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                ✓ J'ai corrigé
+              </button>
+            </div>
+            <div style={{background:dark?'#1a1a1a':'#fff',border:`1px dashed ${C.red}`,borderRadius:6,padding:'8px 10px',fontSize:12,lineHeight:1.5,color:dark?'#e8e8e8':'#1a1a1a'}}>
+              <strong style={{color:C.red,textTransform:'uppercase',fontSize:10}}>💬 Commentaire de la comptabilité :</strong>
+              <div style={{marginTop:4}}>{r.commentaire_retour}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVerifies, setNegsVerifies, profil, data, lancerSync, syncing, syncLog, validationsCompta, retoursActifs, setRetoursActifs}: any) {
   const validesNegatifIds = new Set((validationsCompta||[]).filter((v:any)=>v.source==='negatif').map((v:any)=>v.ref_id))
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const employe = profil?.nom || profil?.email || 'Inconnu'
+
+  async function marquerRetourCorrige(retourId: number) {
+    try {
+      await fetch('/api/comptabilite/retours', {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ id: retourId, action: 'corrige', user_email: employe })
+      })
+      // Refresh la liste des retours actifs
+      const r = await fetch('/api/comptabilite/retours?actifs=1')
+      const j = await r.json()
+      if (Array.isArray(j) && setRetoursActifs) setRetoursActifs(j)
+    } catch (e: any) { alert(e.message) }
+  }
   const [filtFourn, setFiltFourn] = useState('ALL')
   const [filtLignes, setFiltLignes] = useState<string[]>([])
   const [ddLigneOpen, setDdLigneOpen] = useState(false)
@@ -3926,6 +4037,9 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
 
 
   return <>
+    {/* Bandeau de retours comptabilité — affiché en TÊTE si l'utilisateur a des corrections demandées */}
+    <RetoursComptaBandeau retours={retoursActifs} source="negatif" employe={employe} dark={dark} card={card} bdr={bdr} sub={sub} C={C} onCorrige={marquerRetourCorrige}/>
+
     {/* Input photo caché */}
     <input ref={photoRef} type="file" accept="image/*" capture="environment" multiple onChange={onPhoto} style={{display:'none'}}/>
 
@@ -4514,16 +4628,52 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [loadingAction, setLoadingAction] = useState<string|null>(null)
   const [filtSourceHist, setFiltSourceHist] = useState<'tous'|'negatif'|'comptage'>('tous')
+  // Retour au demandeur (avec commentaire obligatoire)
+  const [retourModal, setRetourModal] = useState<{ source: 'negatif'|'comptage'; ref_id: number; code_piece: string; demandeur: string } | null>(null)
+  const [retourCommentaire, setRetourCommentaire] = useState('')
+  const [retoursActifs, setRetoursActifs] = useState<any[]>([])
 
   async function recharger() {
     try {
-      const [c, v] = await Promise.all([
+      const [c, v, r] = await Promise.all([
         fetch('/api/inventaire/comptages').then(r=>r.json()),
         fetch('/api/validations-comptables').then(r=>r.json()),
+        fetch('/api/comptabilite/retours?actifs=1').then(r=>r.json()),
       ])
       if (Array.isArray(c)) setComptages(c)
       if (Array.isArray(v)) setValidationsCompta(v)
+      if (Array.isArray(r)) setRetoursActifs(r)
     } catch {}
+  }
+
+  // Set des items déjà retournés (pour ne pas les afficher dans la liste à valider)
+  const retournesKey = new Set(retoursActifs.map((r:any) => `${r.source}:${r.ref_id}`))
+  const estRetourne = (source:string, refId:any) => retournesKey.has(`${source}:${refId}`)
+
+  async function envoyerRetour() {
+    if (!retourModal) return
+    const commentaire = retourCommentaire.trim()
+    if (!commentaire) { alert('Le commentaire est obligatoire pour expliquer la raison du retour.'); return }
+    setLoadingAction(`retour:${retourModal.source}:${retourModal.ref_id}`)
+    try {
+      const r = await fetch('/api/comptabilite/retours', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          source: retourModal.source,
+          ref_id: retourModal.ref_id,
+          code_piece: retourModal.code_piece,
+          demandeur_employe: retourModal.demandeur,
+          comptable_email: userEmail,
+          commentaire_retour: commentaire,
+        })
+      })
+      const j = await r.json()
+      if (j.erreur) { alert(j.erreur); return }
+      setRetourModal(null)
+      setRetourCommentaire('')
+      await recharger()
+    } finally { setLoadingAction(null) }
   }
 
   useEffect(() => { recharger() }, [])
@@ -4545,6 +4695,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   ]
   for (const n of (negsVerifies||[])) {
     if (estValide('negatif', n.id)) continue
+    if (estRetourne('negatif', n.id)) continue   // déjà retourné au demandeur
     if (n.cause && CAUSES_HORS_COMPTA.includes(n.cause)) continue
     items.push({
       key: `negatif:${n.id}`, source: 'negatif', id: n.id, code_piece: n.code_piece,
@@ -4561,6 +4712,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     const ec = c.ecart_reconcilie
     if (ec === 0 || ec === null || ec === undefined) continue
     if (estValide('comptage', c.id)) continue
+    if (estRetourne('comptage', c.id)) continue   // déjà retourné au demandeur
     items.push({
       key: `comptage:${c.id}`, source: 'comptage', id: c.id, code_piece: c.code_piece,
       date: c.date_reconciliation || c.date_comptage, ecart: Number(ec),
@@ -4870,7 +5022,13 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                           </div>}
                           {!isMobile && <div style={{width:120,fontSize:11,color:sub,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>👤 {it.employe}</div>}
                           {!isMobile && <div style={{width:110,textAlign:'right',fontSize:11,color:sub,whiteSpace:'nowrap'}}>{fmtDate(it.date)}</div>}
-                          <div style={{width:isMobile?60:90,textAlign:'right'}}>
+                          <div style={{width:isMobile?80:130,textAlign:'right',display:'flex',gap:4,justifyContent:'flex-end'}}>
+                            <button disabled={loadingAction===it.key}
+                              onClick={(e:any)=>{e.stopPropagation();setRetourModal({source:it.source,ref_id:it.id,code_piece:it.code_piece,demandeur:it.employe});setRetourCommentaire('')}}
+                              title="Retourner au demandeur pour correction"
+                              style={{background:'transparent',border:`1px solid ${C.yellow}`,color:C.yellow,borderRadius:6,padding:isMobile?'6px 8px':'6px 10px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                              ↩
+                            </button>
                             <button disabled={loadingAction===it.key} onClick={(e:any)=>{e.stopPropagation();valider(it)}}
                               style={{background:C.green,color:'#fff',border:'none',borderRadius:6,padding:isMobile?'6px 8px':'6px 12px',fontWeight:700,cursor:'pointer',fontSize:11,opacity:loadingAction===it.key?0.6:1}}>
                               {loadingAction===it.key?'⏳':'✓'}
@@ -4946,6 +5104,45 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                   </table>
                 </div>
             }
+          </div>
+        </div>
+      )}
+
+      {/* Modal RETOUR AU DEMANDEUR */}
+      {retourModal && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+             onClick={()=>{setRetourModal(null);setRetourCommentaire('')}}>
+          <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,maxWidth:560,width:'100%',border:`2px solid ${C.yellow}`,padding:20,boxShadow:'0 10px 40px rgba(0,0,0,.4)'}}>
+            <div style={{fontSize:15,fontWeight:900,marginBottom:6,color:C.yellow}}>↩ Retourner au demandeur pour correction</div>
+            <div style={{fontSize:12,color:sub,marginBottom:14,lineHeight:1.5}}>
+              Cette pièce sera renvoyée à <strong>{retourModal.demandeur}</strong> avec ton commentaire. Elle réapparaîtra dans son onglet d'origine ({retourModal.source==='negatif'?'Négatifs':'Inventaire / Comptages'}) avec un encadré rouge bien visible. Une notification sera affichée dès sa prochaine connexion.
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'auto 1fr',gap:8,marginBottom:14,fontSize:12}}>
+              <div style={{color:sub,fontWeight:700}}>Type :</div>
+              <div><span style={{background:colorSource(retourModal.source)+'22',color:colorSource(retourModal.source),padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:700}}>{labelSource(retourModal.source)}</span></div>
+              <div style={{color:sub,fontWeight:700}}>Pièce :</div>
+              <div style={{fontFamily:'monospace',fontWeight:700}}>{retourModal.code_piece}</div>
+              <div style={{color:sub,fontWeight:700}}>Demandeur :</div>
+              <div>👤 {retourModal.demandeur || '(inconnu)'}</div>
+            </div>
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:sub,marginBottom:4,textTransform:'uppercase'}}>Raison du retour <span style={{color:C.red}}>*</span></div>
+              <textarea value={retourCommentaire} onChange={e=>setRetourCommentaire(e.target.value)}
+                placeholder="Ex: Le commentaire ne précise pas si le produit a été retrouvé. Photo manquante. À recompter avec localisation."
+                style={{...S,width:'100%',minHeight:100,fontSize:12,padding:'8px 10px',resize:'vertical'}}
+                autoFocus/>
+              <div style={{fontSize:10,color:sub,marginTop:4}}>Le demandeur verra exactement ce texte. Sois précis pour qu'il sache quoi corriger.</div>
+            </div>
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+              <button onClick={()=>{setRetourModal(null);setRetourCommentaire('')}}
+                style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                Annuler
+              </button>
+              <button onClick={envoyerRetour} disabled={!retourCommentaire.trim() || loadingAction?.startsWith('retour:')}
+                style={{background:retourCommentaire.trim()?C.yellow:bdr,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontWeight:800,cursor:retourCommentaire.trim()?'pointer':'default',fontSize:12}}>
+                {loadingAction?.startsWith('retour:') ? '⏳ Envoi...' : '↩ Envoyer le retour'}
+              </button>
+            </div>
           </div>
         </div>
       )}
