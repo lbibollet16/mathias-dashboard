@@ -247,41 +247,69 @@ export async function GET(req: NextRequest) {
     const doc3CashFlow = sumWhere(t => ['REVERSAL_REIMBURSEMENT','WAREHOUSE_DAMAGE','WAREHOUSE_LOST','WAREHOUSE_DAMAGE_EXCEPTION','WAREHOUSE_LOST_MANIFEST'].includes(t.amount_type) || ['REVERSAL_REIMBURSEMENT','WAREHOUSE_DAMAGE','WAREHOUSE_LOST'].includes(desc(t)))
     const totalCoutsAmazon = Number((totalTsv - doc1CashFlow - doc2CashFlow - doc3CashFlow).toFixed(2))
 
-    // Détail par catégorie pour le rapport comptable. La SOMME doit égaler
-    // totalCoutsAmazon. Les catégories sont mappées sur les sections du
-    // relevé de paiement papier d'Amazon. Si une transaction n'est dans
-    // aucune catégorie, elle apparaît dans 'autre_non_classe'.
+    // Breakdown 3 sections identique au relevé papier d'Amazon
+    // pour que l'utilisateur puisse vérifier visuellement.
+    //   A — VENTES (hors Doc 1 = Order Principal) : Expédition seulement
+    //   B — REMBOURSEMENTS (hors Doc 2 cashflow = part Refund Principal sellable)
+    //   C — DÉPENSES (= section "Dépenses" du relevé papier, doit matcher au cent)
     const orderCommissionDescs = ['Commission','FBAPerUnitFulfillmentFee','MarketplaceFacilitatorTax-Principal','MarketplaceFacilitatorTax-Shipping','ShippingChargeback','ShippingHB']
-    const refundCommissionDescs = ['Commission','RefundCommission','MarketplaceFacilitatorTax-Principal','MarketplaceFacilitatorTax-Shipping','ShippingChargeback']
+
+    // Section A — VENTES (hors Doc 1)
+    const a_expedition_orders = sumWhere(t => isOrder(t) && ['Shipping','ShippingTax','GiftWrap','GiftWrapTax'].includes(desc(t)))
+    const a_taxes_orders_net = sumWhere(t => isOrder(t) && (desc(t) === 'Tax' || desc(t).startsWith('MarketplaceFacilitatorTax')))
+    const sectionA_total = Number((a_expedition_orders + a_taxes_orders_net).toFixed(2))
+
+    // Section B — REMBOURSEMENTS (hors Doc 2 cashflow)
+    // Dépenses remboursées = Refund non-Principal positif (Promotion + ItemFees - RefundCommission)
+    const b_depenses_remboursees = sumWhere(t => isRefund(t) && Number(t.amount || 0) > 0 && !['Principal','Shipping','ShippingTax'].includes(desc(t)))
+    const b_depenses_remboursees_neg = sumWhere(t => isRefund(t) && Number(t.amount || 0) < 0 && !['Principal','Shipping','ShippingTax'].includes(desc(t)))
+    // Ventes remboursées Frais produit hors sellable
+    const refundPrincipalTotal = sumWhere(t => isRefund(t) && desc(t) === 'Principal')
+    const b_ventes_remboursees_frais_produit_non_sellable = Number((refundPrincipalTotal - retoursTotal).toFixed(2))
+    // Ventes remboursées Expédition (Refund Shipping + ShippingTax)
+    const b_ventes_remboursees_expedition = sumWhere(t => isRefund(t) && ['Shipping','ShippingTax'].includes(desc(t)))
+    const sectionB_total = Number((b_depenses_remboursees + b_depenses_remboursees_neg + b_ventes_remboursees_frais_produit_non_sellable + b_ventes_remboursees_expedition).toFixed(2))
+
+    // Section C — DÉPENSES (= section "Dépenses" du relevé papier)
+    const c_rabais_promotionnels = sumWhere(t => isOrder(t) && t.amount_type === 'Promotion')
+    const c_frais_fba_stockage = sumWhere(t => t.amount_type === 'Storage Fee' || desc(t) === 'Storage Fee')
+    const c_frais_fba_autres = sumWhere(t => t.amount_type === 'RemovalComplete' || desc(t) === 'RemovalComplete')
+    // Frais d'abonnement / autres frais FBA non couverts
+    const c_frais_fba_autre_amount_type = sumWhere(t => ['Subscription Fee'].includes(t.amount_type))
+    const c_publicite = sumWhere(t => t.amount_type === 'Cost of Advertising' || desc(t) === 'TransactionTotalAmount')
+    const c_commissions_amazon = sumWhere(t => isOrder(t) && orderCommissionDescs.includes(desc(t)))
+    const c_remboursements_inverses = sumWhere(t => t.amount_type === 'COMPENSATED_CLAWBACK' || desc(t) === 'COMPENSATED_CLAWBACK')
+    const sectionC_total = Number((c_rabais_promotionnels + c_frais_fba_stockage + c_frais_fba_autres + c_frais_fba_autre_amount_type + c_publicite + c_commissions_amazon + c_remboursements_inverses).toFixed(2))
 
     const couts_amazon = {
-      rabais_promotionnels:    sumWhere(t => t.amount_type === 'Promotion'),                              // Order/Promotion + Refund/Promotion
-      frais_fba_stockage:      sumWhere(t => t.amount_type === 'Storage Fee' || desc(t) === 'Storage Fee'),
-      frais_fba_autres:        sumWhere(t => t.amount_type === 'RemovalComplete' || desc(t) === 'RemovalComplete'),
-      publicite:               sumWhere(t => t.amount_type === 'Cost of Advertising' || desc(t) === 'TransactionTotalAmount'),
-      commissions_orders:      sumWhere(t => isOrder(t) && orderCommissionDescs.includes(desc(t))),       // = "Commissions Amazon" du relevé papier
-      expedition_orders:       sumWhere(t => isOrder(t) && ['Shipping','ShippingTax','GiftWrap','GiftWrapTax'].includes(desc(t))),  // = "Expédition" dans VENTES
-      taxes_collectees:        sumWhere(t => isOrder(t) && desc(t) === 'Tax'),                            // collectées (positif), reversées via MFT-Principal
-      // Côté Refunds (= "Dépenses remboursées" + parts non-Principal des "Ventes remboursées" du relevé)
-      refunds_commissions:     sumWhere(t => isRefund(t) && refundCommissionDescs.includes(desc(t))),
-      refunds_taxes:           sumWhere(t => isRefund(t) && desc(t) === 'Tax'),
-      refunds_shipping:        sumWhere(t => isRefund(t) && ['Shipping','ShippingTax'].includes(desc(t))), // = "Ventes remboursées Expédition" du relevé
-      // Reimbursements Amazon
-      remboursements_inverses: sumWhere(t => t.amount_type === 'COMPENSATED_CLAWBACK' || desc(t) === 'COMPENSATED_CLAWBACK'),
-      remboursements_stock_amazon: doc3CashFlow * -1,  // signe inversé : c'est dans Doc 3 cashflow, pas dans Coûts pour la balance
-      // Refund Principal qui ne sont PAS des retours sellable (= retours non sellable, refund-only, ou unités encore en transit)
-      refunds_principal_non_sellable: sumWhere(t => isRefund(t) && desc(t) === 'Principal') - retoursTotal,
+      // Section A — Ventes (hors Doc 1)
+      'A_ventes_expedition': a_expedition_orders,
+      'A_ventes_taxes_net': a_taxes_orders_net,
+      'A_TOTAL_section_A': sectionA_total,
+      // Section B — Remboursements (hors Doc 2 cashflow)
+      'B_remb_depenses_pos': b_depenses_remboursees,
+      'B_remb_depenses_neg': b_depenses_remboursees_neg,
+      'B_remb_ventes_frais_produit_non_sellable': b_ventes_remboursees_frais_produit_non_sellable,
+      'B_remb_ventes_expedition': b_ventes_remboursees_expedition,
+      'B_TOTAL_section_B': sectionB_total,
+      // Section C — Dépenses (= scan papier)
+      'C_rabais_promotionnels': c_rabais_promotionnels,
+      'C_frais_fba_stockage': c_frais_fba_stockage,
+      'C_frais_fba_autres': c_frais_fba_autres,
+      'C_publicite': c_publicite,
+      'C_commissions_amazon': c_commissions_amazon,
+      'C_remboursements_inverses': c_remboursements_inverses,
+      'C_TOTAL_section_C': sectionC_total,
     }
-    // Note: remboursements_stock_amazon est mis à 0 dans Coûts Amazon car
-    // déjà compté dans Doc 3 cashflow. On le garde dans le breakdown pour
-    // info (signe inversé).
-    couts_amazon.remboursements_stock_amazon = 0
+    if (Math.abs(c_frais_fba_autre_amount_type) >= 0.01) {
+      ;(couts_amazon as any)['C_frais_fba_abonnement'] = c_frais_fba_autre_amount_type
+    }
 
-    // Calcul du résiduel non-classé pour ne pas perdre d'argent
-    const sumDetailExplicit = Object.values(couts_amazon).reduce((s: number, v) => s + Number(v), 0)
-    const residuel = Number((totalCoutsAmazon - sumDetailExplicit).toFixed(2))
+    // Calcul du résiduel non-classé (transactions du TSV non couvertes par les 3 sections)
+    const sumABC = Number((sectionA_total + sectionB_total + sectionC_total).toFixed(2))
+    const residuel = Number((totalCoutsAmazon - sumABC).toFixed(2))
     if (Math.abs(residuel) >= 0.01) {
-      ;(couts_amazon as any).autre_non_classe = residuel
+      ;(couts_amazon as any).Z_autre_non_classe = residuel
     }
 
     // ─── Documents existants saisis (n° facture LAUTOPAK déjà entrés) ──────

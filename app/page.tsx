@@ -6500,26 +6500,89 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     })}
                   </div>
 
-                  {/* Détail Coûts Amazon (collapsible) */}
+                  {/* Détail Coûts Amazon — 3 sections identiques au relevé papier */}
                   <details style={{marginTop:10,fontSize:11}}>
                     <summary style={{cursor:'pointer',color:sub,padding:'6px 0',fontWeight:700}}>
-                      ▾ Détail des « Coûts des ventes Amazon » (compte agrégé, pas de stock — {fmt$(d.total_couts_amazon||0)})
+                      ▾ Détail des « Coût des ventes Amazon » (compte agrégé, pas de stock — {fmt$(d.total_couts_amazon||0)})
                     </summary>
-                    <div style={{padding:'8px 0'}}>
-                      <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
-                        <tbody>
-                          {Object.entries(d.couts_amazon||{}).map(([k, v]: any) => Math.abs(Number(v||0)) < 0.01 ? null : (
-                            <tr key={k}>
-                              <td style={{padding:'4px 8px',borderBottom:`1px solid ${bdr}`}}>{k.replace(/_/g,' ')}</td>
-                              <td style={{padding:'4px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:Number(v)<0?C.red:C.green,fontFamily:'monospace'}}>{fmt$(Number(v))}</td>
+                    <div style={{padding:'8px 0',fontSize:11}}>
+                      <div style={{fontSize:10,color:sub,marginBottom:6,fontStyle:'italic',lineHeight:1.5}}>
+                        Le breakdown reproduit les 3 sections du relevé papier d'Amazon (hors les ventes/remboursements déjà capturés par les Docs 1 et 2 ci-dessus).
+                        La <strong>Section C — Dépenses</strong> doit matcher exactement la section « Dépenses » de ton scan papier.
+                      </div>
+                      {(() => {
+                        const ca: any = d.couts_amazon || {}
+                        const labelsLignes: Record<string, string> = {
+                          'A_ventes_expedition': 'Expédition (Order Shipping)',
+                          'A_ventes_taxes_net': 'Taxes net (Tax + MarketplaceFacilitatorTax)',
+                          'B_remb_depenses_pos': 'Dépenses remboursées (positifs)',
+                          'B_remb_depenses_neg': 'Dépenses remboursées (négatifs)',
+                          'B_remb_ventes_frais_produit_non_sellable': 'Ventes remboursées : Frais produit (non sellable)',
+                          'B_remb_ventes_expedition': 'Ventes remboursées : Expédition',
+                          'C_rabais_promotionnels': 'Rabais promotionnels',
+                          'C_frais_fba_stockage': 'Frais Expédié par Amazon — Stockage',
+                          'C_frais_fba_autres': 'Frais Expédié par Amazon — Autre (RemovalComplete)',
+                          'C_frais_fba_abonnement': 'Frais d\'abonnement',
+                          'C_publicite': 'Prix de la publicité',
+                          'C_commissions_amazon': 'Commissions Amazon',
+                          'C_remboursements_inverses': 'Remboursements inversés (FBA)',
+                        }
+                        const renderLigne = (key: string, indent = 1) => {
+                          if (ca[key] === undefined || Math.abs(Number(ca[key])) < 0.01) return null
+                          return (
+                            <tr key={key}>
+                              <td style={{padding:'3px 8px',paddingLeft:8 + indent*16,borderBottom:`1px solid ${bdr}`,color:sub}}>{labelsLignes[key] || key}</td>
+                              <td style={{padding:'3px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:Number(ca[key])<0?C.red:C.green,fontFamily:'monospace',fontSize:11}}>{fmt$(Number(ca[key]))}</td>
                             </tr>
-                          ))}
-                          <tr style={{background:thBg}}>
-                            <td style={{padding:'6px 8px',fontWeight:900}}>TOTAL Coûts Amazon</td>
-                            <td style={{padding:'6px 8px',textAlign:'right',fontWeight:900,color:Number(d.total_couts_amazon)<0?C.red:C.green,fontFamily:'monospace'}}>{fmt$(d.total_couts_amazon||0)}</td>
-                          </tr>
-                        </tbody>
-                      </table>
+                          )
+                        }
+                        return (
+                          <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                            <tbody>
+                              {/* Section A */}
+                              <tr style={{background:dark?'#0d1829':'#e8f0fe'}}>
+                                <td style={{padding:'5px 8px',fontWeight:800,color:C.blue}}>A — VENTES (hors Doc 1 = Order Principal)</td>
+                                <td style={{padding:'5px 8px',textAlign:'right',fontWeight:800,color:C.blue,fontFamily:'monospace'}}>{fmt$(Number(ca.A_TOTAL_section_A||0))}</td>
+                              </tr>
+                              {renderLigne('A_ventes_expedition')}
+                              {renderLigne('A_ventes_taxes_net')}
+                              {/* Section B */}
+                              <tr style={{background:dark?'#2b2411':'#fff8e1'}}>
+                                <td style={{padding:'5px 8px',fontWeight:800,color:C.yellow}}>B — REMBOURSEMENTS (hors Doc 2 cashflow)</td>
+                                <td style={{padding:'5px 8px',textAlign:'right',fontWeight:800,color:C.yellow,fontFamily:'monospace'}}>{fmt$(Number(ca.B_TOTAL_section_B||0))}</td>
+                              </tr>
+                              {renderLigne('B_remb_depenses_pos')}
+                              {renderLigne('B_remb_depenses_neg')}
+                              {renderLigne('B_remb_ventes_frais_produit_non_sellable')}
+                              {renderLigne('B_remb_ventes_expedition')}
+                              {/* Section C */}
+                              <tr style={{background:dark?'#2b1113':'#fce8e6'}}>
+                                <td style={{padding:'5px 8px',fontWeight:800,color:C.red}}>C — DÉPENSES (= scan papier section Dépenses)</td>
+                                <td style={{padding:'5px 8px',textAlign:'right',fontWeight:800,color:C.red,fontFamily:'monospace'}}>{fmt$(Number(ca.C_TOTAL_section_C||0))}</td>
+                              </tr>
+                              {renderLigne('C_rabais_promotionnels')}
+                              {renderLigne('C_frais_fba_stockage')}
+                              {renderLigne('C_frais_fba_autres')}
+                              {renderLigne('C_frais_fba_abonnement')}
+                              {renderLigne('C_publicite')}
+                              {renderLigne('C_commissions_amazon')}
+                              {renderLigne('C_remboursements_inverses')}
+                              {/* Non classé */}
+                              {ca.Z_autre_non_classe !== undefined && (
+                                <tr style={{background:'#fdf6e3'}}>
+                                  <td style={{padding:'4px 8px',color:C.yellow,fontWeight:700}}>⚠ Autre / non classé (à investiguer)</td>
+                                  <td style={{padding:'4px 8px',textAlign:'right',color:C.yellow,fontWeight:800,fontFamily:'monospace'}}>{fmt$(Number(ca.Z_autre_non_classe))}</td>
+                                </tr>
+                              )}
+                              {/* Grand total */}
+                              <tr style={{background:thBg,borderTop:`2px solid ${bdr}`}}>
+                                <td style={{padding:'7px 8px',fontWeight:900}}>= TOTAL Coût des ventes Amazon (A + B + C)</td>
+                                <td style={{padding:'7px 8px',textAlign:'right',fontWeight:900,color:Number(d.total_couts_amazon)<0?C.red:C.green,fontFamily:'monospace'}}>{fmt$(d.total_couts_amazon||0)}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        )
+                      })()}
                     </div>
                   </details>
 
