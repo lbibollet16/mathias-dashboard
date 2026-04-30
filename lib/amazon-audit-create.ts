@@ -143,9 +143,52 @@ export async function createAuditSnapshot(input: CreateAuditInput): Promise<Crea
       bases.set(v.base, ex)
     }
 
+    // Pour 'settlement_fbm' : ne lister QUE les base_codes ayant eu une
+    // transaction FBM (fulfillment_id='MFN') dans le settlement courant.
+    // Les autres SKU FBM n'ont pas bougé depuis le dernier audit → pas
+    // besoin de les recompter (ils seront vérifiés dans l'audit AMA mensuel).
+    let basesAvecTransactionFbm: Set<string> | null = null
+    if (auditType === 'settlement_fbm' && input.settlement_id) {
+      // Charger les SKU avec transactions MFN dans ce settlement
+      const mfnTxRows: any[] = []
+      let from = 0
+      while (true) {
+        const { data, error } = await supabaseAdmin
+          .from('amazon_transactions')
+          .select('sku, traction_code')
+          .eq('settlement_id', input.settlement_id)
+          .eq('fulfillment_id', 'MFN')
+          .range(from, from + 999)
+        if (error) break
+        mfnTxRows.push(...(data || []))
+        if (!data || data.length < 1000) break
+        from += 1000
+      }
+      basesAvecTransactionFbm = new Set<string>()
+      // Résoudre chaque SKU vers ses base_codes (en utilisant les multi-mappings)
+      for (const t of mfnTxRows) {
+        const sku = t.sku
+        if (!sku) continue
+        const manual = manualMappings.get(sku)
+        if (manual && manual.length > 0) {
+          for (const m of manual) {
+            const v = detectVariant(m.pk_code)
+            // Ne garder que si le pk_code mappé est FBM (sinon c'est un FBA via mapping)
+            if (v.location === 'FBM') basesAvecTransactionFbm.add(v.base)
+          }
+        } else {
+          const tc = t.traction_code || sku
+          const v = detectVariant(tc)
+          if (v.location === 'FBM') basesAvecTransactionFbm.add(v.base)
+        }
+      }
+    }
+
     // Créer une ligne audit_count pour chaque base qui a du stock quelque part.
     // Filtrage selon le mode :
-    //   - 'settlement_fbm' : seulement les base avec fbm_theorique > 0 (comptage rapide)
+    //   - 'settlement_fbm' : SEULEMENT les base avec fbm_theorique > 0 ET
+    //                        ayant eu au moins une transaction MFN dans le
+    //                        settlement courant (comptage incrémental rapide)
     //   - 'mensuel_ama'    : toutes les bases avec stock à un endroit physique chez Mathias
     const countRows: any[] = []
     for (const [base, b] of bases) {
@@ -153,6 +196,8 @@ export async function createAuditSnapshot(input: CreateAuditInput): Promise<Crea
       if (auditType === 'settlement_fbm') {
         // Comptage rapide FBM only — exclut HUB, SP, FBA
         if (b.fbm === 0) continue
+        // Comptage incrémental : seulement les bases avec mouvement FBM ce settlement
+        if (basesAvecTransactionFbm && !basesAvecTransactionFbm.has(base)) continue
       } else {
         // Audit mensuel — toutes les bases avec stock physique chez Mathias OU au FBA
         if (b.hub === 0 && b.fbm === 0 && b.sans_prefix === 0 && fba_amazon === 0 && b.fba_traction === 0) continue
