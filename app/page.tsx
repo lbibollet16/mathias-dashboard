@@ -6938,14 +6938,16 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               )
             })()}
 
-            {/* Bandeau info sur LAUTOPAK */}
-            <div style={{background:dark?'#1a233a':'#e8f0fe',border:`1px solid ${C.blue}`,borderRadius:10,padding:'10px 14px',marginBottom:10,fontSize:11,color:C.blue,lineHeight:1.5}}>
-              💡 <strong>LAUTOPAK = ta source de vérité comptable (DSM)</strong>. Traction importe l'inventaire LAUTOPAK tous les jours — tout ajustement doit se faire dans LAUTOPAK, sinon il sera écrasé à la prochaine sync.
-              Chaque étape ci-dessous vérifie une condition précise ; clique sur <strong>ℹ️ Détails</strong> pour comprendre.
-            </div>
-
-            {/* 6 étapes */}
-            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+            {/* ═══ ANCIEN WORKFLOW v1 (6 étapes) — masqué par défaut ═══ */}
+            <details style={{marginTop:4,marginBottom:10}}>
+              <summary style={{cursor:'pointer',padding:'10px 14px',background:dark?'#1a1a1a':'#f5f5f5',border:`1px dashed ${bdr}`,borderRadius:8,fontSize:12,color:sub,fontWeight:700,listStyle:'revert'}}>
+                ▾ Afficher l'ancien workflow v1 (6 étapes — rétrocompat)
+              </summary>
+              <div style={{marginTop:10}}>
+                <div style={{background:dark?'#1a233a':'#e8f0fe',border:`1px solid ${C.blue}`,borderRadius:10,padding:'10px 14px',marginBottom:10,fontSize:11,color:C.blue,lineHeight:1.5}}>
+                  💡 <strong>Workflow v1</strong> — préservé pour les anciens settlements. Pour les nouveaux, utilise plutôt le bloc « 📑 Documents LAUTOPAK v2 » en haut qui consolide toutes ces étapes en 4 documents avec balance auto.
+                </div>
+                <div style={{display:'flex',flexDirection:'column',gap:8}}>
               {steps.map((st: any, idx: number) => (
                 <div key={st.key} style={{background:card,border:`2px solid ${stepColor(st.status)}`,borderRadius:10,padding:'14px 16px',opacity:st.status==='locked'?.55:1}}>
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10,flexWrap:'wrap'}}>
@@ -7386,7 +7388,9 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   )}
                 </div>
               ))}
-            </div>
+                </div>
+              </div>
+            </details>
           </div>
         )
       })()}
