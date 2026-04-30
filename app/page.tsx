@@ -1137,8 +1137,22 @@ function CommandesTab({data, dark, card, bdr, sub, thBg, S, C, hvr, altsMap, fou
                   onMouseEnter={e=>e.currentTarget.style.background=isCmd?(dark?'#3a1518':'#ffe5e5'):hvr} onMouseLeave={e=>e.currentTarget.style.background=isCmd?(dark?'#2b1113':'#fff0f0'):'transparent'}>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:600}}>{d.employe}</td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontSize:12}}>{d.sku||'—'}</td>
-                  <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:isCmd?800:400,color:isCmd?C.red:undefined}} title={d.description}>
-                    {isCmd ? `🚩 ${d.fournisseur}` : d.description}
+                  <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:280,fontWeight:isCmd?800:400,color:isCmd?C.red:undefined}}>
+                    {(() => {
+                      const noteText = (d.note||'').split('|||')[0]
+                      return (
+                        <>
+                          <div style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={d.description}>
+                            {isCmd ? `🚩 ${d.fournisseur}` : d.description}
+                          </div>
+                          {noteText && !isCmd && (
+                            <div style={{fontSize:11,color:C.blue,fontStyle:'italic',marginTop:3,fontWeight:600,whiteSpace:'pre-wrap',wordBreak:'break-word',lineHeight:1.4}} title={noteText}>
+                              💬 {noteText}
+                            </div>
+                          )}
+                        </>
+                      )
+                    })()}
                   </td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,color:isCmd?C.red:sub,fontSize:12,fontWeight:isCmd?700:400}}>{d.fournisseur||'—'}</td>
                   <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{isCmd?'—':d.quantite}</td>
