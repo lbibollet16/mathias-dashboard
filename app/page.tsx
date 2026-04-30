@@ -4983,6 +4983,9 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [docInputs, setDocInputs] = useState<Record<string, { numero?: string; date?: string; notes?: string }>>({})
   // Audit FBA auto (comparaison FBA Amazon vs FBA Traction)
   const [fbaComparison, setFbaComparison] = useState<any>(null)
+  // Audit FBM lié au settlement courant (audit_type='settlement_fbm')
+  const [fbmAuditSettlement, setFbmAuditSettlement] = useState<any>(null)
+  const [creatingFbmAudit, setCreatingFbmAudit] = useState(false)
   const [releveRembStock, setReleveRembStock] = useState<Record<string,string>>({})  // saisie par settlement_id
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
   const [expandedPk, setExpandedPk] = useState<Record<string, boolean>>({})
@@ -5219,9 +5222,50 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           const jFba = await rFba.json()
           if (!jFba.erreur) setFbaComparison(jFba)
         } catch {}
+        // Audit FBM lié au settlement (audit_type='settlement_fbm')
+        try {
+          const rAudits = await fetch('/api/amazon/audits')
+          const jAudits = await rAudits.json()
+          if (Array.isArray(jAudits)) {
+            const fbmAudit = jAudits.find((a: any) => a.settlement_id === settlementId && a.audit_type === 'settlement_fbm')
+            setFbmAuditSettlement(fbmAudit || null)
+          }
+        } catch {}
       }
     } catch {}
     setClosureLoading(false)
+  }
+
+  async function demarrerAuditFbmSettlement(settlementId: string, settlementMois: string) {
+    setCreatingFbmAudit(true)
+    try {
+      const r = await fetch('/api/amazon/audits', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          mois: settlementMois,
+          label: `FBM Settlement ${settlementId}`,
+          started_by: profil?.email || profil?.nom || 'Inconnu',
+          settlement_id: settlementId,
+          audit_type: 'settlement_fbm',
+        })
+      })
+      const j = await r.json()
+      if (j.success && j.audit?.id) {
+        setVue('audit')
+        await chargerAudits()
+        await chargerAuditDetail(j.audit.id)
+      } else {
+        alert(j.erreur || 'Erreur création audit FBM')
+      }
+    } catch (e: any) { alert(e.message) }
+    setCreatingFbmAudit(false)
+  }
+
+  async function ouvrirAuditFbmSettlement(auditId: number) {
+    setVue('audit')
+    if (!audits.length) await chargerAudits()
+    await chargerAuditDetail(auditId)
   }
 
   async function saisirDocLautopak(settlement_id: string, doc_type: string, payload: { numero_facture?: string; date_facture?: string; montant_total?: number; notes?: string }) {
@@ -6599,6 +6643,48 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                       ✅ Tous les documents sont saisis et la balance correspond au dépôt bancaire — settlement prêt à fermer.
                     </div>
                   )}
+                </div>
+              )
+            })()}
+
+            {/* Bloc « Audit FBM » — comptage physique obligatoire à chaque settlement */}
+            {(() => {
+              const settMois = s.settlement_end ? String(s.settlement_end).slice(0,7) : new Date().toISOString().slice(0,7)
+              const a = fbmAuditSettlement
+              const isClosed = closureDetail.is_closed
+              if (!a) {
+                return (
+                  <div style={{background:card,border:`2px solid ${C.yellow}`,borderRadius:10,padding:'12px 14px',marginBottom:12,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:10}}>
+                    <div style={{flex:1,minWidth:200}}>
+                      <div style={{fontSize:13,fontWeight:800,color:C.yellow}}>📦 Audit FBM physique — à faire pour fermer ce settlement</div>
+                      <div style={{fontSize:11,color:sub,marginTop:3,lineHeight:1.5}}>
+                        Compte physiquement le stock <strong>FBM (chez Mathias, prêt à expédier)</strong> pour ce cycle de paiement. Les écarts alimentent automatiquement le Doc 4 (Ajust audit) ci-dessus.
+                      </div>
+                    </div>
+                    {!isClosed && (
+                      <button onClick={()=>demarrerAuditFbmSettlement(s.settlement_id, settMois)} disabled={creatingFbmAudit}
+                        style={{background:creatingFbmAudit?bdr:C.yellow,color:'#fff',border:'none',borderRadius:8,padding:'10px 16px',fontWeight:800,cursor:creatingFbmAudit?'default':'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                        {creatingFbmAudit ? '⏳ Création...' : '📋 Démarrer l\'audit FBM'}
+                      </button>
+                    )}
+                  </div>
+                )
+              }
+              const pct = a.nb_total > 0 ? Math.round((a.nb_comptes/a.nb_total)*100) : 0
+              const isFini = a.statut === 'termine'
+              const couleur = isFini ? C.green : (pct>0 ? C.blue : C.yellow)
+              return (
+                <div style={{background:card,border:`2px solid ${couleur}`,borderRadius:10,padding:'12px 14px',marginBottom:12,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:10}}>
+                  <div style={{flex:1,minWidth:200}}>
+                    <div style={{fontSize:13,fontWeight:800,color:couleur}}>📦 Audit FBM physique — {isFini ? '✓ Terminé' : (pct>0?'En cours':'Démarré, à compter')}</div>
+                    <div style={{fontSize:11,color:sub,marginTop:3}}>
+                      Audit <strong>{a.label}</strong> • {a.nb_comptes||0}/{a.nb_total||0} produits comptés ({pct}%)
+                    </div>
+                  </div>
+                  <button onClick={()=>ouvrirAuditFbmSettlement(a.id)}
+                    style={{background:couleur,color:'#fff',border:'none',borderRadius:8,padding:'10px 16px',fontWeight:800,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                    {isFini ? '👁 Voir résultat' : '📝 Continuer le comptage'}
+                  </button>
                 </div>
               )
             })()}

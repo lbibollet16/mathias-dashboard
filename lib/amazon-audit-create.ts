@@ -11,6 +11,10 @@ export interface CreateAuditInput {
   label?: string
   started_by?: string
   settlement_id?: string | null
+  // Mode :
+  //   'mensuel_ama' (défaut) — audit mensuel warehouse complet (HUB + FBM + SP)
+  //   'settlement_fbm'       — comptage rapide FBM uniquement (par settlement)
+  audit_type?: 'mensuel_ama' | 'settlement_fbm'
 }
 
 export interface CreateAuditResult {
@@ -24,18 +28,24 @@ export interface CreateAuditResult {
 
 export async function createAuditSnapshot(input: CreateAuditInput): Promise<CreateAuditResult> {
   try {
-    // Dédoublonnage par settlement_id : si un audit existe déjà pour ce
-    // settlement, on le garde tel quel (préserve les comptages saisis).
+    // Dédoublonnage par (settlement_id, audit_type) : si un audit du même type
+    // existe déjà pour ce settlement, on le garde (préserve les comptages saisis).
+    // Plusieurs audits de TYPES différents peuvent coexister sur le même
+    // settlement (ex: settlement_fbm + settlement_fba snapshot).
     if (input.settlement_id) {
+      const targetType = input.audit_type || 'mensuel_ama'
       const { data: existing } = await supabaseAdmin
         .from('amazon_audits')
-        .select('id, label')
+        .select('id, label, audit_type')
         .eq('settlement_id', input.settlement_id)
+        .eq('audit_type', targetType)
         .limit(1)
       if (existing && existing.length > 0) {
-        return { success: true, skipped: true, reason: `Audit déjà existant (id=${existing[0].id}) pour ce settlement`, audit: existing[0] }
+        return { success: true, skipped: true, reason: `Audit ${targetType} déjà existant (id=${existing[0].id}) pour ce settlement`, audit: existing[0] }
       }
     }
+
+    const auditType = input.audit_type || 'mensuel_ama'
 
     // Créer l'enregistrement audit
     const { data: created, error: cErr } = await supabaseAdmin
@@ -47,6 +57,7 @@ export async function createAuditSnapshot(input: CreateAuditInput): Promise<Crea
         statut: 'en_cours',
         started_at: new Date().toISOString(),
         settlement_id: input.settlement_id || null,
+        audit_type: auditType,
       })
       .select()
       .single()
@@ -132,11 +143,20 @@ export async function createAuditSnapshot(input: CreateAuditInput): Promise<Crea
       bases.set(v.base, ex)
     }
 
-    // Créer une ligne audit_count pour chaque base qui a du stock quelque part
+    // Créer une ligne audit_count pour chaque base qui a du stock quelque part.
+    // Filtrage selon le mode :
+    //   - 'settlement_fbm' : seulement les base avec fbm_theorique > 0 (comptage rapide)
+    //   - 'mensuel_ama'    : toutes les bases avec stock à un endroit physique chez Mathias
     const countRows: any[] = []
     for (const [base, b] of bases) {
       const fba_amazon = fbaByBase.get(base) || 0
-      if (b.hub === 0 && b.fbm === 0 && b.sans_prefix === 0 && fba_amazon === 0 && b.fba_traction === 0) continue
+      if (auditType === 'settlement_fbm') {
+        // Comptage rapide FBM only — exclut HUB, SP, FBA
+        if (b.fbm === 0) continue
+      } else {
+        // Audit mensuel — toutes les bases avec stock physique chez Mathias OU au FBA
+        if (b.hub === 0 && b.fbm === 0 && b.sans_prefix === 0 && fba_amazon === 0 && b.fba_traction === 0) continue
+      }
       countRows.push({
         audit_id: auditId,
         base_code: base,

@@ -32,12 +32,17 @@ export async function GET() {
 
 // POST — créer un nouvel audit, avec snapshot initial de tous les base products
 //        qui ont du stock HUB, FBM ou sans préfixe (stock à compter physiquement)
+// audit_type: 'mensuel_ama' (default) | 'settlement_fbm'
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { mois, label, started_by, settlement_id } = body
+    const { mois, label, started_by, settlement_id, audit_type } = body
     if (!mois) return NextResponse.json({ erreur: 'mois requis (YYYY-MM)' }, { status: 400 })
-    const r = await createAuditSnapshot({ mois, label, started_by, settlement_id: settlement_id || null })
+    const r = await createAuditSnapshot({
+      mois, label, started_by,
+      settlement_id: settlement_id || null,
+      audit_type: audit_type || 'mensuel_ama',
+    })
     if (!r.success) return NextResponse.json({ erreur: r.erreur }, { status: 500 })
     return NextResponse.json(r)
   } catch (e: any) {
