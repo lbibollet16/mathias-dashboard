@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { detectVariant } from '@/lib/amazon-inventory'
+import { loadManualMappings } from '@/lib/amazon-mapping'
 
 // GET — détail d'un audit + toutes ses lignes de comptage
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -158,6 +160,73 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         .eq('id', auditId)
       if (error) throw error
       return NextResponse.json({ success: true })
+    }
+
+    // Nettoyer un audit settlement_fbm : supprimer les lignes audit_count des
+    // base_codes qui n'ont eu AUCUNE transaction MFN dans le settlement lié
+    // ET qui n'ont pas encore été comptées (préserve le travail déjà fait).
+    if (body.action === 'cleanup_no_movement') {
+      const { data: audit } = await supabaseAdmin
+        .from('amazon_audits')
+        .select('settlement_id, audit_type')
+        .eq('id', auditId)
+        .single()
+      if (!audit) return NextResponse.json({ erreur: 'Audit introuvable' }, { status: 404 })
+      if (audit.audit_type !== 'settlement_fbm' || !audit.settlement_id) {
+        return NextResponse.json({ erreur: 'Cleanup réservé aux audits settlement_fbm liés à un settlement' }, { status: 400 })
+      }
+      // Bases avec transaction MFN dans le settlement
+      const mfnTxRows: any[] = []
+      let from = 0
+      while (true) {
+        const { data, error } = await supabaseAdmin
+          .from('amazon_transactions')
+          .select('sku, traction_code')
+          .eq('settlement_id', audit.settlement_id)
+          .eq('fulfillment_id', 'MFN')
+          .range(from, from + 999)
+        if (error) break
+        mfnTxRows.push(...(data || []))
+        if (!data || data.length < 1000) break
+        from += 1000
+      }
+      const manualMappings = await loadManualMappings()
+      const basesAvecMouvement = new Set<string>()
+      for (const t of mfnTxRows) {
+        if (!t.sku) continue
+        const manual = manualMappings.get(t.sku)
+        if (manual && manual.length > 0) {
+          for (const m of manual) basesAvecMouvement.add(detectVariant(m.pk_code).base)
+        } else {
+          const tc = t.traction_code || t.sku
+          basesAvecMouvement.add(detectVariant(tc).base)
+        }
+      }
+      // Charger toutes les lignes audit_count
+      const { data: allCounts } = await supabaseAdmin
+        .from('amazon_audit_counts')
+        .select('id, base_code, hub_compte, fbm_compte, sans_prefix_compte')
+        .eq('audit_id', auditId)
+      // À supprimer : pas dans basesAvecMouvement ET aucun comptage saisi
+      const toDelete = (allCounts || []).filter((c: any) => {
+        const dejaCompte = c.hub_compte != null || c.fbm_compte != null || c.sans_prefix_compte != null
+        if (dejaCompte) return false   // préserver le travail déjà fait
+        return !basesAvecMouvement.has(c.base_code)
+      })
+      if (toDelete.length === 0) {
+        return NextResponse.json({ success: true, deleted: 0, kept: (allCounts || []).length, bases_avec_mouvement: basesAvecMouvement.size })
+      }
+      const ids = toDelete.map((c: any) => c.id)
+      // Suppression par lots de 500
+      for (let i = 0; i < ids.length; i += 500) {
+        const batch = ids.slice(i, i + 500)
+        const { error } = await supabaseAdmin.from('amazon_audit_counts').delete().in('id', batch)
+        if (error) throw error
+      }
+      // Mettre à jour snapshot_count
+      const newCount = (allCounts || []).length - toDelete.length
+      await supabaseAdmin.from('amazon_audits').update({ snapshot_count: newCount }).eq('id', auditId)
+      return NextResponse.json({ success: true, deleted: toDelete.length, kept: newCount, bases_avec_mouvement: basesAvecMouvement.size })
     }
 
     // Sinon, c'est un update de ligne de comptage

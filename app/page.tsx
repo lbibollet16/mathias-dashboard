@@ -5503,6 +5503,23 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     } catch (e: any) { alert(e.message) }
   }
 
+  async function nettoyerAuditFbm(auditId: number, settlementId: string) {
+    if (!confirm('Nettoyer cet audit FBM ?\n\nLes lignes des SKU qui n\'ont eu AUCUNE transaction FBM dans ce settlement ET qui ne sont pas encore comptées seront SUPPRIMÉES.\n\nLes lignes déjà comptées sont préservées.')) return
+    try {
+      const r = await fetch(`/api/amazon/audits/${auditId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cleanup_no_movement' })
+      })
+      const j = await r.json()
+      if (j.erreur) { alert(j.erreur); return }
+      alert(`Nettoyage terminé : ${j.deleted} ligne(s) supprimée(s), ${j.kept} ligne(s) conservée(s).\nBases avec mouvement FBM ce settlement : ${j.bases_avec_mouvement}.`)
+      await chargerClosureDetail(settlementId)
+      // Si l'audit est ouvert, le rafraîchir aussi
+      if (openAudit?.id === auditId) await chargerAuditDetail(auditId)
+    } catch (e: any) { alert(e.message) }
+  }
+
   // Quitter la vue audit. Si l'audit ouvert a un settlement_id, on revient
   // directement au settlement et on rafraîchit son détail (pour que le bandeau
   // FBM montre le statut à jour).
@@ -7087,6 +7104,13 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                       style={{background:couleur,color:'#fff',border:'none',borderRadius:8,padding:'10px 16px',fontWeight:800,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
                       {isFini ? '👁 Voir résultat' : '📝 Continuer le comptage'}
                     </button>
+                    {!isClosed && !isFini && (
+                      <button onClick={()=>nettoyerAuditFbm(a.id, s.settlement_id)}
+                        title="Supprime les lignes des SKU sans transaction FBM dans ce settlement (sauf celles déjà comptées)"
+                        style={{background:'transparent',border:`1px solid ${C.blue}`,color:C.blue,borderRadius:8,padding:'10px 14px',fontWeight:700,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                        🧹 Nettoyer (mouvements seulement)
+                      </button>
+                    )}
                     {!isClosed && !isFini && pct > 0 && (
                       <button onClick={()=>finaliserAuditFbmDepuisSettlement(a.id, s.settlement_id)}
                         title="Marque l'audit comme terminé sans rouvrir la vue audit"

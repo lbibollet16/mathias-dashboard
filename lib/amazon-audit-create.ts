@@ -156,21 +156,20 @@ export async function createAuditSnapshot(input: CreateAuditInput): Promise<Crea
         from += 1000
       }
       basesAvecTransactionFbm = new Set<string>()
-      // Résoudre chaque SKU vers ses base_codes (en utilisant les multi-mappings)
+      // Résoudre chaque SKU MFN vers son/ses base_code(s).
+      // Une transaction fulfillment_id='MFN' = forcément FBM, donc on
+      // ajoute la base peu importe la location détectée du pk_code.
       for (const t of mfnTxRows) {
         const sku = t.sku
         if (!sku) continue
         const manual = manualMappings.get(sku)
         if (manual && manual.length > 0) {
           for (const m of manual) {
-            const v = detectVariant(m.pk_code)
-            // Ne garder que si le pk_code mappé est FBM (sinon c'est un FBA via mapping)
-            if (v.location === 'FBM') basesAvecTransactionFbm.add(v.base)
+            basesAvecTransactionFbm.add(detectVariant(m.pk_code).base)
           }
         } else {
           const tc = t.traction_code || sku
-          const v = detectVariant(tc)
-          if (v.location === 'FBM') basesAvecTransactionFbm.add(v.base)
+          basesAvecTransactionFbm.add(detectVariant(tc).base)
         }
       }
     }
