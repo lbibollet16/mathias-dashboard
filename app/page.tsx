@@ -5312,13 +5312,28 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 
   async function chargerRapport(settlementId: string) {
     try {
-      const [r1, r2] = await Promise.all([
+      const [r1, r2, r3, r4] = await Promise.all([
         fetch(`/api/amazon/closure/report?id=${encodeURIComponent(settlementId)}`),
         fetch(`/api/amazon/closure/releve-match?id=${encodeURIComponent(settlementId)}`),
+        fetch(`/api/amazon/closure/lautopak-docs?id=${encodeURIComponent(settlementId)}`),
+        fetch(`/api/amazon/closure/fba-comparison?id=${encodeURIComponent(settlementId)}`),
       ])
-      const [j1, j2] = await Promise.all([r1.json(), r2.json()])
+      const [j1, j2, j3, j4] = await Promise.all([r1.json(), r2.json(), r3.json(), r4.json()])
+      // Charger aussi la liste des audits liés pour la section 4
+      let auditsLies: any[] = []
+      try {
+        const rA = await fetch('/api/amazon/audits')
+        const jA = await rA.json()
+        if (Array.isArray(jA)) auditsLies = jA.filter((a: any) => a.settlement_id === settlementId)
+      } catch {}
       if (!j1.erreur) {
-        setRapportData({ ...j1, releve: !j2?.erreur ? j2 : null })
+        setRapportData({
+          ...j1,
+          releve: !j2?.erreur ? j2 : null,
+          lautopak_docs: !j3?.erreur ? j3 : null,
+          fba_comparison: !j4?.erreur ? j4 : null,
+          audits_lies: auditsLies,
+        })
         setVue('rapport')
       }
     } catch {}
@@ -5351,6 +5366,113 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         ['Généré le', fmtDate(r.genere_le)],
       ]
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sommaire), 'Sommaire')
+
+      // ═══ Workflow v2 — Sections 1-5 ═══
+      if (r.lautopak_docs) {
+        const ld = r.lautopak_docs
+        const docLabels: Record<string, string> = {
+          'ventes': 'Facture VENTES',
+          'note_credit_retours': 'Note crédit RETOURS sellable',
+          'note_credit_pertes': 'Note crédit PERTES / DOMMAGES',
+          'ajust_audit': 'Ajustement INVENTAIRE (audits)',
+        }
+
+        // Feuille 1 — Documents LAUTOPAK
+        const sec1: any[] = [['Type', 'N° facture LAUTOPAK', 'Date', 'Nb lignes', 'Montant CA$']]
+        for (const doc of ld.docs) {
+          sec1.push([
+            docLabels[doc.doc_type] || doc.label,
+            doc.numero_facture || '(non saisi)',
+            doc.date_facture ? fmtDate(doc.date_facture) : '',
+            doc.lignes.length,
+            num2(doc.total),
+          ])
+        }
+        sec1.push([])
+        sec1.push(['Net stock LAUTOPAK total (4 docs)', '', '', '', num2(ld.net_lautopak)])
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sec1), '1 - Documents LAUTOPAK')
+
+        // Feuille 2 — Coûts Amazon
+        const ca = ld.couts_amazon || {}
+        const sec2: any[] = [['Catégorie', 'Montant CA$']]
+        const labels: Record<string,string> = {
+          'A_TOTAL_section_A': 'A — VENTES (hors Doc 1)',
+          'A_ventes_expedition': '   Expédition (Order Shipping)',
+          'A_ventes_taxes_net': '   Taxes net',
+          'B_TOTAL_section_B': 'B — REMBOURSEMENTS (hors Doc 2 cashflow)',
+          'B_remb_depenses_pos': '   Dépenses remboursées (positifs)',
+          'B_remb_depenses_neg': '   Dépenses remboursées (négatifs)',
+          'B_remb_ventes_frais_produit_non_sellable': '   Ventes remboursées : Frais produit non sellable',
+          'B_remb_ventes_expedition': '   Ventes remboursées : Expédition',
+          'C_TOTAL_section_C': 'C — DÉPENSES (= relevé papier section Dépenses)',
+          'C_rabais_promotionnels': '   Rabais promotionnels',
+          'C_frais_fba_stockage': '   Frais Expédié par Amazon — Stockage',
+          'C_frais_fba_autres': '   Frais Expédié par Amazon — Autre',
+          'C_frais_fba_abonnement': '   Frais d\'abonnement',
+          'C_publicite': '   Prix de la publicité',
+          'C_commissions_amazon': '   Commissions Amazon',
+          'C_remboursements_inverses': '   Remboursements inversés (FBA)',
+          'Z_autre_non_classe': 'AUTRE / non classé',
+        }
+        for (const k of Object.keys(labels)) {
+          if (ca[k] !== undefined && Math.abs(Number(ca[k])) >= 0.01) {
+            sec2.push([labels[k], num2(ca[k])])
+          }
+        }
+        sec2.push([])
+        sec2.push(['= TOTAL Coût des ventes Amazon', num2(ld.total_couts_amazon)])
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sec2), '2 - Couts Amazon')
+
+        // Feuille 3 — Balance
+        const sec3 = [
+          ['Élément', 'Montant CA$'],
+          ['Cashflow Doc 1 (Vente Order Principal)', num2(ld.cashflow_docs?.doc1_ventes)],
+          ['Cashflow Doc 2 (Retours sellable, part Refund Principal)', num2(ld.cashflow_docs?.doc2_retours)],
+          ['Cashflow Doc 3 (Pertes, Reim Amazon dans TSV)', num2(ld.cashflow_docs?.doc3_pertes)],
+          ['Doc 4 (Audit) — hors cashflow', 0],
+          [],
+          ['+ Total cashflow documents', num2(ld.cashflow_docs?.total)],
+          ['+ Coût des ventes Amazon (compte agrégé)', num2(ld.total_couts_amazon)],
+          ['= Dépôt bancaire calculé', num2(ld.balance_calcul)],
+          ['Dépôt bancaire réel (TSV settlement)', num2(ld.balance_settlement)],
+          ['Écart', num2((ld.balance_calcul||0) - (ld.balance_settlement||0))],
+          ['Balance OK ?', ld.balance_ok ? 'OUI ✓' : 'NON ⚠'],
+        ]
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sec3), '3 - Balance')
+
+        // Feuille 4 — Audits liés
+        const sec4: any[] = [['Type', 'Libellé', 'Statut', 'Comptés', 'Total', 'Démarré', 'Terminé']]
+        for (const a of (r.audits_lies || [])) {
+          const labelType = a.audit_type === 'settlement_fbm' ? 'FBM (settlement)' :
+                            a.audit_type === 'settlement_fba' ? 'FBA snapshot' :
+                            a.audit_type === 'mensuel_ama' ? 'AMA mensuel' : (a.audit_type || '?')
+          sec4.push([
+            labelType, a.label || '', a.statut === 'termine' ? 'Terminé' : 'En cours',
+            a.nb_comptes || 0, a.nb_total || 0,
+            a.started_at ? fmtDate(a.started_at) : '', a.finished_at ? fmtDate(a.finished_at) : '',
+          ])
+        }
+        if (r.fba_comparison && !r.fba_comparison.erreur_avertissement) {
+          sec4.push([])
+          sec4.push(['Audit FBA auto', `Snapshot ${r.fba_comparison.snapshot_date}`, '', r.fba_comparison.nb_pk_codes_compares, '', '', ''])
+          sec4.push(['  Écarts à réclamer Amazon', `${r.fba_comparison.nb_ecarts} produits`, '', r.fba_comparison.total_ecart_units_abs, '', '', num2(r.fba_comparison.total_ecart_valeur_abs)])
+        }
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sec4), '4 - Audits lies')
+
+        // Feuille 5 — Détail SKU par document
+        const sec5: any[] = [['Document', 'SKU Amazon', 'PKCode', 'Produit', 'Qté', 'Prix unit. CA$', 'Montant CA$', 'Note']]
+        for (const doc of ld.docs) {
+          for (const l of doc.lignes) {
+            sec5.push([
+              docLabels[doc.doc_type] || doc.label,
+              l.sku, l.pk_code || '', l.product_name || '',
+              Number(l.qty || 0), num2(l.prix_unitaire),
+              num2(l.amount), l.notes || '',
+            ])
+          }
+        }
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sec5), '5 - Detail SKU')
+      }
 
       // Relevé de paiement reconstitué
       if (r.releve) {
@@ -8179,9 +8301,227 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 <div><strong>Settlement ID</strong>{r.settlement.settlement_id}</div>
                 <div><strong>Période</strong>{fmtDate(r.settlement.settlement_start)} → {fmtDate(r.settlement.settlement_end)}</div>
                 <div><strong>Date de dépôt</strong>{fmtDate(r.settlement.deposit_date)}</div>
-                <div><strong>Montant Amazon</strong>{fmt$(r.settlement.total_amount)}</div>
-                <div><strong>Facture LAUTOPAK</strong>{r.settlement.lautopak_invoice_ref || '—'} du {fmtDate(r.settlement.lautopak_invoice_date)}</div>
+                <div><strong>Dépôt bancaire</strong>{fmt$(r.settlement.total_amount)}</div>
                 <div><strong>Statut</strong>{r.settlement.closed_at ? `🔒 Fermé le ${fmtDate(r.settlement.closed_at)} par ${r.settlement.closed_by}` : '⏳ En cours'}</div>
+                <div></div>
+              </div>
+
+              {/* ═══════════════ WORKFLOW v2 — 5 SECTIONS POUR LE COMPTABLE ═══════════════ */}
+              {r.lautopak_docs && (() => {
+                const ld = r.lautopak_docs
+                const docLabels: Record<string, { num: string; titre: string }> = {
+                  'ventes':              { num:'1', titre:'Facture VENTES' },
+                  'note_credit_retours': { num:'2', titre:'Note de crédit RETOURS sellable' },
+                  'note_credit_pertes':  { num:'3', titre:'Note de crédit PERTES / DOMMAGES' },
+                  'ajust_audit':         { num:'4', titre:'Ajustement INVENTAIRE (audits)' },
+                }
+                return (
+                  <>
+                    <h2>1. Documents LAUTOPAK émis</h2>
+                    <div style={{fontSize:11,color:'#666',marginBottom:6}}>
+                      Liste des 4 documents (factures + notes de crédit) à saisir dans LAUTOPAK pour ce settlement. Tout ce qui touche à une quantité d'inventaire passe par un de ces documents avec un n° de référence.
+                    </div>
+                    <table>
+                      <thead><tr>
+                        <th style={{width:30}}>#</th>
+                        <th>Type de document</th>
+                        <th>N° facture</th>
+                        <th>Date</th>
+                        <th className="num">Nb lignes</th>
+                        <th className="num">Montant</th>
+                      </tr></thead>
+                      <tbody>
+                        {ld.docs.map((doc: any, i: number) => {
+                          const cfg = docLabels[doc.doc_type] || { num: String(i+1), titre: doc.label }
+                          return (
+                            <tr key={doc.doc_type}>
+                              <td style={{fontWeight:700}}>{cfg.num}</td>
+                              <td>{cfg.titre}</td>
+                              <td style={{fontFamily:'monospace',fontWeight:700}}>{doc.numero_facture || <span style={{color:'#c00'}}>⚠ NON SAISI</span>}</td>
+                              <td>{doc.date_facture ? fmtDate(doc.date_facture) : '—'}</td>
+                              <td className="num">{doc.lignes.length}</td>
+                              <td className="num" style={{fontWeight:800,color:doc.total<0?'#c00':'#000'}}>{fmt$(doc.total)}</td>
+                            </tr>
+                          )
+                        })}
+                        <tr className="tot-row">
+                          <td colSpan={5}>Net stock LAUTOPAK total (4 docs)</td>
+                          <td className="num">{fmt$(ld.net_lautopak||0)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    <h2>2. Coût des ventes Amazon (compte agrégé, sans stock)</h2>
+                    <div style={{fontSize:11,color:'#666',marginBottom:6}}>
+                      Tout ce qui n'implique aucune quantité d'inventaire → compte de charges agrégé. Décomposition reproduit les 3 sections du relevé papier Amazon.
+                    </div>
+                    {(() => {
+                      const ca = ld.couts_amazon || {}
+                      const labels: Record<string,string> = {
+                        'A_ventes_expedition': 'Expédition (Order Shipping)',
+                        'A_ventes_taxes_net': 'Taxes net (Tax + MarketplaceFacilitatorTax)',
+                        'B_remb_depenses_pos': 'Dépenses remboursées (positifs)',
+                        'B_remb_depenses_neg': 'Dépenses remboursées (négatifs)',
+                        'B_remb_ventes_frais_produit_non_sellable': 'Ventes remboursées : Frais produit (non sellable)',
+                        'B_remb_ventes_expedition': 'Ventes remboursées : Expédition',
+                        'C_rabais_promotionnels': 'Rabais promotionnels',
+                        'C_frais_fba_stockage': 'Frais Expédié par Amazon — Stockage',
+                        'C_frais_fba_autres': 'Frais Expédié par Amazon — Autre (RemovalComplete)',
+                        'C_frais_fba_abonnement': 'Frais d\'abonnement',
+                        'C_publicite': 'Prix de la publicité',
+                        'C_commissions_amazon': 'Commissions Amazon',
+                        'C_remboursements_inverses': 'Remboursements inversés (FBA)',
+                      }
+                      const Sec = ({letter, total, color}: any) => (
+                        <tr style={{background:color, fontWeight:800}}>
+                          <td>{letter === 'A' ? 'Section A — VENTES (hors Doc 1)' : letter === 'B' ? 'Section B — REMBOURSEMENTS (hors Doc 2 cashflow)' : 'Section C — DÉPENSES (= relevé papier)'}</td>
+                          <td className="num">{fmt$(Number(total||0))}</td>
+                        </tr>
+                      )
+                      const Sub = ({k}: any) => {
+                        if (ca[k] === undefined || Math.abs(Number(ca[k])) < 0.01) return null
+                        return (
+                          <tr>
+                            <td style={{paddingLeft:24,color:'#666'}}>{labels[k] || k}</td>
+                            <td className="num" style={{color:Number(ca[k])<0?'#c00':'#000'}}>{fmt$(Number(ca[k]))}</td>
+                          </tr>
+                        )
+                      }
+                      return (
+                        <table>
+                          <tbody>
+                            <Sec letter="A" total={ca.A_TOTAL_section_A} color="#e8f0fe" />
+                            <Sub k="A_ventes_expedition" />
+                            <Sub k="A_ventes_taxes_net" />
+                            <Sec letter="B" total={ca.B_TOTAL_section_B} color="#fff8e1" />
+                            <Sub k="B_remb_depenses_pos" />
+                            <Sub k="B_remb_depenses_neg" />
+                            <Sub k="B_remb_ventes_frais_produit_non_sellable" />
+                            <Sub k="B_remb_ventes_expedition" />
+                            <Sec letter="C" total={ca.C_TOTAL_section_C} color="#fce8e6" />
+                            <Sub k="C_rabais_promotionnels" />
+                            <Sub k="C_frais_fba_stockage" />
+                            <Sub k="C_frais_fba_autres" />
+                            <Sub k="C_frais_fba_abonnement" />
+                            <Sub k="C_publicite" />
+                            <Sub k="C_commissions_amazon" />
+                            <Sub k="C_remboursements_inverses" />
+                            {ca.Z_autre_non_classe !== undefined && (
+                              <tr style={{background:'#fff3cd'}}>
+                                <td>⚠ Autre / non classé</td>
+                                <td className="num">{fmt$(Number(ca.Z_autre_non_classe))}</td>
+                              </tr>
+                            )}
+                            <tr className="tot-row">
+                              <td>= TOTAL Coût des ventes Amazon</td>
+                              <td className="num">{fmt$(ld.total_couts_amazon||0)}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      )
+                    })()}
+
+                    <h2>3. Vérification de balance comptable</h2>
+                    <div style={{fontSize:11,color:'#666',marginBottom:6}}>
+                      Le total des cashflows des documents LAUTOPAK + le compte « Coût des ventes Amazon » doit égaler le dépôt bancaire reçu d'Amazon.
+                    </div>
+                    <table>
+                      <tbody>
+                        <tr><td>Cashflow Doc 1 (Vente = Order Principal du TSV)</td><td className="num">{fmt$(ld.cashflow_docs?.doc1_ventes||0)}</td></tr>
+                        <tr><td>Cashflow Doc 2 (Retours sellable = part du Refund Principal)</td><td className="num">{fmt$(ld.cashflow_docs?.doc2_retours||0)}</td></tr>
+                        <tr><td>Cashflow Doc 3 (Pertes = Reim Amazon dans TSV)</td><td className="num">{fmt$(ld.cashflow_docs?.doc3_pertes||0)}</td></tr>
+                        <tr><td><em>Doc 4 (Audit) — mouvement comptable pur, hors cashflow</em></td><td className="num"><em>0,00 $</em></td></tr>
+                        <tr style={{borderTop:'1px solid #000'}}><td>+ Total cashflow documents</td><td className="num" style={{fontWeight:800}}>{fmt$(ld.cashflow_docs?.total||0)}</td></tr>
+                        <tr><td>+ Coût des ventes Amazon (compte agrégé)</td><td className="num">{fmt$(ld.total_couts_amazon||0)}</td></tr>
+                        <tr className="tot-row"><td>= Dépôt bancaire calculé</td><td className="num">{fmt$(ld.balance_calcul||0)}</td></tr>
+                        <tr><td>Dépôt bancaire réel (TSV settlement)</td><td className="num" style={{fontWeight:800}}>{fmt$(ld.balance_settlement||0)}</td></tr>
+                        <tr style={{background:ld.balance_ok?'#e6f4ea':'#fce8e6'}}>
+                          <td style={{fontWeight:800,color:ld.balance_ok?'#080':'#c00'}}>{ld.balance_ok?'✓ Balance OK':'⚠ Écart'}</td>
+                          <td className="num" style={{fontWeight:800,color:ld.balance_ok?'#080':'#c00'}}>{ld.balance_ok?'0,00 $':fmt$(ld.ecart_balance||0)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    <h2>4. Audits liés à ce settlement</h2>
+                    {(!r.audits_lies || r.audits_lies.length === 0) ? (
+                      <div style={{color:'#666',fontStyle:'italic'}}>Aucun audit physique lié à ce settlement.</div>
+                    ) : (
+                      <table>
+                        <thead><tr>
+                          <th>Type</th>
+                          <th>Libellé</th>
+                          <th>Statut</th>
+                          <th className="num">Comptés</th>
+                          <th className="num">Total</th>
+                          <th>Démarré</th>
+                          <th>Terminé</th>
+                        </tr></thead>
+                        <tbody>
+                          {r.audits_lies.map((a: any) => {
+                            const labelType = a.audit_type === 'settlement_fbm' ? 'FBM (settlement)' :
+                                              a.audit_type === 'settlement_fba' ? 'FBA snapshot' :
+                                              a.audit_type === 'mensuel_ama' ? 'AMA mensuel' : a.audit_type
+                            return (
+                              <tr key={a.id}>
+                                <td><strong>{labelType}</strong></td>
+                                <td>{a.label||'—'}</td>
+                                <td>{a.statut === 'termine' ? '✓ Terminé' : '⏳ En cours'}</td>
+                                <td className="num">{a.nb_comptes||0}</td>
+                                <td className="num">{a.nb_total||0}</td>
+                                <td>{a.started_at ? fmtDate(a.started_at) : '—'}</td>
+                                <td>{a.finished_at ? fmtDate(a.finished_at) : '—'}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                    {r.fba_comparison && !r.fba_comparison.erreur_avertissement && (
+                      <div style={{fontSize:11,color:'#666',marginTop:6}}>
+                        <strong>Audit FBA auto</strong> (snapshot {r.fba_comparison.snapshot_date}) :
+                        {r.fba_comparison.nb_ecarts === 0 ? ' ✓ Aucun écart Amazon vs Traction.' : ` ${r.fba_comparison.nb_ecarts} produit${r.fba_comparison.nb_ecarts>1?'s':''} avec écart, ${fmt$(r.fba_comparison.total_ecart_valeur_abs||0)} valeur — à réclamer Amazon.`}
+                      </div>
+                    )}
+
+                    <h2>5. Détail des mouvements par SKU</h2>
+                    <div style={{fontSize:11,color:'#666',marginBottom:6}}>
+                      Liste exhaustive de toutes les lignes des 4 documents LAUTOPAK pour cette période.
+                    </div>
+                    {ld.docs.map((doc: any) => doc.lignes.length === 0 ? null : (
+                      <div key={doc.doc_type} style={{marginBottom:14}}>
+                        <h3>{docLabels[doc.doc_type]?.titre || doc.label} ({doc.lignes.length} lignes — {fmt$(doc.total)})</h3>
+                        <table>
+                          <thead><tr>
+                            <th>SKU Amazon</th>
+                            <th>PKCode Traction</th>
+                            <th>Produit</th>
+                            <th className="num">Qté</th>
+                            <th className="num">Prix unit.</th>
+                            <th className="num">Montant</th>
+                          </tr></thead>
+                          <tbody>
+                            {doc.lignes.map((l: any, i: number) => (
+                              <tr key={l.sku+i}>
+                                <td style={{fontFamily:'monospace',fontWeight:700}}>{l.sku}</td>
+                                <td style={{fontFamily:'monospace',fontSize:10}}>{l.pk_code||'—'}</td>
+                                <td style={{fontSize:11,maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name||''}>{l.product_name||'—'}</td>
+                                <td className="num">{l.qty}</td>
+                                <td className="num">{fmt$(l.prix_unitaire||0)}</td>
+                                <td className="num" style={{color:l.amount<0?'#c00':'#000'}}>{fmt$(l.amount)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
+                  </>
+                )
+              })()}
+
+              {/* ═══════════════ ANCIENNES SECTIONS (rétrocompat workflow v1) ═══════════════ */}
+              <div style={{marginTop:30,paddingTop:14,borderTop:'2px solid #ccc',fontSize:11,color:'#666'}}>
+                <em>Les sections suivantes sont conservées pour rétrocompatibilité avec le workflow v1.
+                Pour ce settlement géré en v2, elles dupliquent partiellement les sections 1-5 ci-dessus.</em>
               </div>
 
               {r.releve && (() => {
