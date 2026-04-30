@@ -5479,6 +5479,43 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     await chargerAuditDetail(auditId)
   }
 
+  async function finaliserAuditFbmDepuisSettlement(auditId: number, settlementId: string) {
+    if (!confirm('Finaliser cet audit FBM ? Il passera en statut « terminé » et tu ne pourras plus modifier les comptages sans le rouvrir.')) return
+    try {
+      await fetch(`/api/amazon/audits/${auditId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'finalize', finished_by: profil?.email || profil?.nom || 'Inconnu' })
+      })
+      await chargerClosureDetail(settlementId)
+    } catch (e: any) { alert(e.message) }
+  }
+
+  async function reouvrirAuditFbmDepuisSettlement(auditId: number, settlementId: string) {
+    if (!confirm('Rouvrir cet audit FBM pour modifier les comptages ?')) return
+    try {
+      await fetch(`/api/amazon/audits/${auditId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reopen' })
+      })
+      await chargerClosureDetail(settlementId)
+    } catch (e: any) { alert(e.message) }
+  }
+
+  // Quitter la vue audit. Si l'audit ouvert a un settlement_id, on revient
+  // directement au settlement et on rafraîchit son détail (pour que le bandeau
+  // FBM montre le statut à jour).
+  async function retourDepuisAudit(auditOuvert: any) {
+    const sid = auditOuvert?.settlement_id
+    setOpenAudit(null)
+    setAuditCounts([])
+    if (sid) {
+      setVue('fermeture')
+      await chargerClosureDetail(sid)
+    }
+  }
+
   async function saisirDocLautopak(settlement_id: string, doc_type: string, payload: { numero_facture?: string; date_facture?: string; montant_total?: number; notes?: string }) {
     try {
       const r = await fetch('/api/amazon/closure/lautopak-docs', {
@@ -7019,10 +7056,26 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                       Audit <strong>{a.label}</strong> • {a.nb_comptes||0}/{a.nb_total||0} produits comptés ({pct}%)
                     </div>
                   </div>
-                  <button onClick={()=>ouvrirAuditFbmSettlement(a.id)}
-                    style={{background:couleur,color:'#fff',border:'none',borderRadius:8,padding:'10px 16px',fontWeight:800,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
-                    {isFini ? '👁 Voir résultat' : '📝 Continuer le comptage'}
-                  </button>
+                  <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                    <button onClick={()=>ouvrirAuditFbmSettlement(a.id)}
+                      style={{background:couleur,color:'#fff',border:'none',borderRadius:8,padding:'10px 16px',fontWeight:800,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                      {isFini ? '👁 Voir résultat' : '📝 Continuer le comptage'}
+                    </button>
+                    {!isClosed && !isFini && pct > 0 && (
+                      <button onClick={()=>finaliserAuditFbmDepuisSettlement(a.id, s.settlement_id)}
+                        title="Marque l'audit comme terminé sans rouvrir la vue audit"
+                        style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'10px 16px',fontWeight:800,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                        ✓ Finaliser
+                      </button>
+                    )}
+                    {!isClosed && isFini && (
+                      <button onClick={()=>reouvrirAuditFbmDepuisSettlement(a.id, s.settlement_id)}
+                        title="Rouvre l'audit pour modifier les comptages"
+                        style={{background:'transparent',border:`1px solid ${C.yellow}`,color:C.yellow,borderRadius:8,padding:'10px 14px',fontWeight:700,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                        ↩ Rouvrir
+                      </button>
+                    )}
+                  </div>
                 </div>
               )
             })()}
@@ -10074,9 +10127,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   </div>
                 </div>
                 <div style={{display:'flex',gap:8}}>
-                  <button onClick={()=>{setOpenAudit(null); setAuditCounts([])}}
+                  <button onClick={()=>retourDepuisAudit(openAudit)}
+                    title={openAudit?.settlement_id ? `Retour au settlement ${openAudit.settlement_id}` : 'Retour à la liste des audits'}
                     style={{background:'transparent',border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12,color:sub}}>
-                    ← Retour
+                    {openAudit?.settlement_id ? '← Retour au settlement' : '← Retour'}
                   </button>
                   <button onClick={()=>exporterFeuilleComptage('tout')}
                     title="Génère un CSV avec colonnes vides pour comptage manuel — tous les SKU avec stock attendu"
