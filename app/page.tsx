@@ -6831,11 +6831,18 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                         Le reste (commissions, frais FBA, pub…) va dans le compte agrégé « Coûts Amazon » au rapport final.
                       </div>
                     </div>
-                    <button onClick={()=>chargerClosureDetail(s.settlement_id)} disabled={closureLoading}
-                      title="Recalculer les 4 documents (utile après ajout d'un multi-mapping ou modification d'un audit FBM)"
-                      style={{background:closureLoading?bdr:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:closureLoading?'default':'pointer',fontSize:12,whiteSpace:'nowrap'}}>
-                      {closureLoading ? '⏳ Calcul...' : '🔄 Recalculer'}
-                    </button>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                      <button onClick={()=>chargerRapport(s.settlement_id)}
+                        title="Ouvrir le rapport comptable imprimable (PDF + Excel)"
+                        style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                        📊 Voir rapport
+                      </button>
+                      <button onClick={()=>chargerClosureDetail(s.settlement_id)} disabled={closureLoading}
+                        title="Recalculer les 4 documents (utile après ajout d'un multi-mapping ou modification d'un audit FBM)"
+                        style={{background:closureLoading?bdr:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:closureLoading?'default':'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                        {closureLoading ? '⏳ Calcul...' : '🔄 Recalculer'}
+                      </button>
+                    </div>
                   </div>
 
                   {/* Balance en bandeau — équation cashflow = dépôt bancaire */}
