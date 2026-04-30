@@ -8632,14 +8632,21 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                       <tbody>
                         {ld.docs.map((doc: any, i: number) => {
                           const cfg = docLabels[doc.doc_type] || { num: String(i+1), titre: doc.label }
+                          const isVide = doc.lignes.length === 0 || Math.abs(doc.total) < 0.01
                           return (
                             <tr key={doc.doc_type}>
                               <td style={{fontWeight:700}}>{cfg.num}</td>
                               <td>{cfg.titre}</td>
-                              <td style={{fontFamily:'monospace',fontWeight:700}}>{doc.numero_facture || <span style={{color:'#c00'}}>⚠ NON SAISI</span>}</td>
-                              <td>{doc.date_facture ? fmtDate(doc.date_facture) : '—'}</td>
+                              <td style={{fontFamily:'monospace',fontWeight:700}}>
+                                {doc.numero_facture
+                                  ? doc.numero_facture
+                                  : isVide
+                                    ? <span style={{color:'#080'}}>✓ Sans objet</span>
+                                    : <span style={{color:'#c00'}}>⚠ NON SAISI</span>}
+                              </td>
+                              <td>{doc.date_facture ? fmtDate(doc.date_facture) : (isVide ? '—' : '—')}</td>
                               <td className="num">{doc.lignes.length}</td>
-                              <td className="num" style={{fontWeight:800,color:doc.total<0?'#c00':'#000'}}>{fmt$(doc.total)}</td>
+                              <td className="num" style={{fontWeight:800,color:isVide?'#888':doc.total<0?'#c00':'#000'}}>{fmt$(doc.total)}</td>
                             </tr>
                           )
                         })}
