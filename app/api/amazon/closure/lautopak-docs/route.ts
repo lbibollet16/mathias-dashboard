@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { loadManualMappings } from '@/lib/amazon-mapping'
+import { balanceLignes } from '@/lib/amazon-balance'
 
 // GET /api/amazon/closure/lautopak-docs?id=XXX
 //
@@ -109,6 +110,9 @@ export async function GET(req: NextRequest) {
     const ventesLignes = [...ventesBySku.values()]
       .map(l => ({ ...l, prix_unitaire: l.qty > 0 ? Number((l.amount / l.qty).toFixed(2)) : 0 }))
       .sort((a, b) => b.amount - a.amount)
+    // Équilibrage : prix unitaire arrondi à 0,10 $, somme(qty × prix) = total exact
+    const ventesTotalBrut = Number(ventesLignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
+    const ventesBalance = balanceLignes(ventesLignes, ventesTotalBrut)
     const ventesTotal = Number(ventesLignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
 
     // ─── DOC 2 — NOTE CRÉDIT RETOURS SELLABLE ──────────────────────────────
@@ -158,6 +162,9 @@ export async function GET(req: NextRequest) {
       })
     }
     retoursLignes.sort((a, b) => a.amount - b.amount)
+    // Équilibrage : prix unitaire arrondi à 0,10 $ (signe négatif conservé pour note de crédit)
+    const retoursTotalBrut = Number(retoursLignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
+    const retoursBalance = balanceLignes(retoursLignes, retoursTotalBrut)
     const retoursTotal = Number(retoursLignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
 
     // ─── DOC 3 — NOTE CRÉDIT PERTES/DOMMAGES ───────────────────────────────
@@ -190,6 +197,9 @@ export async function GET(req: NextRequest) {
       qty: l.qty,
       prix_unitaire: l.qty > 0 ? Number((Math.abs(l.amount) / l.qty).toFixed(2)) : 0,
     })).sort((a, b) => a.amount - b.amount)
+    // Équilibrage : prix unitaire arrondi à 0,10 $
+    const pertesTotalBrut = Number(pertesLignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
+    const pertesBalance = balanceLignes(pertesLignes, pertesTotalBrut)
     const pertesTotal = Number(pertesLignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
 
     // ─── DOC 4 — AJUSTEMENT INVENTAIRE (écarts audits) ─────────────────────
@@ -389,6 +399,12 @@ export async function GET(req: NextRequest) {
       balance_settlement: depotBancaire,
       balance_ok: balanceOk,
       ecart_balance: Number((balanceCalcul - depotBancaire).toFixed(2)),
+      // Info équilibrage des prix unitaires (transparence pour debug)
+      balance_info: {
+        ventes: ventesBalance,
+        retours: retoursBalance,
+        pertes: pertesBalance,
+      },
     })
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message || String(e) }, { status: 500 })
