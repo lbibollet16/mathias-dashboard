@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { SkuResolver } from '@/lib/amazon-sku'
 import { syncTractionFeed } from '@/lib/amazon-traction-sync'
 import { createAuditSnapshot } from '@/lib/amazon-audit-create'
+import { createTractionSnapshot } from '@/lib/amazon-traction-snapshot'
 
 // POST multipart/form-data — upload d'un fichier Amazon.
 // Auto-détection du type via les colonnes d'en-tête:
@@ -170,13 +171,22 @@ async function handlePayments(objs: Record<string, string>[], fileName: string, 
 
   // ─── AUTO : gel de l'inventaire via création d'un audit lié au settlement ──
   // 1. Sync le feed Traction pour avoir les données les plus fraîches
-  // 2. Crée un audit lié à ce settlement (skip si déjà existant)
+  // 2. Photo (snapshot) figée de l'inventaire Traction pour ce settlement
+  //    → garantit que les calculs ne bougent pas si Traction est resync ensuite
+  // 3. Crée un audit lié à ce settlement (skip si déjà existant)
   let auditResult: any = null
   let tractionSync: any = null
+  let tractionSnapshot: any = null
   try {
     tractionSync = await syncTractionFeed()
   } catch (e: any) {
     tractionSync = { success: false, erreur: e.message }
+  }
+  // Photo Traction figée — APRÈS la sync pour avoir les chiffres frais
+  try {
+    tractionSnapshot = await createTractionSnapshot(settlement_id)
+  } catch (e: any) {
+    tractionSnapshot = { success: false, erreur: e.message }
   }
   try {
     // Mois = celui du deposit_date (fallback settlement_end)
@@ -203,6 +213,7 @@ async function handlePayments(objs: Record<string, string>[], fileName: string, 
     transactions_inserted: inserted,
     unresolved_sku: unresolved,
     traction_sync: tractionSync,
+    traction_snapshot: tractionSnapshot,
     audit: auditResult,
   }
 }

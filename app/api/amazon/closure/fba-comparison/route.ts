@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { detectVariant } from '@/lib/amazon-inventory'
 import { loadManualMappings, distributeToBases } from '@/lib/amazon-mapping'
+import { loadTractionForSettlement } from '@/lib/amazon-traction-snapshot'
 
 // GET /api/amazon/closure/fba-comparison?id=XXX
 //
@@ -81,20 +82,8 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 4) Stock FBA Traction (somme par pk_code)
-    const tractionRows: any[] = []
-    let f = 0
-    while (true) {
-      const { data, error } = await supabaseAdmin
-        .from('traction_amazon_lignes')
-        .select('pk_code, qty_minus_reserved, prix_coutant, desc_fra')
-        .eq('code_ligne', 'AMA')
-        .range(f, f + 999)
-      if (error) throw error
-      tractionRows.push(...(data || []))
-      if (!data || data.length < 1000) break
-      f += 1000
-    }
+    // 4) Stock FBA Traction (somme par pk_code) — depuis snapshot figé du settlement
+    const tractionRows = await loadTractionForSettlement(s.settlement_id, { code_ligne_in: ['AMA'] })
     const fbaTractionByPk = new Map<string, { qty: number; coutant: number; desc: string | null }>()
     for (const t of tractionRows) {
       const v = detectVariant(t.pk_code)

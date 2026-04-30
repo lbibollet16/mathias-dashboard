@@ -5,6 +5,7 @@
 import { supabaseAdmin } from './supabase'
 import { detectVariant } from './amazon-inventory'
 import { loadManualMappings, distributeToBases } from './amazon-mapping'
+import { loadTractionForSettlement } from './amazon-traction-snapshot'
 
 export interface CreateAuditInput {
   mois: string              // YYYY-MM
@@ -64,21 +65,11 @@ export async function createAuditSnapshot(input: CreateAuditInput): Promise<Crea
     if (cErr) throw cErr
     const auditId = created.id
 
-    // Charger uniquement la ligne AMA (audit physique = stock comptable Amazon).
-    // FBA et FBM sont des sous-comptes, l'AMA contient le total à compter.
-    const tractionRows: any[] = []
-    let from = 0
-    while (true) {
-      const { data, error } = await supabaseAdmin
-        .from('traction_amazon_lignes')
-        .select('pk_code, qty_minus_reserved, prix_coutant, desc_fra')
-        .eq('code_ligne', 'AMA')
-        .range(from, from + 999)
-      if (error) throw error
-      tractionRows.push(...(data || []))
-      if (!data || data.length < 1000) break
-      from += 1000
-    }
+    // Charger l'inventaire Traction (ligne AMA seulement) DEPUIS LE SNAPSHOT
+    // figé du settlement — garantit que les valeurs théoriques de l'audit
+    // ne bougent pas si Traction est resync entre l'import et l'audit.
+    // Si pas de settlement_id ou pas de snapshot → fallback sur live.
+    const tractionRows = await loadTractionForSettlement(input.settlement_id || null, { code_ligne_in: ['AMA'] })
 
     // Dernier snapshot FBA Amazon
     const { data: snapDates } = await supabaseAdmin
