@@ -7021,8 +7021,27 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   </details>
 
                   {tousSaisis && d.balance_ok && (
-                    <div style={{marginTop:10,padding:'10px 14px',background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}`,borderRadius:8,fontSize:12,color:C.green,fontWeight:700}}>
-                      ✅ Tous les documents sont saisis et la balance correspond au dépôt bancaire — settlement prêt à fermer.
+                    <div style={{marginTop:10,padding:'12px 14px',background:dark?'#0d2a18':'#e6f4ea',border:`2px solid ${C.green}`,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,flexWrap:'wrap'}}>
+                      <div style={{fontSize:12,color:C.green,fontWeight:700,flex:1,minWidth:200}}>
+                        ✅ Tous les documents sont saisis et la balance correspond au dépôt bancaire — settlement prêt à fermer.
+                      </div>
+                      {!closureDetail.is_closed && (
+                        <button onClick={()=>{if(confirm('Fermer définitivement ce settlement ? Il passera en lecture seule.')) validerEtape(s.settlement_id,'close')}}
+                          style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'10px 18px',fontWeight:800,cursor:'pointer',fontSize:13,whiteSpace:'nowrap'}}>
+                          🔒 Fermer le settlement
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {closureDetail.is_closed && (
+                    <div style={{marginTop:10,padding:'12px 14px',background:dark?'#0d2a18':'#e6f4ea',border:`2px solid ${C.green}`,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,flexWrap:'wrap'}}>
+                      <div style={{fontSize:12,color:C.green,fontWeight:700}}>
+                        🔒 Settlement fermé le {fmtDate(s.closed_at)} par {s.closed_by} — lecture seule.
+                      </div>
+                      <button onClick={()=>{if(confirm('Rouvrir ce settlement ?')) validerEtape(s.settlement_id,'reopen')}}
+                        style={{background:'transparent',border:`1px solid ${C.yellow}`,color:C.yellow,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                        ↩ Rouvrir
+                      </button>
                     </div>
                   )}
                 </div>
