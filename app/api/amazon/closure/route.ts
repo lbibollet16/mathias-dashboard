@@ -101,6 +101,20 @@ export async function GET(req: NextRequest) {
       .select('id', { count: 'exact', head: true })
       .eq('settlement_id', s.settlement_id)
 
+    // Customer Returns dans la période 60j glissants finissant à settlement_end
+    let customerReturnsCount = 0
+    if (endDate) {
+      const dt60 = new Date(endDate)
+      dt60.setDate(dt60.getDate() - 60)
+      const dt60Iso = dt60.toISOString()
+      const { count: crCount } = await supabaseAdmin
+        .from('amazon_customer_returns')
+        .select('id', { count: 'exact', head: true })
+        .gte('return_date', dt60Iso)
+        .lte('return_date', endDate + 'T23:59:59Z')
+      customerReturnsCount = crCount || 0
+    }
+
     const fichiers_importes = {
       payments: {
         imported: (paymentsCount || 0) > 0,
@@ -448,6 +462,7 @@ export async function GET(req: NextRequest) {
       },
       steps: [step1, step2, step3, step4, step5, step6],
       fichiers_importes,
+      customer_returns_count: customerReturnsCount,
       can_close: allDone && !isClosed,
       is_closed: isClosed,
     })

@@ -4981,6 +4981,8 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [lautopakDocs, setLautopakDocs] = useState<any>(null)
   const [docDetailModal, setDocDetailModal] = useState<{ doc_type: string } | null>(null)
   const [docInputs, setDocInputs] = useState<Record<string, { numero?: string; date?: string; notes?: string }>>({})
+  // Audit FBA auto (comparaison FBA Amazon vs FBA Traction)
+  const [fbaComparison, setFbaComparison] = useState<any>(null)
   const [releveRembStock, setReleveRembStock] = useState<Record<string,string>>({})  // saisie par settlement_id
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
   const [expandedPk, setExpandedPk] = useState<Record<string, boolean>>({})
@@ -5210,6 +5212,12 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           const rDocs = await fetch(`/api/amazon/closure/lautopak-docs?id=${encodeURIComponent(settlementId)}`)
           const jDocs = await rDocs.json()
           if (!jDocs.erreur) setLautopakDocs(jDocs)
+        } catch {}
+        // Audit FBA auto (comparaison Amazon vs Traction)
+        try {
+          const rFba = await fetch(`/api/amazon/closure/fba-comparison?id=${encodeURIComponent(settlementId)}`)
+          const jFba = await rFba.json()
+          if (!jFba.erreur) setFbaComparison(jFba)
         } catch {}
       }
     } catch {}
@@ -6595,31 +6603,129 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               )
             })()}
 
-            {/* Bandeau "📁 Fichiers importés" — les 3 fichiers requis pour ce settlement */}
+            {/* Bloc « Audit FBA auto » — comparaison FBA Amazon vs FBA Traction */}
+            {fbaComparison && !fbaComparison.erreur_avertissement && (() => {
+              const fc = fbaComparison
+              const hasEcart = fc.nb_ecarts > 0
+              return (
+                <div style={{background:card,border:`2px solid ${hasEcart?C.yellow:C.green}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8,marginBottom:hasEcart?10:0}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:800}}>🤖 Audit FBA auto (comparaison Amazon vs Traction)</div>
+                      <div style={{fontSize:11,color:sub,marginTop:2,lineHeight:1.5}}>
+                        Snapshot Amazon du <strong>{fc.snapshot_date}</strong> comparé à ce que dit Traction sur les pk_codes FBA-xxx.
+                        {' '}{fc.nb_pk_codes_compares} pk_codes comparés, tolérance ±1 unité par produit.
+                      </div>
+                    </div>
+                    <div style={{textAlign:'right'}}>
+                      {hasEcart ? (
+                        <>
+                          <div style={{fontSize:11,color:sub}}>Écarts à investiguer</div>
+                          <div style={{fontSize:18,fontWeight:900,color:C.yellow}}>{fc.nb_ecarts} produit{fc.nb_ecarts>1?'s':''}</div>
+                          <div style={{fontSize:11,color:C.yellow,fontWeight:700}}>{fmt$(fc.total_ecart_valeur_abs||0)} valeur</div>
+                        </>
+                      ) : (
+                        <div style={{fontSize:14,fontWeight:900,color:C.green}}>✓ Aucun écart</div>
+                      )}
+                    </div>
+                  </div>
+                  {hasEcart && (
+                    <details>
+                      <summary style={{cursor:'pointer',fontSize:11,color:C.blue,fontWeight:700,padding:'4px 0'}}>
+                        ▾ Voir le détail des {fc.nb_ecarts} écart{fc.nb_ecarts>1?'s':''}
+                      </summary>
+                      <div style={{maxHeight:300,overflow:'auto',marginTop:6,border:`1px solid ${bdr}`,borderRadius:6}}>
+                        <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                          <thead style={{position:'sticky',top:0,background:thBg,zIndex:1}}>
+                            <tr>
+                              <th style={{padding:'6px 8px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Pk_code</th>
+                              <th style={{padding:'6px 8px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
+                              <th style={{padding:'6px 8px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Produit</th>
+                              <th style={{padding:'6px 8px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Qté Amazon</th>
+                              <th style={{padding:'6px 8px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Qté Traction</th>
+                              <th style={{padding:'6px 8px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Δ</th>
+                              <th style={{padding:'6px 8px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Valeur</th>
+                              <th style={{padding:'6px 8px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {fc.ecarts.map((e: any, i: number) => (
+                              <tr key={e.pk_code+i} style={{borderBottom:`1px solid ${bdr}`}}>
+                                <td style={{padding:'5px 8px',fontFamily:'monospace',fontWeight:700}}>{e.pk_code}</td>
+                                <td style={{padding:'5px 8px',fontFamily:'monospace',fontSize:10,color:sub}}>{e.sku_amazon||'—'}</td>
+                                <td style={{padding:'5px 8px',fontSize:10,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={e.product_name||''}>{e.product_name||'—'}</td>
+                                <td style={{padding:'5px 8px',textAlign:'right'}}>{e.qty_amazon}</td>
+                                <td style={{padding:'5px 8px',textAlign:'right'}}>{e.qty_traction}</td>
+                                <td style={{padding:'5px 8px',textAlign:'right',fontWeight:800,color:e.ecart_units<0?C.red:C.yellow}}>{e.ecart_units>0?'+':''}{e.ecart_units}</td>
+                                <td style={{padding:'5px 8px',textAlign:'right',fontFamily:'monospace',fontWeight:700,color:e.valeur_ecart<0?C.red:C.yellow}}>{fmt$(e.valeur_ecart)}</td>
+                                <td style={{padding:'5px 8px',fontSize:10,color:e.ecart_units<0?C.red:sub}}>{e.action_recommandee}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{fontSize:10,color:sub,marginTop:6,lineHeight:1.5,fontStyle:'italic'}}>
+                        💡 Δ négatif = Amazon dit avoir <strong>moins</strong> que Traction → unités probablement perdues, à réclamer Amazon (case Seller Central).
+                        Δ positif = Amazon dit avoir <strong>plus</strong> que Traction → vérifier qu'aucun pack n'est mal mappé (multi-mapping).
+                      </div>
+                    </details>
+                  )}
+                </div>
+              )
+            })()}
+
+            {/* Bandeau "📁 Fichiers importés" — les 4 fichiers requis pour ce settlement */}
             {closureDetail.fichiers_importes && (() => {
               const f = closureDetail.fichiers_importes
-              const card = (label: string, ok: boolean, detail: string, sublabel?: string) => (
-                <div style={{flex:1,minWidth:180,background:ok?(dark?'#0d2a18':'#e6f4ea'):(dark?'#2b1113':'#fce8e6'),border:`2px solid ${ok?C.green:C.red}`,borderRadius:8,padding:'10px 12px'}}>
-                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>{sublabel||label}</div>
+              // Calcul des plages exactes à exporter dans Seller Central
+              const settEnd = s.settlement_end ? new Date(s.settlement_end) : new Date()
+              const settStart = s.settlement_start ? new Date(s.settlement_start) : new Date()
+              const d60avant = new Date(settEnd); d60avant.setDate(d60avant.getDate() - 60)
+              const fmtDateFr = (d: Date) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`
+              const periodeSettlement = `${fmtDateFr(settStart)} → ${fmtDateFr(settEnd)}`
+              const periode60j = `${fmtDateFr(d60avant)} → ${fmtDateFr(settEnd)}`
+
+              const card = (label: string, ok: boolean, detail: string, sublabel: string, dates: string) => (
+                <div style={{flex:1,minWidth:200,background:ok?(dark?'#0d2a18':'#e6f4ea'):(dark?'#2b1113':'#fce8e6'),border:`2px solid ${ok?C.green:C.red}`,borderRadius:8,padding:'10px 12px'}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>{sublabel}</div>
                   <div style={{fontSize:13,fontWeight:900,color:ok?C.green:C.red,marginTop:2}}>
                     {ok ? '✅ Importé' : '❌ Manquant'}
                   </div>
                   <div style={{fontSize:10,color:sub,marginTop:2}}>{detail}</div>
+                  {!ok && (
+                    <div style={{marginTop:6,padding:'5px 8px',background:dark?'#1a1a1a':'#fff',border:`1px dashed ${C.yellow}`,borderRadius:5,fontSize:10,color:C.yellow,fontWeight:700,fontFamily:'monospace'}}>
+                      📅 {dates}
+                    </div>
+                  )}
                 </div>
               )
               return (
                 <div style={{background:dark?'#0f0f0f':'#fafbfc',border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',marginBottom:10}}>
-                  <div style={{fontSize:11,fontWeight:800,color:sub,textTransform:'uppercase',marginBottom:8}}>📁 Fichiers importés pour ce settlement</div>
-                  <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                    {card('Payments', f.payments.imported, f.payments.imported ? `${f.payments.count} lignes de transactions` : 'Aucune transaction — réimporte le settlement TSV', '1️⃣ Payments (TSV)')}
-                    {card('FBA Inv.', f.fba_inventory.imported, f.fba_inventory.imported ? `Snapshot ${f.fba_inventory.snapshot_date} • ${f.fba_inventory.count} SKU${f.fba_inventory.dans_periode ? '' : ' ⚠ hors période'}` : 'Aucun snapshot FBA — importe le CSV "FBA Inventory"', '2️⃣ FBA Inventory')}
-                    {card('Reimb.', f.reimbursements.imported, f.reimbursements.imported ? `${f.reimbursements.count} remboursements liés` : 'Aucun reimbursement attribué — importe le CSV "Reimbursements"', '3️⃣ Reimbursements (CSV)')}
+                  <div style={{fontSize:11,fontWeight:800,color:sub,textTransform:'uppercase',marginBottom:8,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
+                    <span>📁 Fichiers requis pour fermer ce settlement</span>
+                    <span style={{fontSize:10,color:sub,fontWeight:400,textTransform:'none'}}>Période settlement : <strong style={{color:C.blue}}>{periodeSettlement}</strong></span>
                   </div>
-                  {(!f.payments.imported || !f.fba_inventory.imported || !f.reimbursements.imported) && (
-                    <div style={{marginTop:8,fontSize:11,color:C.yellow}}>
-                      💡 Va dans 📥 Import pour charger les fichiers manquants. Toutes les étapes du workflow reposent sur ces 3 fichiers.
-                    </div>
-                  )}
+                  <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:8}}>
+                    {card('Payments', f.payments.imported,
+                      f.payments.imported ? `${f.payments.count} transactions` : 'Settlement → Payments → All Statements',
+                      '1️⃣ Settlement TSV',
+                      periodeSettlement)}
+                    {card('FBA Inv.', f.fba_inventory.imported,
+                      f.fba_inventory.imported ? `Snapshot ${f.fba_inventory.snapshot_date} • ${f.fba_inventory.count} SKU` : 'Inventory → All Inventory → snapshot du jour',
+                      '2️⃣ FBA Inventory',
+                      `Snapshot du jour (${fmtDateFr(new Date())})`)}
+                    {card('Reimb.', f.reimbursements.imported,
+                      f.reimbursements.imported ? `${f.reimbursements.count} remboursements liés` : 'Payments → Reimbursements (60 derniers jours)',
+                      '3️⃣ Reimbursements CSV',
+                      periode60j)}
+                    {card('Customer Returns', !!closureDetail.customer_returns_count,
+                      closureDetail.customer_returns_count ? `${closureDetail.customer_returns_count} retours dans la période` : 'Reports → FBA → Customer Concessions → Returns',
+                      '4️⃣ FBA Customer Returns',
+                      periode60j)}
+                  </div>
+                  <div style={{marginTop:8,padding:'8px 10px',background:dark?'#1a233a':'#e8f0fe',border:`1px solid ${C.blue}`,borderRadius:6,fontSize:11,color:C.blue,lineHeight:1.5}}>
+                    📋 <strong>Pour télécharger les rapports :</strong> connecte-toi à Seller Central → utilise les chemins ci-dessus → filtre par les dates indiquées en jaune → télécharge en TSV/CSV → glisse-dépose dans <strong>📥 Import</strong> de l'onglet Amazon. Le système détecte automatiquement le type.
+                  </div>
                 </div>
               )
             })()}
