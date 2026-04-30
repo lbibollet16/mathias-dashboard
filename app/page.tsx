@@ -6411,25 +6411,30 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     </div>
                   </div>
 
-                  {/* Balance en bandeau */}
-                  <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:8,marginBottom:12,padding:10,background:dark?'#0d0d0d':'#fafbfc',borderRadius:8,border:`1px solid ${bdr}`}}>
-                    <div>
-                      <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>Net LAUTOPAK</div>
-                      <div style={{fontSize:16,fontWeight:900,color:C.blue}}>{fmt$(d.net_lautopak||0)}</div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>+ Coûts Amazon</div>
-                      <div style={{fontSize:16,fontWeight:900,color:d.total_couts_amazon<0?C.red:C.green}}>{fmt$(d.total_couts_amazon||0)}</div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>= Calcul</div>
-                      <div style={{fontSize:16,fontWeight:900}}>{fmt$(d.balance_calcul||0)}</div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>Dépôt bancaire (cible)</div>
-                      <div style={{fontSize:16,fontWeight:900,color:d.balance_ok?C.green:C.red}}>
-                        {fmt$(d.balance_settlement||0)} {d.balance_ok ? '✓' : `⚠ écart ${fmt$(d.ecart_balance||0)}`}
+                  {/* Balance en bandeau — équation cashflow = dépôt bancaire */}
+                  <div style={{padding:10,background:dark?'#0d0d0d':'#fafbfc',borderRadius:8,border:`1px solid ${bdr}`,marginBottom:12}}>
+                    <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6}}>Équation comptable (cashflow)</div>
+                    <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(5,1fr)',gap:8}}>
+                      <div>
+                        <div style={{fontSize:9,fontWeight:700,color:sub}}>Cashflow Doc 1+2+3</div>
+                        <div style={{fontSize:14,fontWeight:900,color:C.blue}}>{fmt$(d.cashflow_docs?.total||0)}</div>
                       </div>
+                      <div style={{fontSize:18,fontWeight:900,color:sub,textAlign:'center',alignSelf:'center'}}>+</div>
+                      <div>
+                        <div style={{fontSize:9,fontWeight:700,color:sub}}>Coûts Amazon</div>
+                        <div style={{fontSize:14,fontWeight:900,color:d.total_couts_amazon<0?C.red:C.green}}>{fmt$(d.total_couts_amazon||0)}</div>
+                      </div>
+                      <div style={{fontSize:18,fontWeight:900,color:sub,textAlign:'center',alignSelf:'center'}}>=</div>
+                      <div>
+                        <div style={{fontSize:9,fontWeight:700,color:sub}}>Dépôt bancaire</div>
+                        <div style={{fontSize:14,fontWeight:900,color:d.balance_ok?C.green:C.red}}>
+                          {fmt$(d.balance_settlement||0)} {d.balance_ok ? '✓' : `⚠ ${fmt$(d.ecart_balance||0)}`}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{fontSize:10,color:sub,marginTop:6,fontStyle:'italic'}}>
+                      Doc 4 (Ajust audit) = mouvement comptable pur, hors cashflow.
+                      Net stock LAUTOPAK total (4 docs) = <strong>{fmt$(d.net_lautopak||0)}</strong>
                     </div>
                   </div>
 

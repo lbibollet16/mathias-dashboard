@@ -193,16 +193,13 @@ export async function GET(req: NextRequest) {
     const pertesTotal = Number(pertesLignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
 
     // ─── DOC 4 — AJUSTEMENT INVENTAIRE (écarts audits) ─────────────────────
-    // 1. Audit FBM/FBA lié à ce settlement (audit_type='settlement_fbm')
-    // 2. Audit AMA mensuel du mois courant (si settlement chevauche le mois)
-    const settlementMonth = s.settlement_end
-      ? String(s.settlement_end).slice(0, 7)
-      : new Date().toISOString().slice(0, 7)
-
+    // SEULEMENT les audits liés explicitement à CE settlement
+    // (audit_type='settlement_fbm' ou 'settlement_fba'). L'audit AMA mensuel
+    // global a son propre cycle et n'est PAS inclus ici.
     const { data: auditsLies } = await supabaseAdmin
       .from('amazon_audits')
       .select('id, audit_type, mois, label, statut')
-      .or(`settlement_id.eq.${id},and(audit_type.eq.mensuel_ama,mois.eq.${settlementMonth})`)
+      .eq('settlement_id', id)
 
     const ajustLignes: LigneSku[] = []
     if (auditsLies && auditsLies.length > 0) {
@@ -234,23 +231,58 @@ export async function GET(req: NextRequest) {
     const ajustTotal = Number(ajustLignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
 
     // ─── Coûts Amazon (compte agrégé non-stock) ─────────────────────────────
-    const isClassifiedTx = (t: any) =>
-      (isOrder(t) && desc(t) === 'Principal') ||
-      (isRefund(t) && desc(t) === 'Principal')   // Refunds Principal sont gérés par doc 2
+    // BALANCE GARANTIE PAR CONSTRUCTION :
+    //   totalCoutsAmazon = (somme TSV) - (Doc 1 cashflow) - (Doc 2 cashflow) - (Doc 3 cashflow)
+    // où :
+    //   - Doc 1 cashflow = Order Principal du TSV
+    //   - Doc 2 cashflow = partie des Refund Principal correspondant aux retours sellable
+    //                     (= -retoursTotal car Doc 2 est négatif côté stock,
+    //                      mais l'argent remboursé est dans le TSV via Refund Principal)
+    //   - Doc 3 cashflow = reimbursements stock Amazon dans le TSV
+    //                     (REVERSAL_REIMBURSEMENT + WAREHOUSE_DAMAGE/LOST/...)
+    //   - Doc 4 = ajustement comptable pur, AUCUN cashflow (n'entre pas dans la balance)
+    const totalTsv = Number(tx.reduce((s, t) => s + Number(t.amount || 0), 0).toFixed(2))
+    const doc1CashFlow = ventesTotal                        // = Order Principal
+    const doc2CashFlow = retoursTotal                       // négatif déjà (= partie Refund Principal sellable)
+    const doc3CashFlow = sumWhere(t => ['REVERSAL_REIMBURSEMENT','WAREHOUSE_DAMAGE','WAREHOUSE_LOST','WAREHOUSE_DAMAGE_EXCEPTION','WAREHOUSE_LOST_MANIFEST'].includes(t.amount_type) || ['REVERSAL_REIMBURSEMENT','WAREHOUSE_DAMAGE','WAREHOUSE_LOST'].includes(desc(t)))
+    const totalCoutsAmazon = Number((totalTsv - doc1CashFlow - doc2CashFlow - doc3CashFlow).toFixed(2))
+
+    // Détail par catégorie pour le rapport comptable. La SOMME doit égaler
+    // totalCoutsAmazon. Les catégories sont mappées sur les sections du
+    // relevé de paiement papier d'Amazon. Si une transaction n'est dans
+    // aucune catégorie, elle apparaît dans 'autre_non_classe'.
+    const orderCommissionDescs = ['Commission','FBAPerUnitFulfillmentFee','MarketplaceFacilitatorTax-Principal','MarketplaceFacilitatorTax-Shipping','ShippingChargeback','ShippingHB']
+    const refundCommissionDescs = ['Commission','RefundCommission','MarketplaceFacilitatorTax-Principal','MarketplaceFacilitatorTax-Shipping','ShippingChargeback']
 
     const couts_amazon = {
-      rabais_promotionnels: sumWhere(t => isOrder(t) && (desc(t) === 'Promotion' || desc(t).toLowerCase().includes('promo'))),
-      frais_fba_stockage: sumWhere(t => t.amount_type === 'Storage Fee' || desc(t) === 'Storage Fee'),
-      frais_fba_autres: sumWhere(t => t.amount_type === 'RemovalComplete' || desc(t) === 'RemovalComplete'),
-      publicite: sumWhere(t => t.amount_type === 'Cost of Advertising' || desc(t) === 'TransactionTotalAmount'),
-      commissions: sumWhere(t => ['Commission','FBAPerUnitFulfillmentFee','MarketplaceFacilitatorTax-Principal','MarketplaceFacilitatorTax-Shipping','ShippingChargeback','ShippingHB','RefundCommission'].includes(desc(t))),
-      expedition_net: sumWhere(t => isOrder(t) && ['Shipping','ShippingTax','GiftWrap','GiftWrapTax'].includes(desc(t)))
-        + sumWhere(t => isRefund(t) && ['Shipping','ShippingTax'].includes(desc(t))),
-      depenses_remboursees: sumWhere(t => isRefund(t) && Number(t.amount || 0) > 0 && !['Principal','Shipping','ShippingTax'].includes(desc(t))),
+      rabais_promotionnels:    sumWhere(t => t.amount_type === 'Promotion'),                              // Order/Promotion + Refund/Promotion
+      frais_fba_stockage:      sumWhere(t => t.amount_type === 'Storage Fee' || desc(t) === 'Storage Fee'),
+      frais_fba_autres:        sumWhere(t => t.amount_type === 'RemovalComplete' || desc(t) === 'RemovalComplete'),
+      publicite:               sumWhere(t => t.amount_type === 'Cost of Advertising' || desc(t) === 'TransactionTotalAmount'),
+      commissions_orders:      sumWhere(t => isOrder(t) && orderCommissionDescs.includes(desc(t))),       // = "Commissions Amazon" du relevé papier
+      expedition_orders:       sumWhere(t => isOrder(t) && ['Shipping','ShippingTax','GiftWrap','GiftWrapTax'].includes(desc(t))),  // = "Expédition" dans VENTES
+      taxes_collectees:        sumWhere(t => isOrder(t) && desc(t) === 'Tax'),                            // collectées (positif), reversées via MFT-Principal
+      // Côté Refunds (= "Dépenses remboursées" + parts non-Principal des "Ventes remboursées" du relevé)
+      refunds_commissions:     sumWhere(t => isRefund(t) && refundCommissionDescs.includes(desc(t))),
+      refunds_taxes:           sumWhere(t => isRefund(t) && desc(t) === 'Tax'),
+      refunds_shipping:        sumWhere(t => isRefund(t) && ['Shipping','ShippingTax'].includes(desc(t))), // = "Ventes remboursées Expédition" du relevé
+      // Reimbursements Amazon
       remboursements_inverses: sumWhere(t => t.amount_type === 'COMPENSATED_CLAWBACK' || desc(t) === 'COMPENSATED_CLAWBACK'),
-      remboursements_stock_amazon: sumWhere(t => ['REVERSAL_REIMBURSEMENT','WAREHOUSE_DAMAGE','WAREHOUSE_LOST','WAREHOUSE_DAMAGE_EXCEPTION','WAREHOUSE_LOST_MANIFEST'].includes(t.amount_type) || ['REVERSAL_REIMBURSEMENT','WAREHOUSE_DAMAGE','WAREHOUSE_LOST'].includes(desc(t))),
+      remboursements_stock_amazon: doc3CashFlow * -1,  // signe inversé : c'est dans Doc 3 cashflow, pas dans Coûts pour la balance
+      // Refund Principal qui ne sont PAS des retours sellable (= retours non sellable, refund-only, ou unités encore en transit)
+      refunds_principal_non_sellable: sumWhere(t => isRefund(t) && desc(t) === 'Principal') - retoursTotal,
     }
-    const totalCoutsAmazon = Number(Object.values(couts_amazon).reduce((s: number, v) => s + Number(v), 0).toFixed(2))
+    // Note: remboursements_stock_amazon est mis à 0 dans Coûts Amazon car
+    // déjà compté dans Doc 3 cashflow. On le garde dans le breakdown pour
+    // info (signe inversé).
+    couts_amazon.remboursements_stock_amazon = 0
+
+    // Calcul du résiduel non-classé pour ne pas perdre d'argent
+    const sumDetailExplicit = Object.values(couts_amazon).reduce((s: number, v) => s + Number(v), 0)
+    const residuel = Number((totalCoutsAmazon - sumDetailExplicit).toFixed(2))
+    if (Math.abs(residuel) >= 0.01) {
+      ;(couts_amazon as any).autre_non_classe = residuel
+    }
 
     // ─── Documents existants saisis (n° facture LAUTOPAK déjà entrés) ──────
     const { data: docsExistants } = await supabaseAdmin
@@ -285,8 +317,22 @@ export async function GET(req: NextRequest) {
       buildDoc('ajust_audit', 'Ajustement INVENTAIRE (audits)', ajustLignes, ajustTotal),
     ]
 
+    // Cashflow par doc (= contribution au dépôt bancaire) :
+    //   Doc 1 ventes       : +Doc1.total                 (revenu Amazon = Order Principal)
+    //   Doc 2 retours      : Doc2.total                  (négatif = remboursement client = Refund Principal)
+    //   Doc 3 pertes       : -Doc3.total                 (positif = reim Amazon dans TSV, opposé de la note de crédit)
+    //   Doc 4 audit        : 0                           (mouvement comptable pur, hors dépôt)
+    const cashFlowDoc1 = doc1CashFlow
+    const cashFlowDoc2 = doc2CashFlow
+    const cashFlowDoc3 = doc3CashFlow      // déjà calculé plus haut (REVERSAL_REIMBURSEMENT + WAREHOUSE_*)
+    const cashFlowDoc4 = 0
+    const totalCashFlowDocs = Number((cashFlowDoc1 + cashFlowDoc2 + cashFlowDoc3 + cashFlowDoc4).toFixed(2))
+
+    // Valeur stock LAUTOPAK = somme algébrique des 4 documents (sortie + entrée + ajust)
     const netLautopak = Number(docs.reduce((s, d) => s + d.total, 0).toFixed(2))
-    const balanceCalcul = Number((netLautopak + totalCoutsAmazon).toFixed(2))
+
+    // Balance comptable = cashflow docs + coûts Amazon = dépôt bancaire (par construction)
+    const balanceCalcul = Number((totalCashFlowDocs + totalCoutsAmazon).toFixed(2))
     const depotBancaire = Number(s.total_amount || 0)
     const balanceOk = Math.abs(balanceCalcul - depotBancaire) < 0.5
 
@@ -301,7 +347,16 @@ export async function GET(req: NextRequest) {
       docs,
       couts_amazon,
       total_couts_amazon: totalCoutsAmazon,
-      net_lautopak: netLautopak,
+      total_tsv: totalTsv,
+      // Cashflow par doc (contribution au dépôt) — utile pour expliquer la balance
+      cashflow_docs: {
+        doc1_ventes: cashFlowDoc1,
+        doc2_retours: cashFlowDoc2,
+        doc3_pertes: cashFlowDoc3,
+        doc4_audit: cashFlowDoc4,
+        total: totalCashFlowDocs,
+      },
+      net_lautopak: netLautopak,            // valeur stock = somme algébrique des 4 docs
       balance_calcul: balanceCalcul,
       balance_settlement: depotBancaire,
       balance_ok: balanceOk,
