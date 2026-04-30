@@ -106,6 +106,20 @@ export async function GET(req: NextRequest) {
     // Charger les multi-mappings manuels (1 SKU Amazon → N PKCodes × multiplier)
     const manualMappings = await loadManualMappings()
 
+    // Helper : ajoute ou fusionne une variante Amazon dans la liste existante.
+    // Si une variante avec le même amazon_sku existe déjà, on additionne les
+    // qty au lieu de créer un doublon. Cela évite "26 variantes" alors qu'il
+    // n'y a qu'1 SKU répété 26 fois dans les transactions du settlement.
+    function addOrMergeVariante(variantes: Variante[], v: Variante) {
+      const ex = variantes.find(x => x.amazon_sku === v.amazon_sku && x.multiplier === v.multiplier)
+      if (ex) {
+        ex.qty_amazon += v.qty_amazon
+        ex.qty_lautopak += v.qty_lautopak
+      } else {
+        variantes.push(v)
+      }
+    }
+
     // Helper unifié : regroupe une liste d'agrégations { sku, qty, amount } par
     // PKCode Traction cible, en appliquant les multi-mappings manuels.
     // - Si le SKU a un multi-mapping : qty_lautopak = qty_amazon × multiplier,
@@ -135,7 +149,7 @@ export async function GET(req: NextRequest) {
             ex.qty_amazon = (ex.qty_amazon || 0) + qtyAmazon
             ex.amount += amountSource * share
             ex.variantes = ex.variantes || []
-            ex.variantes.push({ amazon_sku: sku, qty_amazon: qtyAmazon, multiplier: m.multiplier, qty_lautopak: qtyLpk })
+            addOrMergeVariante(ex.variantes, { amazon_sku: sku, qty_amazon: qtyAmazon, multiplier: m.multiplier, qty_lautopak: qtyLpk })
             if (!ex.product_name && t.product_name) ex.product_name = t.product_name
             byPk.set(m.pk_code, ex)
           }
@@ -151,7 +165,7 @@ export async function GET(req: NextRequest) {
           ex.qty_amazon = (ex.qty_amazon || 0) + qtyAmazon
           ex.amount += amountSource
           ex.variantes = ex.variantes || []
-          ex.variantes.push({ amazon_sku: sku, qty_amazon: qtyAmazon, multiplier: 1, qty_lautopak: qtyAmazon })
+          addOrMergeVariante(ex.variantes, { amazon_sku: sku, qty_amazon: qtyAmazon, multiplier: 1, qty_lautopak: qtyAmazon })
           if (!ex.product_name && t.product_name) ex.product_name = t.product_name
           byPk.set(pk, ex)
         }
