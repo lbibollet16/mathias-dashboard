@@ -6785,8 +6785,8 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               const tousSaisis = d.docs.every((doc: any) => doc.lignes.length === 0 || doc.numero_facture)
               return (
                 <div style={{background:card,border:`2px solid ${d.balance_ok?C.green:C.yellow}`,borderRadius:12,padding:14,marginBottom:14}}>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:8}}>
-                    <div>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:10,flexWrap:'wrap',gap:8}}>
+                    <div style={{flex:1,minWidth:200}}>
                       <div style={{fontSize:14,fontWeight:900}}>📑 Documents LAUTOPAK à émettre (workflow v2)</div>
                       <div style={{fontSize:11,color:sub,marginTop:2,lineHeight:1.5,maxWidth:680}}>
                         Saisis le n° de chaque facture / note de crédit que tu as créée dans LAUTOPAK pour ce settlement.
@@ -6794,6 +6794,11 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                         Le reste (commissions, frais FBA, pub…) va dans le compte agrégé « Coûts Amazon » au rapport final.
                       </div>
                     </div>
+                    <button onClick={()=>chargerClosureDetail(s.settlement_id)} disabled={closureLoading}
+                      title="Recalculer les 4 documents (utile après ajout d'un multi-mapping ou modification d'un audit FBM)"
+                      style={{background:closureLoading?bdr:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:closureLoading?'default':'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                      {closureLoading ? '⏳ Calcul...' : '🔄 Recalculer'}
+                    </button>
                   </div>
 
                   {/* Balance en bandeau — équation cashflow = dépôt bancaire */}
