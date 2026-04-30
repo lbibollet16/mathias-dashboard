@@ -21,13 +21,23 @@ import { balanceLignes } from '@/lib/amazon-balance'
 // rabais promo) va dans le compte agrégé "Coût des ventes Amazon" — exposé
 // dans `couts_amazon` ci-dessous mais PAS dans une facture LAUTOPAK.
 
+interface Variante {
+  amazon_sku: string
+  qty_amazon: number
+  multiplier: number
+  qty_lautopak: number
+}
+
 interface LigneSku {
-  sku: string
-  pk_code: string | null
+  sku: string                   // SKU Amazon principal (ou "N variantes")
+  pk_code: string | null         // PKCode Traction cible saisi dans LAUTOPAK
   product_name: string | null
-  qty: number
-  amount: number
-  prix_unitaire: number
+  qty: number                    // Qté LAUTOPAK (= qty Amazon × multiplier)
+  qty_amazon?: number            // Qté Amazon brute (avant multiplier)
+  amount: number                 // Montant final (équilibré)
+  prix_unitaire: number          // Prix unitaire LAUTOPAK arrondi
+  manual_mapping?: boolean       // True si multi-mapping manuel utilisé
+  variantes?: Variante[]         // Variantes regroupées sous ce pk_code
   notes?: string
 }
 
@@ -93,23 +103,83 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Charger les multi-mappings manuels (1 SKU Amazon → N PKCodes × multiplier)
+    const manualMappings = await loadManualMappings()
+
+    // Helper unifié : regroupe une liste d'agrégations { sku, qty, amount } par
+    // PKCode Traction cible, en appliquant les multi-mappings manuels.
+    // - Si le SKU a un multi-mapping : qty_lautopak = qty_amazon × multiplier,
+    //   et le montant est partagé sur N pk_codes (rare).
+    // - Sinon : fallback sur traction_code résolu (1:1, pas de multiplier).
+    function groupByPkCode(
+      transactions: Array<{ sku: string; traction_code: string | null; qty: number; amount: number; product_name: string | null }>,
+      isRefund: boolean,
+    ): LigneSku[] {
+      const byPk = new Map<string, LigneSku>()
+      for (const t of transactions) {
+        const sku = t.sku || '(sans SKU)'
+        const qtyAmazon = isRefund ? Math.abs(t.qty) : t.qty
+        const amountSource = Number(t.amount.toFixed(2))
+        const manual = manualMappings.get(sku)
+        if (manual && manual.length > 0) {
+          // Multi-mapping : 1 SKU Amazon → N PKCodes Traction
+          const share = 1 / manual.length
+          for (const m of manual) {
+            const qtyLpk = qtyAmazon * m.multiplier
+            const ex = byPk.get(m.pk_code) || {
+              sku: m.pk_code, pk_code: m.pk_code, product_name: t.product_name,
+              qty: 0, qty_amazon: 0, amount: 0, prix_unitaire: 0,
+              manual_mapping: true, variantes: [],
+            }
+            ex.qty += qtyLpk
+            ex.qty_amazon = (ex.qty_amazon || 0) + qtyAmazon
+            ex.amount += amountSource * share
+            ex.variantes = ex.variantes || []
+            ex.variantes.push({ amazon_sku: sku, qty_amazon: qtyAmazon, multiplier: m.multiplier, qty_lautopak: qtyLpk })
+            if (!ex.product_name && t.product_name) ex.product_name = t.product_name
+            byPk.set(m.pk_code, ex)
+          }
+        } else {
+          // Pas de multi-mapping : utiliser traction_code en fallback (1:1)
+          const pk = t.traction_code || sku
+          const ex = byPk.get(pk) || {
+            sku: pk, pk_code: pk, product_name: t.product_name,
+            qty: 0, qty_amazon: 0, amount: 0, prix_unitaire: 0,
+            manual_mapping: false, variantes: [],
+          }
+          ex.qty += qtyAmazon                    // sans multiplier
+          ex.qty_amazon = (ex.qty_amazon || 0) + qtyAmazon
+          ex.amount += amountSource
+          ex.variantes = ex.variantes || []
+          ex.variantes.push({ amazon_sku: sku, qty_amazon: qtyAmazon, multiplier: 1, qty_lautopak: qtyAmazon })
+          if (!ex.product_name && t.product_name) ex.product_name = t.product_name
+          byPk.set(pk, ex)
+        }
+      }
+      // Étiquette sku finale : si plusieurs variantes Amazon, "FBM-78920 (3 variantes)"
+      const lignes = [...byPk.values()]
+      for (const l of lignes) {
+        l.amount = Number(l.amount.toFixed(2))
+        if (l.variantes && l.variantes.length > 1) {
+          l.sku = `${l.pk_code} (${l.variantes.length} variantes)`
+        } else if (l.variantes && l.variantes.length === 1 && l.variantes[0].amazon_sku !== l.pk_code) {
+          // 1 variante Amazon ≠ pk_code → afficher le SKU Amazon
+          l.sku = l.variantes[0].amazon_sku
+        }
+      }
+      return lignes
+    }
+
     // ─── DOC 1 — VENTES (Orders Principal) ─────────────────────────────────
     const ordersPrincipal = tx.filter((t: any) => isOrder(t) && desc(t) === 'Principal')
-    const ventesBySku = new Map<string, LigneSku>()
-    for (const t of ordersPrincipal) {
-      const sku = t.sku || '(sans SKU)'
-      const ex = ventesBySku.get(sku) || {
-        sku, pk_code: t.traction_code || null, product_name: productNames.get(sku) || null,
-        qty: 0, amount: 0, prix_unitaire: 0,
-      }
-      ex.qty += Number(t.quantity_purchased || 0)
-      ex.amount += Number(t.amount || 0)
-      if (!ex.pk_code && t.traction_code) ex.pk_code = t.traction_code
-      ventesBySku.set(sku, ex)
-    }
-    const ventesLignes = [...ventesBySku.values()]
-      .map(l => ({ ...l, prix_unitaire: l.qty > 0 ? Number((l.amount / l.qty).toFixed(2)) : 0 }))
-      .sort((a, b) => b.amount - a.amount)
+    const ordersAggs = ordersPrincipal.map((t: any) => ({
+      sku: t.sku || '(sans SKU)',
+      traction_code: t.traction_code || null,
+      qty: Number(t.quantity_purchased || 0),
+      amount: Number(t.amount || 0),
+      product_name: productNames.get(t.sku) || null,
+    }))
+    const ventesLignes = groupByPkCode(ordersAggs, false).sort((a, b) => b.amount - a.amount)
     // Équilibrage : prix unitaire arrondi à 0,10 $, somme(qty × prix) = total exact
     const ventesTotalBrut = Number(ventesLignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
     const ventesBalance = balanceLignes(ventesLignes, ventesTotalBrut)
@@ -119,12 +189,13 @@ export async function GET(req: NextRequest) {
     // Refunds Principal du settlement (qty estimée = nb de lignes par SKU,
     // car Amazon ne renseigne pas quantity-purchased pour les Refund)
     const refundsPrincipal = tx.filter((t: any) => isRefund(t) && desc(t) === 'Principal')
-    const refundsBySku = new Map<string, { count: number; amount_total: number }>()
+    const refundsBySku = new Map<string, { count: number; amount_total: number; traction_code: string | null }>()
     for (const t of refundsPrincipal) {
       const sku = t.sku || '(sans SKU)'
-      const ex = refundsBySku.get(sku) || { count: 0, amount_total: 0 }
+      const ex = refundsBySku.get(sku) || { count: 0, amount_total: 0, traction_code: t.traction_code || null }
       ex.count++
       ex.amount_total += Number(t.amount || 0)   // négatif
+      if (!ex.traction_code && t.traction_code) ex.traction_code = t.traction_code
       refundsBySku.set(sku, ex)
     }
 
@@ -138,31 +209,30 @@ export async function GET(req: NextRequest) {
         .select('sku, detailed_disposition, quantity, processed_in_settlement_id')
         .in('sku', refundSkus)
         .eq('detailed_disposition', 'SELLABLE')
-        // Ne pas reprendre les retours déjà attribués à un AUTRE settlement
         .or(`processed_in_settlement_id.is.null,processed_in_settlement_id.eq.${id}`)
       for (const r of returns || []) {
         sellableBySku.set(r.sku, (sellableBySku.get(r.sku) || 0) + Number(r.quantity || 1))
       }
     }
 
-    const retoursLignes: LigneSku[] = []
+    // Construire les agrégations Refund Principal × retours sellable, puis
+    // appliquer les multi-mappings.
+    const retoursAggs: Array<{ sku: string; traction_code: string | null; qty: number; amount: number; product_name: string | null }> = []
     for (const [sku, refundInfo] of refundsBySku) {
       const sellableQty = sellableBySku.get(sku) || 0
       const aRemettre = Math.min(sellableQty, refundInfo.count)
       if (aRemettre <= 0) continue
-      const prixUnitaire = Number((refundInfo.amount_total / refundInfo.count).toFixed(2))
-      retoursLignes.push({
+      const prixMoyen = refundInfo.amount_total / refundInfo.count   // négatif
+      retoursAggs.push({
         sku,
-        pk_code: refundsPrincipal.find((t: any) => t.sku === sku)?.traction_code || null,
+        traction_code: refundInfo.traction_code,
+        qty: aRemettre,                       // qty Amazon (avant multiplier)
+        amount: Number((aRemettre * prixMoyen).toFixed(2)),
         product_name: productNames.get(sku) || null,
-        qty: aRemettre,
-        amount: Number((aRemettre * prixUnitaire).toFixed(2)),
-        prix_unitaire: prixUnitaire,
-        notes: `${aRemettre}/${refundInfo.count} remboursements revenus sellable`,
       })
     }
-    retoursLignes.sort((a, b) => a.amount - b.amount)
-    // Équilibrage : prix unitaire arrondi à 0,10 $ (signe négatif conservé pour note de crédit)
+    const retoursLignes = groupByPkCode(retoursAggs, false).sort((a, b) => a.amount - b.amount)
+    // Équilibrage : prix unitaire arrondi à 0,10 $ (signe négatif conservé)
     const retoursTotalBrut = Number(retoursLignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
     const retoursBalance = balanceLignes(retoursLignes, retoursTotalBrut)
     const retoursTotal = Number(retoursLignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
@@ -175,28 +245,23 @@ export async function GET(req: NextRequest) {
       .eq('settlement_id', id)
       .gt('quantity_reimbursed_cash', 0)
 
-    const pertesBySku = new Map<string, LigneSku>()
+    // Construire les agrégations puis appliquer les multi-mappings (= signe négatif
+    // pour la note de crédit côté stock).
+    const pertesAggs: Array<{ sku: string; traction_code: string | null; qty: number; amount: number; product_name: string | null }> = []
     for (const r of reimbs || []) {
       const sku = r.sku || '(sans SKU)'
       const qty = Number(r.quantity_reimbursed_cash || 0)
       const amt = Number(r.amount_total || 0)
-      const ex = pertesBySku.get(sku) || {
-        sku, pk_code: r.traction_code || null, product_name: r.product_name || null,
-        qty: 0, amount: 0, prix_unitaire: Number(r.amount_per_unit || 0),
-        notes: r.reason || '',
-      }
-      ex.qty += qty
-      ex.amount += amt
-      if (!ex.pk_code && r.traction_code) ex.pk_code = r.traction_code
-      pertesBySku.set(sku, ex)
+      if (qty <= 0) continue
+      pertesAggs.push({
+        sku,
+        traction_code: r.traction_code || null,
+        qty,
+        amount: -Math.abs(amt),                 // négatif (note de crédit)
+        product_name: r.product_name || null,
+      })
     }
-    // Note de crédit = négatif (sortie de stock + perte)
-    const pertesLignes = [...pertesBySku.values()].map(l => ({
-      ...l,
-      amount: -Math.abs(l.amount),
-      qty: l.qty,
-      prix_unitaire: l.qty > 0 ? Number((Math.abs(l.amount) / l.qty).toFixed(2)) : 0,
-    })).sort((a, b) => a.amount - b.amount)
+    const pertesLignes = groupByPkCode(pertesAggs, false).sort((a, b) => a.amount - b.amount)
     // Équilibrage : prix unitaire arrondi à 0,10 $
     const pertesTotalBrut = Number(pertesLignes.reduce((s, l) => s + l.amount, 0).toFixed(2))
     const pertesBalance = balanceLignes(pertesLignes, pertesTotalBrut)
