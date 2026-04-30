@@ -4977,6 +4977,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [showLautopakReimbModal, setShowLautopakReimbModal] = useState(false)
   const [reimbInvoiceRef, setReimbInvoiceRef] = useState('')
   const [reimbInvoiceDate, setReimbInvoiceDate] = useState('')
+  // Workflow v2 : 4 documents LAUTOPAK + balance auto
+  const [lautopakDocs, setLautopakDocs] = useState<any>(null)
+  const [docDetailModal, setDocDetailModal] = useState<{ doc_type: string } | null>(null)
+  const [docInputs, setDocInputs] = useState<Record<string, { numero?: string; date?: string; notes?: string }>>({})
   const [releveRembStock, setReleveRembStock] = useState<Record<string,string>>({})  // saisie par settlement_id
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
   const [expandedPk, setExpandedPk] = useState<Record<string, boolean>>({})
@@ -5201,9 +5205,45 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
             if (!j2.erreur) setLautopakReimbLines(j2)
           } catch {}
         }
+        // Nouveau workflow v2 : 4 documents LAUTOPAK + balance auto
+        try {
+          const rDocs = await fetch(`/api/amazon/closure/lautopak-docs?id=${encodeURIComponent(settlementId)}`)
+          const jDocs = await rDocs.json()
+          if (!jDocs.erreur) setLautopakDocs(jDocs)
+        } catch {}
       }
     } catch {}
     setClosureLoading(false)
+  }
+
+  async function saisirDocLautopak(settlement_id: string, doc_type: string, payload: { numero_facture?: string; date_facture?: string; montant_total?: number; notes?: string }) {
+    try {
+      const r = await fetch('/api/amazon/closure/lautopak-docs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          settlement_id, doc_type,
+          ...payload,
+          saisi_par: profil?.nom || profil?.email || 'Inconnu',
+        }),
+      })
+      const j = await r.json()
+      if (!j.success) { alert(j.erreur || 'Erreur'); return }
+      // Recharge les docs (pour avoir saisi_le, saisi_par, etc.)
+      const rDocs = await fetch(`/api/amazon/closure/lautopak-docs?id=${encodeURIComponent(settlement_id)}`)
+      const jDocs = await rDocs.json()
+      if (!jDocs.erreur) setLautopakDocs(jDocs)
+    } catch (e: any) { alert(e.message) }
+  }
+
+  async function effacerDocLautopak(settlement_id: string, doc_type: string) {
+    if (!confirm(`Effacer la saisie ${doc_type} ?`)) return
+    try {
+      await fetch(`/api/amazon/closure/lautopak-docs?settlement_id=${encodeURIComponent(settlement_id)}&doc_type=${doc_type}`, { method: 'DELETE' })
+      const rDocs = await fetch(`/api/amazon/closure/lautopak-docs?id=${encodeURIComponent(settlement_id)}`)
+      const jDocs = await rDocs.json()
+      if (!jDocs.erreur) setLautopakDocs(jDocs)
+    } catch (e: any) { alert(e.message) }
   }
 
   async function validerEtape(settlementId: string, step: number | 'close' | 'reopen', action: 'validate' | 'unvalidate' = 'validate') {
@@ -6346,6 +6386,147 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               </div>
             </div>
 
+            {/* ╔══════════════════════════════════════════════════════════╗
+                NOUVEAU WORKFLOW v2 — 4 documents LAUTOPAK + balance auto
+                ╚══════════════════════════════════════════════════════════╝ */}
+            {lautopakDocs && lautopakDocs.docs && (() => {
+              const d = lautopakDocs
+              const docLabels: Record<string, { icon: string; titre: string; aide: string; couleur: string }> = {
+                'ventes':              { icon: '📦', titre: 'Facture VENTES',           aide: 'Sortie de stock × prix de vente', couleur: C.blue },
+                'note_credit_retours': { icon: '↩️', titre: 'Note crédit RETOURS sellable', aide: 'Unités revenues en bon état au FBA', couleur: C.green },
+                'note_credit_pertes':  { icon: '💸', titre: 'Note crédit PERTES/DOMMAGES', aide: 'Unités définitivement perdues (cash $)', couleur: C.red },
+                'ajust_audit':         { icon: '⚖️', titre: 'Ajustement INVENTAIRE',    aide: 'Écarts d\'audit physique AMA + FBM',  couleur: C.yellow },
+              }
+              const tousSaisis = d.docs.every((doc: any) => doc.lignes.length === 0 || doc.numero_facture)
+              return (
+                <div style={{background:card,border:`2px solid ${d.balance_ok?C.green:C.yellow}`,borderRadius:12,padding:14,marginBottom:14}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:8}}>
+                    <div>
+                      <div style={{fontSize:14,fontWeight:900}}>📑 Documents LAUTOPAK à émettre (workflow v2)</div>
+                      <div style={{fontSize:11,color:sub,marginTop:2,lineHeight:1.5,maxWidth:680}}>
+                        Saisis le n° de chaque facture / note de crédit que tu as créée dans LAUTOPAK pour ce settlement.
+                        Tout ce qui touche à une <strong>quantité d'inventaire</strong> passe ici.
+                        Le reste (commissions, frais FBA, pub…) va dans le compte agrégé « Coûts Amazon » au rapport final.
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Balance en bandeau */}
+                  <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:8,marginBottom:12,padding:10,background:dark?'#0d0d0d':'#fafbfc',borderRadius:8,border:`1px solid ${bdr}`}}>
+                    <div>
+                      <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>Net LAUTOPAK</div>
+                      <div style={{fontSize:16,fontWeight:900,color:C.blue}}>{fmt$(d.net_lautopak||0)}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>+ Coûts Amazon</div>
+                      <div style={{fontSize:16,fontWeight:900,color:d.total_couts_amazon<0?C.red:C.green}}>{fmt$(d.total_couts_amazon||0)}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>= Calcul</div>
+                      <div style={{fontSize:16,fontWeight:900}}>{fmt$(d.balance_calcul||0)}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',color:sub}}>Dépôt bancaire (cible)</div>
+                      <div style={{fontSize:16,fontWeight:900,color:d.balance_ok?C.green:C.red}}>
+                        {fmt$(d.balance_settlement||0)} {d.balance_ok ? '✓' : `⚠ écart ${fmt$(d.ecart_balance||0)}`}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 4 cartes documents */}
+                  <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:10}}>
+                    {d.docs.map((doc: any) => {
+                      const cfg = docLabels[doc.doc_type] || { icon:'📄', titre:doc.label, aide:'', couleur:sub }
+                      const inputState = docInputs[doc.doc_type] || {}
+                      const numero = inputState.numero !== undefined ? inputState.numero : (doc.numero_facture || '')
+                      const dateF = inputState.date !== undefined ? inputState.date : (doc.date_facture ? String(doc.date_facture).split('T')[0] : '')
+                      const isVide = doc.lignes.length === 0 || Math.abs(doc.total) < 0.01
+                      const isSaisi = !!doc.numero_facture
+                      const colorBordure = isVide ? bdr : isSaisi ? C.green : cfg.couleur
+                      return (
+                        <div key={doc.doc_type} style={{background:dark?'#0d0d0d':'#fff',border:`2px solid ${colorBordure}`,borderRadius:10,padding:'12px 14px'}}>
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:13,fontWeight:800,color:cfg.couleur}}>{cfg.icon} {cfg.titre}</div>
+                              <div style={{fontSize:10,color:sub,marginTop:2,lineHeight:1.4}}>{cfg.aide}</div>
+                              <div style={{fontSize:11,color:sub,marginTop:4}}>
+                                <strong style={{color:Math.abs(doc.total)<0.01?sub:doc.total<0?C.red:C.blue,fontSize:14}}>{fmt$(doc.total)}</strong>
+                                {' • '}
+                                {isVide
+                                  ? <span style={{color:sub}}>aucune ligne</span>
+                                  : <button onClick={()=>setDocDetailModal({doc_type:doc.doc_type})} style={{background:'transparent',border:'none',color:C.blue,fontWeight:700,cursor:'pointer',fontSize:11,padding:0,textDecoration:'underline'}}>
+                                      voir {doc.lignes.length} ligne{doc.lignes.length>1?'s':''}
+                                    </button>
+                                }
+                              </div>
+                            </div>
+                            {isSaisi && <div style={{background:C.green+'22',color:C.green,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700,whiteSpace:'nowrap'}}>✓ saisi</div>}
+                          </div>
+
+                          {!isVide && !closureDetail.is_closed && (
+                            <div style={{display:'grid',gridTemplateColumns:'2fr 1fr auto',gap:6,marginTop:10}}>
+                              <input value={numero} placeholder="N° facture LAUTOPAK"
+                                onChange={e=>setDocInputs(p=>({...p,[doc.doc_type]:{...p[doc.doc_type],numero:e.target.value}}))}
+                                style={{...S,fontSize:12,padding:'7px 10px',fontFamily:'monospace'}}/>
+                              <input type="date" value={dateF}
+                                onChange={e=>setDocInputs(p=>({...p,[doc.doc_type]:{...p[doc.doc_type],date:e.target.value}}))}
+                                style={{...S,fontSize:12,padding:'7px 10px'}}/>
+                              <button
+                                onClick={()=>saisirDocLautopak(s.settlement_id, doc.doc_type, { numero_facture: numero || undefined, date_facture: dateF || undefined, montant_total: doc.total })}
+                                disabled={!numero || !dateF}
+                                style={{background:(!numero||!dateF)?bdr:C.green,color:'#fff',border:'none',borderRadius:6,padding:'7px 12px',fontWeight:700,cursor:(!numero||!dateF)?'default':'pointer',fontSize:11,whiteSpace:'nowrap'}}>
+                                ✓ Enregistrer
+                              </button>
+                            </div>
+                          )}
+                          {isSaisi && doc.saisi_le && (
+                            <div style={{fontSize:10,color:sub,marginTop:6,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                              <span>📅 {fmtDate(doc.date_facture)} • saisi par {doc.saisi_par}</span>
+                              {!closureDetail.is_closed && (
+                                <button onClick={()=>effacerDocLautopak(s.settlement_id, doc.doc_type)}
+                                  style={{background:'transparent',border:'none',color:C.red,fontSize:10,fontWeight:700,cursor:'pointer',padding:0,textDecoration:'underline'}}>
+                                  effacer
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* Détail Coûts Amazon (collapsible) */}
+                  <details style={{marginTop:10,fontSize:11}}>
+                    <summary style={{cursor:'pointer',color:sub,padding:'6px 0',fontWeight:700}}>
+                      ▾ Détail des « Coûts des ventes Amazon » (compte agrégé, pas de stock — {fmt$(d.total_couts_amazon||0)})
+                    </summary>
+                    <div style={{padding:'8px 0'}}>
+                      <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                        <tbody>
+                          {Object.entries(d.couts_amazon||{}).map(([k, v]: any) => Math.abs(Number(v||0)) < 0.01 ? null : (
+                            <tr key={k}>
+                              <td style={{padding:'4px 8px',borderBottom:`1px solid ${bdr}`}}>{k.replace(/_/g,' ')}</td>
+                              <td style={{padding:'4px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:Number(v)<0?C.red:C.green,fontFamily:'monospace'}}>{fmt$(Number(v))}</td>
+                            </tr>
+                          ))}
+                          <tr style={{background:thBg}}>
+                            <td style={{padding:'6px 8px',fontWeight:900}}>TOTAL Coûts Amazon</td>
+                            <td style={{padding:'6px 8px',textAlign:'right',fontWeight:900,color:Number(d.total_couts_amazon)<0?C.red:C.green,fontFamily:'monospace'}}>{fmt$(d.total_couts_amazon||0)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+
+                  {tousSaisis && d.balance_ok && (
+                    <div style={{marginTop:10,padding:'10px 14px',background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}`,borderRadius:8,fontSize:12,color:C.green,fontWeight:700}}>
+                      ✅ Tous les documents sont saisis et la balance correspond au dépôt bancaire — settlement prêt à fermer.
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+
             {/* Bandeau "📁 Fichiers importés" — les 3 fichiers requis pour ce settlement */}
             {closureDetail.fichiers_importes && (() => {
               const f = closureDetail.fichiers_importes
@@ -7109,6 +7290,64 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ═══ Modal DÉTAIL LIGNES d'un document LAUTOPAK v2 ═══ */}
+      {docDetailModal && lautopakDocs && (() => {
+        const fmt$ = (n: number) => `${n<0?'−':''}${Math.abs(Number(n||0)).toLocaleString('fr-CA',{minimumFractionDigits:2,maximumFractionDigits:2})} $`
+        const doc = lautopakDocs.docs.find((d: any) => d.doc_type === docDetailModal.doc_type)
+        if (!doc) return null
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+               onClick={()=>setDocDetailModal(null)}>
+            <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,maxWidth:900,width:'100%',maxHeight:'92vh',overflow:'hidden',display:'flex',flexDirection:'column',border:`1px solid ${bdr}`}}>
+              <div style={{padding:'14px 18px',borderBottom:`1px solid ${bdr}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <div>
+                  <div style={{fontSize:14,fontWeight:900}}>{doc.label}</div>
+                  <div style={{fontSize:11,color:sub,marginTop:2}}>{doc.lignes.length} ligne{doc.lignes.length>1?'s':''} • Total <strong style={{color:doc.total<0?C.red:C.blue}}>{fmt$(doc.total)}</strong></div>
+                </div>
+                <button onClick={()=>setDocDetailModal(null)}
+                  style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:'pointer',fontSize:11}}>✕ Fermer</button>
+              </div>
+              <div style={{overflow:'auto',flex:1}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                  <thead style={{position:'sticky',top:0,background:thBg,zIndex:1}}>
+                    <tr>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>SKU Amazon</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>PKCode Traction</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Produit</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Qté</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Prix unit.</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Montant</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,fontWeight:700,color:sub,borderBottom:`1px solid ${bdr}`}}>Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {doc.lignes.map((l: any, i: number) => (
+                      <tr key={l.sku+i} style={{borderBottom:`1px solid ${bdr}`}}>
+                        <td style={{padding:'6px 10px',fontFamily:'monospace',fontWeight:700}}>{l.sku}</td>
+                        <td style={{padding:'6px 10px',fontFamily:'monospace',fontSize:11,color:sub}}>{l.pk_code||'—'}</td>
+                        <td style={{padding:'6px 10px',fontSize:11,maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name||''}>{l.product_name||'—'}</td>
+                        <td style={{padding:'6px 10px',textAlign:'right',fontWeight:700,color:l.qty<0?C.red:undefined}}>{l.qty}</td>
+                        <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'monospace'}}>{fmt$(l.prix_unitaire||0)}</td>
+                        <td style={{padding:'6px 10px',textAlign:'right',fontWeight:700,color:l.amount<0?C.red:C.blue,fontFamily:'monospace'}}>{fmt$(l.amount)}</td>
+                        <td style={{padding:'6px 10px',fontSize:10,color:sub}}>{l.notes||''}</td>
+                      </tr>
+                    ))}
+                    <tr style={{background:thBg,borderTop:`2px solid ${bdr}`}}>
+                      <td colSpan={5} style={{padding:'8px 10px',fontWeight:900}}>TOTAL</td>
+                      <td style={{padding:'8px 10px',textAlign:'right',fontWeight:900,color:doc.total<0?C.red:C.blue,fontFamily:'monospace'}}>{fmt$(doc.total)}</td>
+                      <td></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div style={{padding:'10px 18px',borderTop:`1px solid ${bdr}`,fontSize:11,color:sub,lineHeight:1.5}}>
+                💡 Crée ce document dans LAUTOPAK avec ces lignes (qté × prix unitaire), puis reviens ici saisir le n° de facture obtenu.
+              </div>
             </div>
           </div>
         )
