@@ -5173,6 +5173,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [forecastData, setForecastData] = useState<any>(null)
   const [coutsTransport, setCoutsTransport] = useState<any[]>([])
   const [editingTransport, setEditingTransport] = useState<{ pk_code: string; cout: string } | null>(null)
+  const [editingCoutant, setEditingCoutant] = useState<{ pk_code: string; cout: string; source?: string } | null>(null)
   const [drilldownPk, setDrilldownPk] = useState<string | null>(null)
   // États de la vue Fermeture (nouvelle vue principale)
   const [closureList, setClosureList] = useState<any[]>([])
@@ -5547,6 +5548,31 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       })
       await chargerCoutsTransport()
       // Recharger la profitabilité pour refléter le nouveau coût
+      if (profitSettlementId) await chargerProfitabilite(profitSettlementId)
+    } catch (e: any) { alert(e.message) }
+  }
+
+  async function saisirCoutant(pk_code: string, cout_unitaire: number) {
+    try {
+      const r = await fetch('/api/amazon/couts-manuels', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          pk_code, cout_unitaire,
+          updated_by: profil?.email || profil?.nom || 'Inconnu',
+        })
+      })
+      const j = await r.json()
+      if (j.erreur) { alert(j.erreur); return }
+      // Recharger la profitabilité
+      if (profitSettlementId) await chargerProfitabilite(profitSettlementId)
+    } catch (e: any) { alert(e.message) }
+  }
+
+  async function effacerCoutantManuel(pk_code: string) {
+    if (!confirm(`Effacer le coûtant manuel pour ${pk_code} ?\n\nLe système utilisera de nouveau le coûtant Traction (s'il existe).`)) return
+    try {
+      await fetch(`/api/amazon/couts-manuels?pk_code=${encodeURIComponent(pk_code)}`, { method: 'DELETE' })
       if (profitSettlementId) await chargerProfitabilite(profitSettlementId)
     } catch (e: any) { alert(e.message) }
   }
@@ -8567,9 +8593,15 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                   <td style={{padding:'6px 10px',fontSize:11,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name||''}>{l.product_name||'—'}</td>
                                   <td style={{padding:'6px 10px',textAlign:'right',fontWeight:700}}>{l.qty_lautopak}{l.qty_refund>0&&<span style={{color:C.red,fontSize:10}}>(−{l.qty_refund})</span>}</td>
                                   <td style={{padding:'6px 10px',textAlign:'right',color:C.blue,fontFamily:'monospace'}}>{fmt$(l.ventes_net)}</td>
-                                  <td style={{padding:'6px 10px',textAlign:'right',color:l.coutant_manquant?C.yellow:C.red,fontFamily:'monospace',background:l.coutant_manquant?(dark?'#2b2411':'#fff8e1'):undefined}}
-                                      title={l.coutant_manquant ? '⚠ Pas de coûtant trouvé dans Traction pour ce PKCode' : `Coûtant unitaire: ${l.coutant_unitaire} $`}>
-                                    {l.coutant_manquant ? <span>⚠ —</span> : fmt$(l.coutant)}
+                                  <td style={{padding:'6px 10px',textAlign:'right',color:l.coutant_manquant?C.yellow:l.coutant_source==='manuel'?C.yellow:C.red,fontFamily:'monospace',background:l.coutant_manquant?(dark?'#2b2411':'#fff8e1'):undefined,cursor:'pointer'}}
+                                      onClick={(e:any)=>{e.stopPropagation();setEditingCoutant({pk_code:l.pk_code,cout:String(l.coutant_unitaire||''),source:l.coutant_source})}}
+                                      title={l.coutant_manquant ? '⚠ Pas de coûtant trouvé. Clique pour saisir manuellement.' : l.coutant_source==='manuel' ? `✏️ Coûtant manuel : ${l.coutant_unitaire} $/u (clique pour modifier)` : `Coûtant Traction : ${l.coutant_unitaire} $/u (clique pour overrider manuellement)`}>
+                                    {l.coutant_manquant ? <span>⚠ + saisir</span> : (
+                                      <>
+                                        {l.coutant_source==='manuel' && <span style={{fontSize:9}}>✏️ </span>}
+                                        {fmt$(l.coutant)}
+                                      </>
+                                    )}
                                   </td>
                                   <td style={{padding:'6px 10px',textAlign:'right',color:C.red,fontFamily:'monospace',fontSize:11}}>{fmt$(l.commissions)}</td>
                                   <td style={{padding:'6px 10px',textAlign:'right',color:C.red,fontFamily:'monospace',fontSize:11}}>{fmt$(l.fba_fees+l.pub)}</td>
@@ -8621,6 +8653,58 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                       </table>
                     </div>
                   </div>
+
+                  {/* Modal saisie coûtant manuel */}
+                  {editingCoutant && (
+                    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+                         onClick={()=>setEditingCoutant(null)}>
+                      <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,maxWidth:480,width:'100%',border:`2px solid ${C.red}`,padding:18}}>
+                        <div style={{fontSize:14,fontWeight:900,marginBottom:6,color:C.red}}>💰 Coûtant unitaire manuel</div>
+                        <div style={{fontSize:11,color:sub,marginBottom:14,lineHeight:1.5}}>
+                          PKCode : <code style={{background:dark?'#222':'#eee',padding:'2px 6px',borderRadius:4,fontFamily:'monospace'}}>{editingCoutant.pk_code}</code><br/>
+                          {editingCoutant.source === 'manuel' ? (
+                            <span>Tu as déjà saisi un coûtant manuel pour ce PKCode. Modification ci-dessous.</span>
+                          ) : editingCoutant.source === 'aucun' ? (
+                            <span>Aucun coûtant trouvé dans Traction. Saisis-le manuellement ici.</span>
+                          ) : (
+                            <span>Coûtant actuel issu de Traction. Saisir une valeur ici override Traction.</span>
+                          )}
+                        </div>
+                        <input type="number" step="0.01" value={editingCoutant.cout}
+                          onChange={e=>setEditingCoutant({...editingCoutant, cout:e.target.value})}
+                          placeholder="0,00" autoFocus
+                          style={{...S,fontSize:14,padding:'10px 12px',width:'100%',marginBottom:14}}/>
+                        <div style={{display:'flex',gap:8,justifyContent:'space-between',flexWrap:'wrap'}}>
+                          <div>
+                            {editingCoutant.source === 'manuel' && (
+                              <button onClick={async()=>{
+                                await effacerCoutantManuel(editingCoutant.pk_code)
+                                setEditingCoutant(null)
+                              }}
+                                style={{background:'transparent',border:`1px solid ${C.red}`,color:C.red,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                                🗑 Retirer (utiliser Traction)
+                              </button>
+                            )}
+                          </div>
+                          <div style={{display:'flex',gap:8}}>
+                            <button onClick={()=>setEditingCoutant(null)}
+                              style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                              Annuler
+                            </button>
+                            <button onClick={async()=>{
+                              const c = Number(editingCoutant.cout)
+                              if (isNaN(c) || c <= 0) { alert('Coûtant invalide (doit être > 0)'); return }
+                              await saisirCoutant(editingCoutant.pk_code, c)
+                              setEditingCoutant(null)
+                            }}
+                              style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                              ✓ Enregistrer
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Modal saisie coût transport */}
                   {editingTransport && (

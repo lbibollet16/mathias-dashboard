@@ -88,13 +88,26 @@ export async function GET(req: NextRequest) {
       }
       if (!descByPk.has(v.base) && r.desc_fra) descByPk.set(v.base, r.desc_fra)
     }
-    function findCoutant(pk_code: string): number {
-      if (coutantByPkExact.has(pk_code)) return coutantByPkExact.get(pk_code)!
+    // Charger les coûtants manuels (saisis par l'utilisateur, prioritaires)
+    const { data: coutsManuelsRows } = await supabaseAdmin
+      .from('amazon_couts_manuels')
+      .select('pk_code, cout_unitaire')
+    const coutsManuelsByPk = new Map<string, number>()
+    for (const r of coutsManuelsRows || []) {
+      coutsManuelsByPk.set(r.pk_code, Number(r.cout_unitaire || 0))
+    }
+    function findCoutant(pk_code: string): { value: number; source: 'manuel'|'pk_exact'|'base'|'wide_base'|'aucun' } {
+      // Priorité 1 : saisie manuelle (override Traction)
+      if (coutsManuelsByPk.has(pk_code)) {
+        return { value: coutsManuelsByPk.get(pk_code)!, source: 'manuel' }
+      }
+      // Priorité 2-4 : recherche dans Traction
+      if (coutantByPkExact.has(pk_code)) return { value: coutantByPkExact.get(pk_code)!, source: 'pk_exact' }
       const base = detectVariant(pk_code).base
-      if (coutantByBase.has(base)) return coutantByBase.get(base)!
+      if (coutantByBase.has(base)) return { value: coutantByBase.get(base)!, source: 'base' }
       const wb = wideBase(base)
-      if (coutantByWideBase.has(wb)) return coutantByWideBase.get(wb)!
-      return 0
+      if (coutantByWideBase.has(wb)) return { value: coutantByWideBase.get(wb)!, source: 'wide_base' }
+      return { value: 0, source: 'aucun' }
     }
 
     // Charger les coûts de transport par pk_code (saisis manuellement)
@@ -227,9 +240,11 @@ export async function GET(req: NextRequest) {
     // 2ème passe : coûtant, transport, frais globaux au prorata
     const totalRevenuTous = [...byPk.values()].reduce((s, l) => s + l.revenu, 0)
     const skusSansCoutant: string[] = []
+    const coutantSourceByPk = new Map<string, string>()
     for (const line of byPk.values()) {
       const base = detectVariant(line.pk_code).base
-      const coutantUnit = findCoutant(line.pk_code)
+      const { value: coutantUnit, source } = findCoutant(line.pk_code)
+      coutantSourceByPk.set(line.pk_code, source)
       if (coutantUnit === 0 && line.qty_lautopak_total > 0) skusSansCoutant.push(line.pk_code)
       const transportUnit = transportByPk.get(line.pk_code) || transportByPk.get(base) || 0
       line.coutant = -1 * line.qty_lautopak_total * coutantUnit
@@ -244,7 +259,8 @@ export async function GET(req: NextRequest) {
       const ventesNet = Number((l.revenu + l.refunds).toFixed(2))
       const margeAvantTransport = Number((ventesNet + l.coutant + l.commissions_orders + l.commissions_refunds + l.fba_fees + l.pub).toFixed(2))
       const margeBrute = Number((margeAvantTransport + l.transport).toFixed(2))
-      const coutantUnit = findCoutant(l.pk_code)
+      const { value: coutantUnit } = findCoutant(l.pk_code)
+      const coutantSource = coutantSourceByPk.get(l.pk_code) || 'aucun'
       const margePct = ventesNet > 0 ? Number(((margeBrute / ventesNet) * 100).toFixed(1)) : null
       const variantes = [...l.variantes.entries()].map(([sku, v]) => ({
         amazon_sku: sku,
@@ -265,6 +281,7 @@ export async function GET(req: NextRequest) {
         ventes_net: ventesNet,
         coutant: Number(l.coutant.toFixed(2)),
         coutant_unitaire: coutantUnit,
+        coutant_source: coutantSource,                                        // 'manuel' | 'pk_exact' | 'base' | 'wide_base' | 'aucun'
         coutant_manquant: coutantUnit === 0 && l.qty_lautopak_total > 0,
         commissions: Number((l.commissions_orders + l.commissions_refunds).toFixed(2)),
         fba_fees: Number(l.fba_fees.toFixed(2)),
