@@ -8485,8 +8485,24 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 
             {profitabiliteData && (() => {
               const t = profitabiliteData.totaux
+              const nbSansCoutant = profitabiliteData.nb_skus_sans_coutant || 0
               return (
                 <>
+                  {nbSansCoutant > 0 && (
+                    <div style={{background:dark?'#2b1113':'#fce8e6',border:`1px solid ${C.red}`,borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:12,color:C.red,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                      <span style={{fontSize:18}}>⚠️</span>
+                      <div style={{flex:1,minWidth:200}}>
+                        <strong>{nbSansCoutant} SKU{nbSansCoutant>1?'s':''} sans coûtant Traction</strong> — la marge calculée pour ces lignes est faussée (= 100% revenu).
+                        Vérifie dans Traction que le prix coûtant est bien renseigné, ou pour les nouveautés non encore syncées tu peux faire « 🔄 Sync Traction ».
+                      </div>
+                      <details style={{fontSize:11}}>
+                        <summary style={{cursor:'pointer',color:C.red,fontWeight:700}}>Voir la liste</summary>
+                        <div style={{marginTop:6,maxHeight:120,overflowY:'auto',background:dark?'#1a1a1a':'#fff',padding:'6px 10px',borderRadius:6,fontFamily:'monospace',fontSize:10,lineHeight:1.6}}>
+                          {(profitabiliteData.skus_sans_coutant || []).join(', ')}
+                        </div>
+                      </details>
+                    </div>
+                  )}
                   {/* Totaux */}
                   <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(6,1fr)',gap:8,marginBottom:14}}>
                     <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
@@ -8551,7 +8567,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                                   <td style={{padding:'6px 10px',fontSize:11,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name||''}>{l.product_name||'—'}</td>
                                   <td style={{padding:'6px 10px',textAlign:'right',fontWeight:700}}>{l.qty_lautopak}{l.qty_refund>0&&<span style={{color:C.red,fontSize:10}}>(−{l.qty_refund})</span>}</td>
                                   <td style={{padding:'6px 10px',textAlign:'right',color:C.blue,fontFamily:'monospace'}}>{fmt$(l.ventes_net)}</td>
-                                  <td style={{padding:'6px 10px',textAlign:'right',color:C.red,fontFamily:'monospace'}}>{fmt$(l.coutant)}</td>
+                                  <td style={{padding:'6px 10px',textAlign:'right',color:l.coutant_manquant?C.yellow:C.red,fontFamily:'monospace',background:l.coutant_manquant?(dark?'#2b2411':'#fff8e1'):undefined}}
+                                      title={l.coutant_manquant ? '⚠ Pas de coûtant trouvé dans Traction pour ce PKCode' : `Coûtant unitaire: ${l.coutant_unitaire} $`}>
+                                    {l.coutant_manquant ? <span>⚠ —</span> : fmt$(l.coutant)}
+                                  </td>
                                   <td style={{padding:'6px 10px',textAlign:'right',color:C.red,fontFamily:'monospace',fontSize:11}}>{fmt$(l.commissions)}</td>
                                   <td style={{padding:'6px 10px',textAlign:'right',color:C.red,fontFamily:'monospace',fontSize:11}}>{fmt$(l.fba_fees+l.pub)}</td>
                                   <td style={{padding:'6px 10px',textAlign:'right'}} onClick={(e:any)=>{e.stopPropagation();setEditingTransport({pk_code:l.pk_code,cout:String(transportSaisi||'')})}}>

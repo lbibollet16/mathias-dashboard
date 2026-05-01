@@ -65,15 +65,36 @@ export async function GET(req: NextRequest) {
     // Charger les multi-mappings et coûtants Traction
     const manualMappings = await loadManualMappings()
     const tractionRows = await loadTractionForSettlement(id, { code_ligne_in: ['AMA', 'FBA', 'FBM'] })
-    const coutantByPk = new Map<string, number>()
+    // 3 niveaux d'index pour maximiser les chances de trouver le coûtant :
+    //   1. par pk_code exact (priorité haute)
+    //   2. par base (= pk_code sans préfixe FBA-/FBM-/HUB-)
+    //   3. par wide_base (= base sans le préfixe A initial parfois ajouté)
+    const coutantByPkExact = new Map<string, number>()
+    const coutantByBase = new Map<string, number>()
+    const coutantByWideBase = new Map<string, number>()
     const descByPk = new Map<string, string>()
+    function wideBase(b: string): string {
+      const m = /^[Aa](\d.*)$/.exec(b)
+      return m ? m[1] : b
+    }
     for (const r of tractionRows) {
       const v = detectVariant(r.pk_code)
-      // Indexer par base code (= pk_code sans préfixe)
-      if (!coutantByPk.has(v.base) && Number(r.prix_coutant || 0) > 0) {
-        coutantByPk.set(v.base, Number(r.prix_coutant))
+      const c = Number(r.prix_coutant || 0)
+      if (c > 0) {
+        if (!coutantByPkExact.has(r.pk_code)) coutantByPkExact.set(r.pk_code, c)
+        if (!coutantByBase.has(v.base)) coutantByBase.set(v.base, c)
+        const wb = wideBase(v.base)
+        if (!coutantByWideBase.has(wb)) coutantByWideBase.set(wb, c)
       }
       if (!descByPk.has(v.base) && r.desc_fra) descByPk.set(v.base, r.desc_fra)
+    }
+    function findCoutant(pk_code: string): number {
+      if (coutantByPkExact.has(pk_code)) return coutantByPkExact.get(pk_code)!
+      const base = detectVariant(pk_code).base
+      if (coutantByBase.has(base)) return coutantByBase.get(base)!
+      const wb = wideBase(base)
+      if (coutantByWideBase.has(wb)) return coutantByWideBase.get(wb)!
+      return 0
     }
 
     // Charger les coûts de transport par pk_code (saisis manuellement)
@@ -205,18 +226,17 @@ export async function GET(req: NextRequest) {
 
     // 2ème passe : coûtant, transport, frais globaux au prorata
     const totalRevenuTous = [...byPk.values()].reduce((s, l) => s + l.revenu, 0)
+    const skusSansCoutant: string[] = []
     for (const line of byPk.values()) {
       const base = detectVariant(line.pk_code).base
-      const coutantUnit = coutantByPk.get(base) || 0
+      const coutantUnit = findCoutant(line.pk_code)
+      if (coutantUnit === 0 && line.qty_lautopak_total > 0) skusSansCoutant.push(line.pk_code)
       const transportUnit = transportByPk.get(line.pk_code) || transportByPk.get(base) || 0
-      // Coûtant : qté physique nette (vendue - retournée sellable, mais on ne sait pas
-      // ici si c'est sellable ou non — on prend la qté vendue brute)
       line.coutant = -1 * line.qty_lautopak_total * coutantUnit
       line.transport = -1 * line.qty_lautopak_total * transportUnit
-      // Frais globaux au prorata du revenu
       const part = totalRevenuTous > 0 ? line.revenu / totalRevenuTous : 0
-      line.fba_fees = (fbaStockage + fbaAutres) * part   // négatif
-      line.pub = pubTotale * part                          // négatif
+      line.fba_fees = (fbaStockage + fbaAutres) * part
+      line.pub = pubTotale * part
     }
 
     // Format de sortie
@@ -224,6 +244,7 @@ export async function GET(req: NextRequest) {
       const ventesNet = Number((l.revenu + l.refunds).toFixed(2))
       const margeAvantTransport = Number((ventesNet + l.coutant + l.commissions_orders + l.commissions_refunds + l.fba_fees + l.pub).toFixed(2))
       const margeBrute = Number((margeAvantTransport + l.transport).toFixed(2))
+      const coutantUnit = findCoutant(l.pk_code)
       const margePct = ventesNet > 0 ? Number(((margeBrute / ventesNet) * 100).toFixed(1)) : null
       const variantes = [...l.variantes.entries()].map(([sku, v]) => ({
         amazon_sku: sku,
@@ -243,7 +264,8 @@ export async function GET(req: NextRequest) {
         refunds: Number(l.refunds.toFixed(2)),
         ventes_net: ventesNet,
         coutant: Number(l.coutant.toFixed(2)),
-        coutant_unitaire: coutantByPk.get(detectVariant(l.pk_code).base) || 0,
+        coutant_unitaire: coutantUnit,
+        coutant_manquant: coutantUnit === 0 && l.qty_lautopak_total > 0,
         commissions: Number((l.commissions_orders + l.commissions_refunds).toFixed(2)),
         fba_fees: Number(l.fba_fees.toFixed(2)),
         pub: Number(l.pub.toFixed(2)),
@@ -282,6 +304,8 @@ export async function GET(req: NextRequest) {
         pub_totale: pubTotale,
         total: fraisGlobauxTotal,
       },
+      skus_sans_coutant: skusSansCoutant,
+      nb_skus_sans_coutant: skusSansCoutant.length,
     })
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message || String(e) }, { status: 500 })
