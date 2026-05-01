@@ -206,9 +206,18 @@ export async function POST() {
       for (const c of comptagesAReconcilier) {
         const s = stockTraction.get(c.code_piece)
         if (!s) continue
+        // Écart d'inventaire = différence AU MOMENT DU COMPTAGE (qte_comptee
+        // vs qte_systeme), PAS au moment de la sync. Les ventes intermédiaires
+        // (entre comptage et sync) ne doivent pas amplifier l'écart — elles
+        // sont déjà comptabilisées normalement.
+        // s.stock est sauvegardé dans stock_apres_sync uniquement à titre
+        // informatif (= où on en est aujourd'hui).
+        const ecartReconcilie = Number(c.qte_comptee || 0) - Number(c.qte_systeme || 0)
         await supabaseAdmin.from('inventaire_comptages').update({
-          stock_apres_sync: s.stock, ecart_reconcilie: c.qte_comptee - s.stock,
-          date_reconciliation: now.toISOString(), statut: 'reconcilie'
+          stock_apres_sync: s.stock,
+          ecart_reconcilie: ecartReconcilie,
+          date_reconciliation: now.toISOString(),
+          statut: 'reconcilie'
         }).eq('id', c.id)
         nb++
       }
