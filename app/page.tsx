@@ -5167,7 +5167,13 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
 // ── Amazon Tab (Phase 1) ─────────────────────────────────────────────────────
 function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
-  const [vue, setVue] = useState<'fermeture'|'import'|'settlements'|'inventaire'|'consolide'|'audit'|'mapping'|'multimapping'|'archives'|'rapport'|'unsellable_suivi'>('fermeture')
+  const [vue, setVue] = useState<'fermeture'|'import'|'settlements'|'inventaire'|'consolide'|'audit'|'mapping'|'multimapping'|'archives'|'rapport'|'unsellable_suivi'|'profitabilite'|'forecast'>('fermeture')
+  const [profitabiliteData, setProfitabiliteData] = useState<any>(null)
+  const [profitSettlementId, setProfitSettlementId] = useState<string>('')
+  const [forecastData, setForecastData] = useState<any>(null)
+  const [coutsTransport, setCoutsTransport] = useState<any[]>([])
+  const [editingTransport, setEditingTransport] = useState<{ pk_code: string; cout: string } | null>(null)
+  const [drilldownPk, setDrilldownPk] = useState<string | null>(null)
   // États de la vue Fermeture (nouvelle vue principale)
   const [closureList, setClosureList] = useState<any[]>([])
   const [closureActif, setClosureActif] = useState<string | null>(null)
@@ -5500,6 +5506,48 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         body: JSON.stringify({ action: 'reopen' })
       })
       await chargerClosureDetail(settlementId)
+    } catch (e: any) { alert(e.message) }
+  }
+
+  async function chargerProfitabilite(settlementId: string) {
+    setProfitSettlementId(settlementId)
+    try {
+      const r = await fetch(`/api/amazon/profitabilite?id=${encodeURIComponent(settlementId)}`)
+      const j = await r.json()
+      if (!j.erreur) setProfitabiliteData(j)
+      else alert(j.erreur)
+    } catch (e: any) { alert(e.message) }
+  }
+
+  async function chargerForecast() {
+    try {
+      const r = await fetch('/api/amazon/forecast')
+      const j = await r.json()
+      if (!j.erreur) setForecastData(j)
+    } catch {}
+  }
+
+  async function chargerCoutsTransport() {
+    try {
+      const r = await fetch('/api/amazon/couts-transport')
+      const j = await r.json()
+      if (Array.isArray(j)) setCoutsTransport(j)
+    } catch {}
+  }
+
+  async function saisirCoutTransport(pk_code: string, cout_unitaire: number) {
+    try {
+      await fetch('/api/amazon/couts-transport', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          pk_code, cout_unitaire,
+          updated_by: profil?.email || profil?.nom || 'Inconnu',
+        })
+      })
+      await chargerCoutsTransport()
+      // Recharger la profitabilité pour refléter le nouveau coût
+      if (profitSettlementId) await chargerProfitabilite(profitSettlementId)
     } catch (e: any) { alert(e.message) }
   }
 
@@ -6613,6 +6661,14 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         <button onClick={()=>{setVue('multimapping'); chargerMultimapping()}}
           style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='multimapping'?C.blue:bdr}`,background:vue==='multimapping'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='multimapping'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
           🔗 Multi-mapping SKU
+        </button>
+        <button onClick={()=>{setVue('profitabilite'); chargerCoutsTransport(); if(closureList[0]) chargerProfitabilite(closureList[0].settlement_id)}}
+          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='profitabilite'?C.green:bdr}`,background:vue==='profitabilite'?(dark?'#0d2a18':'#e6f4ea'):'transparent',color:vue==='profitabilite'?C.green:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+          💰 Profitabilité
+        </button>
+        <button onClick={()=>{setVue('forecast'); chargerForecast()}}
+          style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='forecast'?C.blue:bdr}`,background:vue==='forecast'?(dark?'#1a233a':'#e8f0fe'):'transparent',color:vue==='forecast'?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+          📈 Prévisionnel
         </button>
         <button onClick={()=>{setVue('unsellable_suivi'); chargerUnsellableSuivi()}}
           style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${vue==='unsellable_suivi'?C.red:bdr}`,background:vue==='unsellable_suivi'?(dark?'#2b1113':'#fce8e6'):'transparent',color:vue==='unsellable_suivi'?C.red:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
@@ -8392,6 +8448,283 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       })()}
 
       {/* ═══ Vue SUIVI UNSELLABLE ═══ */}
+      {/* ═══ Vue PROFITABILITÉ par settlement ═══ */}
+      {vue === 'profitabilite' && (() => {
+        const fmt$ = (n: number) => `${Number(n||0).toLocaleString('fr-CA',{minimumFractionDigits:2,maximumFractionDigits:2})} $`
+        const transportByPk = new Map(coutsTransport.map((c:any)=>[c.pk_code, Number(c.cout_unitaire)]))
+        return (
+          <div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'14px 16px',marginBottom:14}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                <div>
+                  <div style={{fontSize:14,fontWeight:800,marginBottom:4}}>💰 Profitabilité par PKCode</div>
+                  <div style={{fontSize:11,color:sub,maxWidth:680,lineHeight:1.5}}>
+                    Marge par produit pour un settlement : Revenu − Coûtant Traction − Commissions Amazon − FBA Fees − Pub (au prorata) − Transport (saisi manuellement). Drill-down sur les variantes Amazon (packs) en cliquant sur une ligne.
+                  </div>
+                </div>
+                <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                  <span style={{fontSize:11,color:sub}}>Settlement :</span>
+                  <select value={profitSettlementId} onChange={e=>chargerProfitabilite(e.target.value)}
+                    style={{...S,fontSize:12,padding:'8px 10px',minWidth:180}}>
+                    <option value="">— choisir —</option>
+                    {closureList.map((s:any)=>(
+                      <option key={s.settlement_id} value={s.settlement_id}>
+                        {s.settlement_id} ({String(s.settlement_start||'').split('T')[0]} → {String(s.settlement_end||'').split('T')[0]})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {!profitabiliteData && (
+              <div style={{textAlign:'center',padding:30,color:sub,fontSize:13}}>
+                Sélectionne un settlement ci-dessus pour voir la profitabilité par PKCode.
+              </div>
+            )}
+
+            {profitabiliteData && (() => {
+              const t = profitabiliteData.totaux
+              return (
+                <>
+                  {/* Totaux */}
+                  <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(6,1fr)',gap:8,marginBottom:14}}>
+                    <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
+                      <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Ventes net</div>
+                      <div style={{fontSize:18,fontWeight:900,color:C.blue}}>{fmt$(t.ventes_net)}</div>
+                      <div style={{fontSize:10,color:sub}}>{t.qty_lautopak} unités</div>
+                    </div>
+                    <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.red}`}}>
+                      <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Coûtant</div>
+                      <div style={{fontSize:18,fontWeight:900,color:C.red}}>{fmt$(t.coutant)}</div>
+                    </div>
+                    <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.red}`}}>
+                      <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Commissions</div>
+                      <div style={{fontSize:18,fontWeight:900,color:C.red}}>{fmt$(t.commissions)}</div>
+                    </div>
+                    <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.red}`}}>
+                      <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>FBA + Pub</div>
+                      <div style={{fontSize:18,fontWeight:900,color:C.red}}>{fmt$(t.fba_fees + t.pub)}</div>
+                    </div>
+                    <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.yellow}`}}>
+                      <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Transport</div>
+                      <div style={{fontSize:18,fontWeight:900,color:C.yellow}}>{fmt$(t.transport)}</div>
+                    </div>
+                    <div style={{background:card,border:`2px solid ${t.marge_brute>=0?C.green:C.red}`,borderRadius:10,padding:'10px 12px'}}>
+                      <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Marge brute</div>
+                      <div style={{fontSize:18,fontWeight:900,color:t.marge_brute>=0?C.green:C.red}}>{fmt$(t.marge_brute)}</div>
+                      <div style={{fontSize:10,color:sub}}>{t.marge_pct != null ? `${t.marge_pct}%` : '—'}</div>
+                    </div>
+                  </div>
+
+                  {/* Tableau des PKCode */}
+                  <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,overflow:'hidden'}}>
+                    <div style={{overflowX:'auto'}}>
+                      <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                        <thead style={{background:thBg}}>
+                          <tr>
+                            <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`,width:40}}></th>
+                            <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>PKCode</th>
+                            <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Produit</th>
+                            <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Qté</th>
+                            <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Ventes</th>
+                            <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Coûtant</th>
+                            <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Comm.</th>
+                            <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>FBA+Pub</th>
+                            <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Transport $/u</th>
+                            <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Marge $</th>
+                            <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Marge %</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {profitabiliteData.lignes.map((l: any, i: number) => {
+                            const isExp = drilldownPk === l.pk_code
+                            const transportSaisi = transportByPk.get(l.pk_code)
+                            return (
+                              <React.Fragment key={l.pk_code+i}>
+                                <tr onClick={()=>setDrilldownPk(isExp?null:l.pk_code)}
+                                  style={{borderBottom:`1px solid ${bdr}`,cursor:'pointer',background:isExp?(dark?'#1a233a':'#e8f0fe'):'transparent'}}
+                                  onMouseEnter={(e:any)=>!isExp && (e.currentTarget.style.background=hvr)}
+                                  onMouseLeave={(e:any)=>!isExp && (e.currentTarget.style.background='transparent')}>
+                                  <td style={{padding:'6px 10px',color:sub}}>{l.nb_variantes>1 ? (isExp?'▼':'▶') : ''}</td>
+                                  <td style={{padding:'6px 10px',fontFamily:'monospace',fontWeight:700}}>{l.pk_code}</td>
+                                  <td style={{padding:'6px 10px',fontSize:11,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name||''}>{l.product_name||'—'}</td>
+                                  <td style={{padding:'6px 10px',textAlign:'right',fontWeight:700}}>{l.qty_lautopak}{l.qty_refund>0&&<span style={{color:C.red,fontSize:10}}>(−{l.qty_refund})</span>}</td>
+                                  <td style={{padding:'6px 10px',textAlign:'right',color:C.blue,fontFamily:'monospace'}}>{fmt$(l.ventes_net)}</td>
+                                  <td style={{padding:'6px 10px',textAlign:'right',color:C.red,fontFamily:'monospace'}}>{fmt$(l.coutant)}</td>
+                                  <td style={{padding:'6px 10px',textAlign:'right',color:C.red,fontFamily:'monospace',fontSize:11}}>{fmt$(l.commissions)}</td>
+                                  <td style={{padding:'6px 10px',textAlign:'right',color:C.red,fontFamily:'monospace',fontSize:11}}>{fmt$(l.fba_fees+l.pub)}</td>
+                                  <td style={{padding:'6px 10px',textAlign:'right'}} onClick={(e:any)=>{e.stopPropagation();setEditingTransport({pk_code:l.pk_code,cout:String(transportSaisi||'')})}}>
+                                    {transportSaisi !== undefined ? (
+                                      <span style={{color:C.yellow,fontFamily:'monospace',fontWeight:700,cursor:'pointer'}}>{fmt$(transportSaisi)}</span>
+                                    ) : (
+                                      <span style={{color:sub,fontSize:10,fontStyle:'italic',cursor:'pointer',textDecoration:'underline'}}>+ saisir</span>
+                                    )}
+                                  </td>
+                                  <td style={{padding:'6px 10px',textAlign:'right',fontWeight:800,color:l.marge_brute>=0?C.green:C.red,fontFamily:'monospace'}}>{fmt$(l.marge_brute)}</td>
+                                  <td style={{padding:'6px 10px',textAlign:'right',fontWeight:800,color:l.marge_pct!=null?(l.marge_pct>=20?C.green:l.marge_pct>=10?C.yellow:C.red):sub}}>
+                                    {l.marge_pct != null ? `${l.marge_pct}%` : '—'}
+                                  </td>
+                                </tr>
+                                {isExp && l.variantes && l.variantes.length > 0 && (
+                                  <tr style={{background:dark?'#0d0d0d':'#fafbfc',borderBottom:`1px solid ${bdr}`}}>
+                                    <td colSpan={11} style={{padding:'8px 14px'}}>
+                                      <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase',marginBottom:4}}>Variantes Amazon regroupées sous ce PKCode</div>
+                                      <table style={{width:'100%',fontSize:11}}>
+                                        <thead><tr>
+                                          <th style={{padding:'4px 8px',textAlign:'left',color:sub}}>SKU Amazon</th>
+                                          <th style={{padding:'4px 8px',textAlign:'right',color:sub}}>Qté Amazon</th>
+                                          <th style={{padding:'4px 8px',textAlign:'right',color:sub}}>Multiplier</th>
+                                          <th style={{padding:'4px 8px',textAlign:'right',color:sub}}>Qté Traction</th>
+                                          <th style={{padding:'4px 8px',textAlign:'right',color:sub}}>Revenu</th>
+                                          <th style={{padding:'4px 8px',textAlign:'right',color:sub}}>Refunds</th>
+                                        </tr></thead>
+                                        <tbody>
+                                          {l.variantes.map((v:any) => (
+                                            <tr key={v.amazon_sku}>
+                                              <td style={{padding:'3px 8px',fontFamily:'monospace',fontWeight:700}}>{v.amazon_sku}</td>
+                                              <td style={{padding:'3px 8px',textAlign:'right'}}>{v.qty_amazon}</td>
+                                              <td style={{padding:'3px 8px',textAlign:'right',color:C.yellow,fontWeight:700}}>×{v.multiplier}</td>
+                                              <td style={{padding:'3px 8px',textAlign:'right',fontWeight:700}}>{v.qty_amazon * v.multiplier}</td>
+                                              <td style={{padding:'3px 8px',textAlign:'right',color:C.blue,fontFamily:'monospace'}}>{fmt$(v.revenu)}</td>
+                                              <td style={{padding:'3px 8px',textAlign:'right',color:C.red,fontFamily:'monospace'}}>{v.refunds<0?fmt$(v.refunds):'—'}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Modal saisie coût transport */}
+                  {editingTransport && (
+                    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+                         onClick={()=>setEditingTransport(null)}>
+                      <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,maxWidth:420,width:'100%',border:`2px solid ${C.yellow}`,padding:18}}>
+                        <div style={{fontSize:14,fontWeight:900,marginBottom:6,color:C.yellow}}>🚚 Coût de transport unitaire</div>
+                        <div style={{fontSize:11,color:sub,marginBottom:14,lineHeight:1.5}}>
+                          PKCode : <code style={{background:dark?'#222':'#eee',padding:'2px 6px',borderRadius:4,fontFamily:'monospace'}}>{editingTransport.pk_code}</code><br/>
+                          Coût par unité physique (vers FBA pour les FBA-, livraison client pour les FBM-).
+                        </div>
+                        <input type="number" step="0.01" value={editingTransport.cout}
+                          onChange={e=>setEditingTransport({...editingTransport, cout:e.target.value})}
+                          placeholder="0,00"
+                          style={{...S,fontSize:14,padding:'10px 12px',width:'100%',marginBottom:14}}/>
+                        <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+                          <button onClick={()=>setEditingTransport(null)}
+                            style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                            Annuler
+                          </button>
+                          <button onClick={async()=>{
+                            const c = Number(editingTransport.cout)
+                            if (isNaN(c) || c < 0) { alert('Coût invalide'); return }
+                            await saisirCoutTransport(editingTransport.pk_code, c)
+                            setEditingTransport(null)
+                          }}
+                            style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                            ✓ Enregistrer
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )
+            })()}
+          </div>
+        )
+      })()}
+
+      {/* ═══ Vue PRÉVISIONNEL DE VENTE ═══ */}
+      {vue === 'forecast' && (() => {
+        const fmt$ = (n: number) => `${Number(n||0).toLocaleString('fr-CA',{minimumFractionDigits:2,maximumFractionDigits:2})} $`
+        if (!forecastData) return <div style={{textAlign:'center',padding:30,color:sub}}>⏳ Chargement...</div>
+        const confLabels: Record<string, { label: string; color: string }> = {
+          'aucune': { label: 'Aucune donnée', color: C.red },
+          'low': { label: 'Faible (< 30j)', color: C.red },
+          'medium': { label: 'Moyenne (30-90j)', color: C.yellow },
+          'high': { label: 'Bonne (90-180j)', color: C.green },
+          'very-high': { label: 'Très bonne (180j+)', color: C.green },
+        }
+        const conf = confLabels[forecastData.confiance] || { label: forecastData.confiance, color: sub }
+        return (
+          <div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'14px 16px',marginBottom:14}}>
+              <div style={{fontSize:14,fontWeight:800,marginBottom:6}}>📈 Prévisionnel de vente par PKCode</div>
+              <div style={{fontSize:11,color:sub,lineHeight:1.5,marginBottom:10}}>
+                Calcul basé sur l'historique des settlements importés. Plus tu auras de settlements, plus la prévision sera fiable.
+                Le système s'auto-ajuste à chaque nouveau settlement importé.
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:8}}>
+                <div style={{background:dark?'#0f0f0f':'#fafbfc',borderRadius:8,padding:'8px 12px'}}>
+                  <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase'}}>Settlements</div>
+                  <div style={{fontSize:18,fontWeight:900}}>{forecastData.nb_settlements}</div>
+                </div>
+                <div style={{background:dark?'#0f0f0f':'#fafbfc',borderRadius:8,padding:'8px 12px'}}>
+                  <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase'}}>Jours d'historique</div>
+                  <div style={{fontSize:18,fontWeight:900}}>{forecastData.jours_historique}</div>
+                </div>
+                <div style={{background:dark?'#0f0f0f':'#fafbfc',borderRadius:8,padding:'8px 12px'}}>
+                  <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase'}}>Confiance</div>
+                  <div style={{fontSize:14,fontWeight:900,color:conf.color}}>{conf.label}</div>
+                </div>
+                <div style={{background:dark?'#0f0f0f':'#fafbfc',borderRadius:8,padding:'8px 12px'}}>
+                  <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase'}}>Produits suivis</div>
+                  <div style={{fontSize:18,fontWeight:900}}>{forecastData.lignes.length}</div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,overflow:'hidden'}}>
+              <div style={{overflowX:'auto'}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                  <thead style={{background:thBg}}>
+                    <tr>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>PKCode</th>
+                      <th style={{padding:'8px 10px',textAlign:'left',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Produit</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Historique total</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Vente moy/jour</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`,background:C.blue+'22'}}>Prév. 30j</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`,background:C.blue+'22'}}>Prév. 60j</th>
+                      <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`,background:C.blue+'22'}}>Prév. 90j</th>
+                      <th style={{padding:'8px 10px',textAlign:'center',fontSize:10,color:sub,borderBottom:`1px solid ${bdr}`}}>Stabilité</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {forecastData.lignes.map((l: any, i: number) => {
+                      const stab = l.coefficient_variation
+                      const stabColor = stab === null ? sub : stab < 0.3 ? C.green : stab < 0.7 ? C.yellow : C.red
+                      const stabLabel = stab === null ? 'N/A' : stab < 0.3 ? 'Stable' : stab < 0.7 ? 'Variable' : 'Erratique'
+                      return (
+                        <tr key={l.pk_code+i} style={{borderBottom:`1px solid ${bdr}`}}>
+                          <td style={{padding:'6px 10px',fontFamily:'monospace',fontWeight:700}}>{l.pk_code}</td>
+                          <td style={{padding:'6px 10px',fontSize:11,maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={l.product_name||''}>{l.product_name||'—'}</td>
+                          <td style={{padding:'6px 10px',textAlign:'right',fontWeight:700}}>{l.qty_historique}</td>
+                          <td style={{padding:'6px 10px',textAlign:'right',color:sub,fontFamily:'monospace'}}>{l.vente_moy_par_jour}</td>
+                          <td style={{padding:'6px 10px',textAlign:'right',fontWeight:800,color:C.blue,background:C.blue+'11'}}>{l.prevision_30j}</td>
+                          <td style={{padding:'6px 10px',textAlign:'right',fontWeight:700,color:C.blue,background:C.blue+'11'}}>{l.prevision_60j}</td>
+                          <td style={{padding:'6px 10px',textAlign:'right',fontWeight:700,color:C.blue,background:C.blue+'11'}}>{l.prevision_90j}</td>
+                          <td style={{padding:'6px 10px',textAlign:'center'}}>
+                            <span style={{background:stabColor+'22',color:stabColor,padding:'2px 6px',borderRadius:6,fontSize:10,fontWeight:700}}>{stabLabel}</span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {vue === 'unsellable_suivi' && (() => {
         const data = unsellableSuivi
         if (!data) return <div style={{textAlign:'center',padding:40,color:sub}}>⏳ Chargement...</div>
