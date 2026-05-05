@@ -1,14 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    // Récupération d'un négatif vérifié précis par id (édition après retour compta)
+    const idParam = req.nextUrl.searchParams.get('id')
+    if (idParam) {
+      const { data, error } = await supabaseAdmin
+        .from('negatifs_verifies').select('*').eq('id', Number(idParam)).maybeSingle()
+      if (error) throw error
+      return NextResponse.json(data || null)
+    }
     const { data, error } = await supabaseAdmin
       .from('negatifs_verifies')
       .select('*')
       .order('date_verification', { ascending: false })
     if (error) throw error
     return NextResponse.json(data || [])
+  } catch (e: any) {
+    return NextResponse.json({ erreur: e.message }, { status: 500 })
+  }
+}
+
+// PATCH /api/negatifs-verifies
+// Body: { id, ...champs à mettre à jour }
+// Met à jour un négatif vérifié existant (utilisé par l'employé après un retour
+// comptabilité). N'écrit que les champs fournis.
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = await req.json()
+    const { id, ...fields } = body
+    if (!id) return NextResponse.json({ erreur: 'id requis' }, { status: 400 })
+
+    const allowed = [
+      'stock_au_moment','valeur_au_moment','note',
+      'serv_detail','serv_interne','serv_gar','pce_detail','recept_comm','dec_physique','autre',
+      'qte_reelle','ajustement','cause','commentaire',
+      'photo_url','photo_url2',
+      'alt_code_piece','alt_ajustement',
+      'alt_serv_detail','alt_serv_interne','alt_serv_gar','alt_pce_detail',
+      'alt_recept_comm','alt_dec_physique','alt_autre','alt_qte_reelle',
+    ]
+    const update: any = {}
+    for (const k of allowed) if (fields[k] !== undefined) update[k] = fields[k]
+
+    const { data, error } = await supabaseAdmin
+      .from('negatifs_verifies').update(update).eq('id', id).select().single()
+    if (error) throw error
+    return NextResponse.json(data)
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message }, { status: 500 })
   }

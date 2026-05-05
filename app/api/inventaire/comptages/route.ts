@@ -3,6 +3,14 @@ import { supabaseAdmin } from '@/lib/supabase'
 
 export async function GET(req: NextRequest) {
   try {
+    // Récupération d'un comptage précis par id (édition côté employé)
+    const idParam = req.nextUrl.searchParams.get('id')
+    if (idParam) {
+      const { data, error } = await supabaseAdmin.from('inventaire_comptages').select('*').eq('id', Number(idParam)).maybeSingle()
+      if (error) throw error
+      return NextResponse.json(data || null)
+    }
+
     // Vérifier les comptages d'aujourd'hui pour une pièce spécifique
     const codeCheck = req.nextUrl.searchParams.get('code_today')
     if (codeCheck) {
@@ -54,6 +62,50 @@ export async function POST(req: NextRequest) {
     }).select()
     if (error) throw error
     return NextResponse.json(data?.[0] || {})
+  } catch (e: any) {
+    return NextResponse.json({ erreur: e.message }, { status: 500 })
+  }
+}
+
+// PATCH /api/inventaire/comptages
+// Body: { id, localisation?, qte_comptee?, qte_reservee?, note?, photo_url? }
+// Met à jour un comptage existant (utilisé par l'employé après un retour
+// comptabilité). Recalcule ecart et — si le comptage est déjà réconcilié —
+// ecart_reconcilie immédiatement (pas d'attente de la prochaine sync ERP).
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = await req.json()
+    const { id, localisation, qte_comptee, qte_systeme, qte_reservee, note, photo_url } = body
+    if (!id) return NextResponse.json({ erreur: 'id requis' }, { status: 400 })
+
+    const { data: existing, error: errFetch } = await supabaseAdmin
+      .from('inventaire_comptages').select('*').eq('id', id).maybeSingle()
+    if (errFetch) throw errFetch
+    if (!existing) return NextResponse.json({ erreur: 'Comptage introuvable' }, { status: 404 })
+
+    const update: any = {}
+    if (localisation !== undefined) update.localisation = localisation
+    if (qte_comptee !== undefined) update.qte_comptee = qte_comptee
+    if (qte_systeme !== undefined) update.qte_systeme = qte_systeme
+    if (qte_reservee !== undefined) update.qte_reservee = qte_reservee
+    if (note !== undefined) update.note = note
+    if (photo_url !== undefined) update.photo_url = photo_url
+
+    const newQc = qte_comptee !== undefined ? Number(qte_comptee) : Number(existing.qte_comptee || 0)
+    const newQs = qte_systeme !== undefined ? Number(qte_systeme) : Number(existing.qte_systeme || 0)
+    update.ecart = newQc - newQs
+
+    // Réconciliation immédiate si déjà réconcilié — on garde le comptage visible
+    // côté Comptabilité avec son nouvel écart sans attendre la prochaine sync.
+    if (existing.statut === 'reconcilie') {
+      update.ecart_reconcilie = newQc - newQs
+      update.date_reconciliation = new Date().toISOString()
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('inventaire_comptages').update(update).eq('id', id).select().single()
+    if (error) throw error
+    return NextResponse.json(data)
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message }, { status: 500 })
   }

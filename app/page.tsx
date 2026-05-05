@@ -1560,6 +1560,93 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
       if (Array.isArray(j) && setRetoursActifs) setRetoursActifs(j)
     } catch (e: any) { alert(e.message) }
   }
+
+  // ── Édition d'un comptage retourné par la compta ───────────────────────────
+  const [editComptage, setEditComptage] = useState<any>(null)        // ligne inventaire_comptages chargée
+  const [editRetourId, setEditRetourId] = useState<number|null>(null) // id du retour comptabilité associé
+  const [editForm, setEditForm] = useState<{localisation:string, qte_comptee:string, note:string}>({localisation:'',qte_comptee:'',note:''})
+  const [editPhotoFile, setEditPhotoFile] = useState<File|null>(null)
+  const [editPhotoPreview, setEditPhotoPreview] = useState<string|null>(null)
+  const [editPhotoSupprimee, setEditPhotoSupprimee] = useState(false)
+  const [editLoading, setEditLoading] = useState(false)
+  const editPhotoRef = useRef<HTMLInputElement>(null)
+
+  async function ouvrirEditComptage(retour: any) {
+    try {
+      const r = await fetch('/api/inventaire/comptages?id=' + encodeURIComponent(String(retour.ref_id)))
+      const c = await r.json()
+      if (!c || c.erreur) { alert('Comptage introuvable'); return }
+      setEditComptage(c)
+      setEditRetourId(retour.id)
+      setEditForm({
+        localisation: c.localisation || '',
+        qte_comptee: String(c.qte_comptee ?? ''),
+        note: c.note || '',
+      })
+      setEditPhotoFile(null)
+      setEditPhotoPreview(null)
+      setEditPhotoSupprimee(false)
+    } catch (e: any) { alert(e.message) }
+  }
+
+  function fermerEditComptage() {
+    setEditComptage(null); setEditRetourId(null)
+    setEditForm({localisation:'',qte_comptee:'',note:''})
+    setEditPhotoFile(null); setEditPhotoPreview(null); setEditPhotoSupprimee(false)
+  }
+
+  function onEditPhotoChange(e: any) {
+    const f = e.target.files?.[0]
+    if (!f) return
+    setEditPhotoFile(f)
+    setEditPhotoSupprimee(false)
+    const reader = new FileReader()
+    reader.onload = ev => setEditPhotoPreview(ev.target?.result as string)
+    reader.readAsDataURL(f)
+    e.target.value = ''
+  }
+
+  async function sauverEditComptage() {
+    if (!editComptage || editForm.qte_comptee === '') return
+    setEditLoading(true)
+    try {
+      // Upload nouvelle photo si fournie
+      let photoUrl: string | null | undefined = undefined
+      if (editPhotoFile) {
+        const fd = new FormData()
+        fd.append('file', editPhotoFile)
+        fd.append('code_piece', editComptage.code_piece)
+        fd.append('localisation', editForm.localisation || editComptage.localisation || '')
+        const r = await fetch('/api/inventaire/photo', { method: 'POST', body: fd })
+        const j = await r.json()
+        if (j.url) photoUrl = j.url
+      } else if (editPhotoSupprimee) {
+        photoUrl = null
+      }
+
+      const body: any = {
+        id: editComptage.id,
+        localisation: editForm.localisation.trim().toUpperCase() || editComptage.localisation,
+        qte_comptee: Number(editForm.qte_comptee),
+        note: editForm.note || null,
+      }
+      if (photoUrl !== undefined) body.photo_url = photoUrl
+
+      const r = await fetch('/api/inventaire/comptages', {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+      })
+      const j = await r.json()
+      if (j.erreur) { alert(j.erreur); setEditLoading(false); return }
+
+      // Marquer le retour comme corrigé
+      if (editRetourId) await marquerRetourCorrigeCompt(editRetourId)
+
+      fermerEditComptage()
+    } catch (e: any) { alert(e.message) }
+    finally { setEditLoading(false) }
+  }
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
@@ -2283,7 +2370,108 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
 
   return <>
     {/* Bandeau de retours comptabilité — affiché en TÊTE si l'utilisateur a des comptages à corriger */}
-    <RetoursComptaBandeau retours={retoursActifs} source="comptage" employe={employe} dark={dark} card={card} bdr={bdr} sub={sub} C={C} onCorrige={marquerRetourCorrigeCompt}/>
+    <RetoursComptaBandeau retours={retoursActifs} source="comptage" employe={employe} dark={dark} card={card} bdr={bdr} sub={sub} C={C} onCorrige={marquerRetourCorrigeCompt} onEdit={ouvrirEditComptage}/>
+
+    {/* Input photo caché pour le modal d'édition */}
+    <input ref={editPhotoRef} type="file" accept="image/*" capture="environment" onChange={onEditPhotoChange} style={{display:'none'}}/>
+
+    {/* Modal d'édition d'un comptage retourné par la compta */}
+    {editComptage && (() => {
+      const qc = editForm.qte_comptee === '' ? null : Number(editForm.qte_comptee)
+      const qs = Number(editComptage.qte_systeme || 0)
+      const ec = qc === null ? null : qc - qs
+      const photoActuelle = !editPhotoSupprimee && !editPhotoPreview ? editComptage.photo_url : null
+      return (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:isMobile?0:20,overflowY:'auto'}}
+             onClick={fermerEditComptage}>
+          <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:isMobile?0:14,maxWidth:560,width:'100%',border:`2px solid ${C.blue}`,boxShadow:'0 10px 40px rgba(0,0,0,.4)',minHeight:isMobile?'100vh':undefined}}>
+            <div style={{position:'sticky',top:0,background:C.blue,color:'#fff',padding:'14px 16px',display:'flex',justifyContent:'space-between',alignItems:'center',borderRadius:isMobile?0:'12px 12px 0 0'}}>
+              <div>
+                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',opacity:.85}}>📦 Modifier le comptage</div>
+                <div style={{fontSize:18,fontWeight:900,fontFamily:'monospace',marginTop:2}}>{editComptage.code_piece}</div>
+              </div>
+              <button onClick={fermerEditComptage}
+                style={{background:'rgba(255,255,255,.2)',border:'none',borderRadius:8,padding:'7px 12px',color:'#fff',cursor:'pointer',fontSize:13,fontWeight:700}}>✕ Fermer</button>
+            </div>
+            <div style={{padding:'16px'}}>
+              <div style={{fontSize:11,color:sub,marginBottom:12}}>
+                Compté par <strong>{editComptage.employe}</strong> le {new Date(editComptage.date_comptage).toLocaleDateString('fr-CA',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+              </div>
+
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:14}}>
+                <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:10,padding:'10px',textAlign:'center',border:`1px solid ${C.blue}33`}}>
+                  <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase'}}>Système</div>
+                  <div style={{fontSize:22,fontWeight:900,color:C.blue}}>{qs}</div>
+                </div>
+                <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:10,padding:'10px',textAlign:'center',border:`1px solid ${C.green}33`}}>
+                  <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase'}}>Compté</div>
+                  <div style={{fontSize:22,fontWeight:900,color:C.green}}>{qc ?? '—'}</div>
+                </div>
+                <div style={{background:ec===0||ec===null?(dark?'#1a1a1a':'#f8f9fa'):(dark?'#2b1113':'#fce8e6'),borderRadius:10,padding:'10px',textAlign:'center',border:`1px solid ${ec===0||ec===null?bdr:C.red}33`}}>
+                  <div style={{fontSize:10,color:sub,fontWeight:700,textTransform:'uppercase'}}>Écart</div>
+                  <div style={{fontSize:22,fontWeight:900,color:ec===0||ec===null?sub:C.red}}>{ec===null?'—':(ec>0?'+':'')+ec}</div>
+                </div>
+              </div>
+
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Localisation</div>
+                <input value={editForm.localisation} onChange={e=>setEditForm(f=>({...f,localisation:e.target.value.toUpperCase()}))}
+                  style={{...S,fontSize:14,fontWeight:700,fontFamily:'monospace'}}/>
+              </div>
+
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Quantité comptée *</div>
+                <input type="number" step="any" inputMode="numeric" value={editForm.qte_comptee}
+                  onChange={e=>setEditForm(f=>({...f,qte_comptee:e.target.value}))}
+                  style={{...S,fontSize:20,fontWeight:900,textAlign:'center',padding:'12px'}}/>
+              </div>
+
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Note</div>
+                <textarea value={editForm.note} onChange={e=>setEditForm(f=>({...f,note:e.target.value}))}
+                  rows={3} placeholder="Optionnel"
+                  style={{...S,fontSize:13,padding:'10px',resize:'vertical',fontFamily:'inherit'}}/>
+              </div>
+
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Photo</div>
+                {(photoActuelle || editPhotoPreview) ? (
+                  <div style={{position:'relative',display:'inline-block'}}>
+                    <img src={editPhotoPreview || photoActuelle!} alt=""
+                      style={{maxWidth:'100%',maxHeight:200,borderRadius:8,border:`2px solid ${C.green}`}}
+                      onError={(e:any)=>e.target.style.display='none'}/>
+                    <button type="button"
+                      onClick={()=>{
+                        if (editPhotoPreview) { setEditPhotoFile(null); setEditPhotoPreview(null) }
+                        else { setEditPhotoSupprimee(true) }
+                      }}
+                      style={{position:'absolute',top:4,right:4,background:C.red,border:'none',borderRadius:'50%',width:28,height:28,color:'#fff',cursor:'pointer',fontWeight:700}}>✕</button>
+                  </div>
+                ) : (
+                  <div style={{fontSize:12,color:sub,marginBottom:8}}>Aucune photo</div>
+                )}
+                <button type="button" onClick={()=>editPhotoRef.current?.click()}
+                  style={{display:'block',marginTop:8,background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 14px',fontWeight:700,cursor:'pointer',fontSize:13}}>
+                  📷 {(photoActuelle || editPhotoPreview) ? 'Remplacer la photo' : 'Ajouter une photo'}
+                </button>
+              </div>
+
+              <div style={{display:'flex',gap:8,justifyContent:'flex-end',borderTop:`1px solid ${bdr}`,paddingTop:14}}>
+                <button onClick={fermerEditComptage}
+                  style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'10px 16px',fontWeight:700,cursor:'pointer',fontSize:13}}>
+                  Annuler
+                </button>
+                <button onClick={sauverEditComptage}
+                  disabled={editLoading || editForm.qte_comptee === ''}
+                  style={{background:editLoading||editForm.qte_comptee===''?bdr:C.green,color:'#fff',border:'none',borderRadius:8,padding:'10px 18px',fontWeight:800,cursor:editLoading?'default':'pointer',fontSize:13}}>
+                  {editLoading ? '⏳ Enregistrement...' : '✅ Enregistrer la correction'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    })()}
 
     {/* Sous-onglets */}
     <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center',justifyContent:'space-between'}}>
@@ -3677,10 +3865,11 @@ function BookingTab({data,dark,card,bdr,sub,thBg,S,alts}: any) {
 // ── Composant : bandeau de retour comptabilité ───────────────────────────────
 // Affiché en TÊTE de NegatifsTab et InventaireTab quand il y a des retours
 // actifs pour l'utilisateur courant.
-function RetoursComptaBandeau({ retours, source, employe, dark, card, bdr, sub, C, onCorrige }: any) {
+function RetoursComptaBandeau({ retours, source, employe, dark, card, bdr, sub, C, onCorrige, onEdit }: any) {
   const mesRetours = (retours || []).filter((r: any) => r.source === source && r.demandeur_employe === employe)
   if (mesRetours.length === 0) return null
   const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('fr-CA',{year:'2-digit',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'
+  const labelEdit = source === 'comptage' ? '📦 Voir / Modifier' : '📝 Voir / Modifier'
   return (
     <div style={{background:dark?'#2b1113':'#fce8e6',border:`2px solid ${C.red}`,borderRadius:10,padding:'14px 16px',marginBottom:14}}>
       <div style={{fontSize:14,fontWeight:900,color:C.red,marginBottom:8,display:'flex',alignItems:'center',gap:8}}>
@@ -3697,10 +3886,18 @@ function RetoursComptaBandeau({ retours, source, employe, dark, card, bdr, sub, 
                 <div style={{fontSize:13,fontWeight:800,fontFamily:'monospace'}}>{r.code_piece || '(code inconnu)'}</div>
                 <div style={{fontSize:10,color:sub,marginTop:2}}>Retourné le {fmtDate(r.retourne_le)} par {r.comptable_email}</div>
               </div>
-              <button onClick={()=>onCorrige(r.id)}
-                style={{background:C.green,color:'#fff',border:'none',borderRadius:6,padding:'7px 14px',fontWeight:700,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
-                ✓ J'ai corrigé
-              </button>
+              <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                {onEdit && (
+                  <button onClick={()=>onEdit(r)}
+                    style={{background:C.blue,color:'#fff',border:'none',borderRadius:6,padding:'7px 14px',fontWeight:700,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                    {labelEdit}
+                  </button>
+                )}
+                <button onClick={()=>onCorrige(r.id)}
+                  style={{background:'transparent',color:C.green,border:`1px solid ${C.green}`,borderRadius:6,padding:'7px 12px',fontWeight:700,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                  ✓ J'ai corrigé
+                </button>
+              </div>
             </div>
             <div style={{background:dark?'#1a1a1a':'#fff',border:`1px dashed ${C.red}`,borderRadius:6,padding:'8px 10px',fontSize:12,lineHeight:1.5,color:dark?'#e8e8e8':'#1a1a1a'}}>
               <strong style={{color:C.red,textTransform:'uppercase',fontSize:10}}>💬 Commentaire de la comptabilité :</strong>
@@ -3729,6 +3926,68 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
       const r = await fetch('/api/comptabilite/retours?actifs=1')
       const j = await r.json()
       if (Array.isArray(j) && setRetoursActifs) setRetoursActifs(j)
+    } catch (e: any) { alert(e.message) }
+  }
+
+  // ── Édition d'un négatif vérifié retourné par la compta ────────────────────
+  // On réutilise le modal de vérification (noteModal + form + altForm) en passant
+  // en mode édition : `editNegId` contient l'id du négatif vérifié à PATCH,
+  // `editRetourId` l'id du retour comptabilité à marquer corrigé après save.
+  // `editKeptPhotos` contient les URLs des photos existantes conservées.
+  const [editNegId, setEditNegId] = useState<number|null>(null)
+  const [editRetourId, setEditRetourId] = useState<number|null>(null)
+  const [editKeptPhotos, setEditKeptPhotos] = useState<string[]>([])
+
+  async function ouvrirEditNeg(retour: any) {
+    try {
+      const r = await fetch('/api/negatifs-verifies?id=' + encodeURIComponent(String(retour.ref_id)))
+      const v = await r.json()
+      if (!v || v.erreur) { alert('Négatif vérifié introuvable'); return }
+
+      // Retrouver description / fournisseur / ligne via data.liste_complete
+      const item = (data?.liste_complete||[]).find((x:any) => x.pk === v.code_piece)
+      const cout = (Number(v.stock_au_moment)||0) !== 0 ? Math.abs(Number(v.valeur_au_moment)/Number(v.stock_au_moment)) : (item?.cost ?? 0)
+      const synthesized = {
+        code_piece: v.code_piece,
+        description: item?.desc || '',
+        fournisseur: item?.fournisseur || '',
+        ligne: item?.ligne || '',
+        stock_negatif: v.stock_au_moment,
+        cout_unitaire: cout,
+      }
+
+      const causeIdx = v.cause ? CAUSES.indexOf(v.cause) : -1
+      setForm({
+        serv_detail: v.serv_detail!=null? String(v.serv_detail):'',
+        serv_interne: v.serv_interne!=null? String(v.serv_interne):'',
+        serv_gar: v.serv_gar!=null? String(v.serv_gar):'',
+        pce_detail: v.pce_detail!=null? String(v.pce_detail):'',
+        recept_comm: v.recept_comm!=null? String(v.recept_comm):'',
+        dec_physique: v.dec_physique!=null? String(v.dec_physique):'',
+        autre: v.autre!=null? String(v.autre):'',
+        qte_reelle: v.qte_reelle!=null? String(v.qte_reelle):'',
+        cause: v.cause || '',
+        causeIdx,
+        commentaire_compta: v.commentaire || '',
+      })
+      setAltForm({
+        serv_detail: v.alt_serv_detail!=null? String(v.alt_serv_detail):'',
+        serv_interne: v.alt_serv_interne!=null? String(v.alt_serv_interne):'',
+        serv_gar: v.alt_serv_gar!=null? String(v.alt_serv_gar):'',
+        pce_detail: v.alt_pce_detail!=null? String(v.alt_pce_detail):'',
+        recept_comm: v.alt_recept_comm!=null? String(v.alt_recept_comm):'',
+        dec_physique: v.alt_dec_physique!=null? String(v.alt_dec_physique):'',
+        autre: v.alt_autre!=null? String(v.alt_autre):'',
+        qte_reelle: v.alt_qte_reelle!=null? String(v.alt_qte_reelle):'',
+        cause: '', causeIdx: -1, commentaire_compta: '',
+      })
+      const kept = [v.photo_url, v.photo_url2].filter(Boolean) as string[]
+      setEditKeptPhotos(kept)
+      setPhotoFiles([])
+      setPhotoPreviews(kept)
+      setEditNegId(v.id)
+      setEditRetourId(retour.id)
+      setNoteModal(synthesized)
     } catch (e: any) { alert(e.message) }
   }
   const [filtFourn, setFiltFourn] = useState('ALL')
@@ -3890,8 +4149,9 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     const ajust = getAjust(stockSys, form)
     const photoObl = photoObligatoire(ajust, form.cause, form.causeIdx)
 
-    const photoObl2 = photoObligatoire(ajust, form.cause, form.causeIdx)
-    if (photoObl2 && photoFiles.length === 0) {
+    // En mode édition, les photos déjà existantes (editKeptPhotos) comptent comme satisfaisant l'obligation.
+    const totalPhotos = (editNegId ? editKeptPhotos.length : 0) + photoFiles.length
+    if (photoObl && totalPhotos === 0) {
       alert('📸 Photo obligatoire car écart > 1 unité !')
       photoRef.current?.click()
       return
@@ -3899,8 +4159,10 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
 
     setLoading(true)
 
-    // Upload photos
-    const photoUrls = await uploadPhotos(n.code_piece, 'NEG')
+    // Upload photos nouvelles
+    const newUrls = await uploadPhotos(n.code_piece, 'NEG')
+    // Combiner photos conservées + nouvelles (max 2)
+    const finalPhotos = editNegId ? [...editKeptPhotos, ...newUrls].slice(0, 2) : newUrls
 
     // Calculer ajustement alternatif
     let altAjust = null
@@ -3910,45 +4172,82 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
       altAjust = getAjust(altStockSys, altForm)
     }
 
-    await fetch('/api/negatifs-verifies', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        code_piece: n.code_piece,
-        employe,
-        stock_au_moment: n.stock_negatif,
-        valeur_au_moment: Math.abs(n.stock_negatif * n.cout_unitaire),
-        serv_detail:   parseFloat(form.serv_detail)||0,
-        serv_interne:  parseFloat(form.serv_interne)||0,
-        serv_gar:      parseFloat(form.serv_gar)||0,
-        pce_detail:    parseFloat(form.pce_detail)||0,
-        recept_comm:   parseFloat(form.recept_comm)||0,
-        dec_physique:  parseFloat(form.dec_physique)||0,
-        autre:         parseFloat(form.autre)||0,
-        qte_reelle:    parseFloat(form.qte_reelle)||0,
-        ajustement:    ajust,
-        cause:         form.cause,
-        commentaire:   form.commentaire_compta,
-        photo_url:     photoUrls[0] || null,
-        photo_url2:    photoUrls[1] || null,
-        alt_code_piece: hasAlt ? altCodes[0] : null,
-        alt_ajustement: altAjust,
-        alt_serv_detail:  parseFloat(altForm.serv_detail)||0,
-        alt_serv_interne: parseFloat(altForm.serv_interne)||0,
-        alt_serv_gar:     parseFloat(altForm.serv_gar)||0,
-        alt_pce_detail:   parseFloat(altForm.pce_detail)||0,
-        alt_recept_comm:  parseFloat(altForm.recept_comm)||0,
-        alt_dec_physique: parseFloat(altForm.dec_physique)||0,
-        alt_autre:        parseFloat(altForm.autre)||0,
-        alt_qte_reelle:   parseFloat(altForm.qte_reelle)||0,
+    if (editNegId) {
+      // Mode édition : PATCH du négatif existant
+      await fetch('/api/negatifs-verifies', {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          id: editNegId,
+          serv_detail:   parseFloat(form.serv_detail)||0,
+          serv_interne:  parseFloat(form.serv_interne)||0,
+          serv_gar:      parseFloat(form.serv_gar)||0,
+          pce_detail:    parseFloat(form.pce_detail)||0,
+          recept_comm:   parseFloat(form.recept_comm)||0,
+          dec_physique:  parseFloat(form.dec_physique)||0,
+          autre:         parseFloat(form.autre)||0,
+          qte_reelle:    parseFloat(form.qte_reelle)||0,
+          ajustement:    ajust,
+          cause:         form.cause,
+          commentaire:   form.commentaire_compta,
+          photo_url:     finalPhotos[0] || null,
+          photo_url2:    finalPhotos[1] || null,
+          alt_code_piece: hasAlt ? altCodes[0] : null,
+          alt_ajustement: altAjust,
+          alt_serv_detail:  parseFloat(altForm.serv_detail)||0,
+          alt_serv_interne: parseFloat(altForm.serv_interne)||0,
+          alt_serv_gar:     parseFloat(altForm.serv_gar)||0,
+          alt_pce_detail:   parseFloat(altForm.pce_detail)||0,
+          alt_recept_comm:  parseFloat(altForm.recept_comm)||0,
+          alt_dec_physique: parseFloat(altForm.dec_physique)||0,
+          alt_autre:        parseFloat(altForm.autre)||0,
+          alt_qte_reelle:   parseFloat(altForm.qte_reelle)||0,
+        })
       })
-    })
+      if (editRetourId) await marquerRetourCorrige(editRetourId)
+    } else {
+      // Création : POST classique
+      await fetch('/api/negatifs-verifies', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          code_piece: n.code_piece,
+          employe,
+          stock_au_moment: n.stock_negatif,
+          valeur_au_moment: Math.abs(n.stock_negatif * n.cout_unitaire),
+          serv_detail:   parseFloat(form.serv_detail)||0,
+          serv_interne:  parseFloat(form.serv_interne)||0,
+          serv_gar:      parseFloat(form.serv_gar)||0,
+          pce_detail:    parseFloat(form.pce_detail)||0,
+          recept_comm:   parseFloat(form.recept_comm)||0,
+          dec_physique:  parseFloat(form.dec_physique)||0,
+          autre:         parseFloat(form.autre)||0,
+          qte_reelle:    parseFloat(form.qte_reelle)||0,
+          ajustement:    ajust,
+          cause:         form.cause,
+          commentaire:   form.commentaire_compta,
+          photo_url:     finalPhotos[0] || null,
+          photo_url2:    finalPhotos[1] || null,
+          alt_code_piece: hasAlt ? altCodes[0] : null,
+          alt_ajustement: altAjust,
+          alt_serv_detail:  parseFloat(altForm.serv_detail)||0,
+          alt_serv_interne: parseFloat(altForm.serv_interne)||0,
+          alt_serv_gar:     parseFloat(altForm.serv_gar)||0,
+          alt_pce_detail:   parseFloat(altForm.pce_detail)||0,
+          alt_recept_comm:  parseFloat(altForm.recept_comm)||0,
+          alt_dec_physique: parseFloat(altForm.dec_physique)||0,
+          alt_autre:        parseFloat(altForm.autre)||0,
+          alt_qte_reelle:   parseFloat(altForm.qte_reelle)||0,
+        })
+      })
+    }
 
     const r = await fetch('/api/negatifs-verifies')
     if (r.ok) setNegsVerifies(await r.json())
     setNoteModal(null)
     setForm(emptyForm()); setAltForm(emptyForm())
     setPhotoFiles([]); setPhotoPreviews([])
+    setEditNegId(null); setEditRetourId(null); setEditKeptPhotos([])
     setLoading(false)
   }
 
@@ -4052,7 +4351,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
 
   return <>
     {/* Bandeau de retours comptabilité — affiché en TÊTE si l'utilisateur a des corrections demandées */}
-    <RetoursComptaBandeau retours={retoursActifs} source="negatif" employe={employe} dark={dark} card={card} bdr={bdr} sub={sub} C={C} onCorrige={marquerRetourCorrige}/>
+    <RetoursComptaBandeau retours={retoursActifs} source="negatif" employe={employe} dark={dark} card={card} bdr={bdr} sub={sub} C={C} onCorrige={marquerRetourCorrige} onEdit={ouvrirEditNeg}/>
 
     {/* Input photo caché */}
     <input ref={photoRef} type="file" accept="image/*" capture="environment" multiple onChange={onPhoto} style={{display:'none'}}/>
@@ -4071,14 +4370,15 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
       const altQteTab = qteTablette(altForm)
       const altAjust = hasAlt ? getAjust(altStockSys, altForm) : null
       const photoObl = photoObligatoire(ajust, form.cause, form.causeIdx)
+      const nbPhotos = photoFiles.length + (editNegId ? editKeptPhotos.length : 0)
       const allFormsComplet = formComplet(form) && (!hasAlt || altFormComplet(altForm, form.causeIdx))
 
       return (
         <div style={{position:'fixed',inset:0,background:dark?'#0d0d0d':'#f0f2f5',zIndex:9999,overflowY:'auto',fontFamily:"'DM Sans',sans-serif"}}>
           {/* Header fixe */}
-          <div style={{position:'sticky',top:0,background:dark?'#111':C.red,color:'#fff',padding:'14px 16px',zIndex:10,display:'flex',justifyContent:'space-between',alignItems:'center',boxShadow:'0 2px 8px rgba(0,0,0,.2)',gap:8}}>
+          <div style={{position:'sticky',top:0,background:dark?'#111':(editNegId?C.blue:C.red),color:'#fff',padding:'14px 16px',zIndex:10,display:'flex',justifyContent:'space-between',alignItems:'center',boxShadow:'0 2px 8px rgba(0,0,0,.2)',gap:8}}>
             <div>
-              <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',opacity:.8}}>Vérification inventaire</div>
+              <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',opacity:.8}}>{editNegId?'📝 Correction négatif (retour compta)':'Vérification inventaire'}</div>
               <div style={{fontSize:18,fontWeight:900,letterSpacing:1}}>{n.code_piece}</div>
             </div>
             <div style={{display:'flex',gap:8}}>
@@ -4086,7 +4386,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                 style={{background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.4)',borderRadius:10,padding:'8px 12px',color:'#fff',cursor:'pointer',fontSize:13,fontWeight:700}}>
                 🔄 Réinitialiser
               </button>
-              <button onClick={()=>{setNoteModal(null);setForm(emptyForm());setAltForm(emptyForm());setPhotoFiles([]);setPhotoPreviews([])}}
+              <button onClick={()=>{setNoteModal(null);setForm(emptyForm());setAltForm(emptyForm());setPhotoFiles([]);setPhotoPreviews([]);setEditNegId(null);setEditRetourId(null);setEditKeptPhotos([])}}
                 style={{background:'rgba(255,255,255,.2)',border:'none',borderRadius:10,padding:'8px 14px',color:'#fff',cursor:'pointer',fontSize:14,fontWeight:700}}>
                 ✕ Fermer
               </button>
@@ -4178,7 +4478,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                       {form.qte_reelle} tablette − {stockSys} système = {ajust > 0 ? '+' : ''}{ajust.toFixed(0)}
                     </div>
                   )}
-                  {photoObligatoire(ajust, form.cause, form.causeIdx) && photoFiles.length === 0 && (
+                  {photoObligatoire(ajust, form.cause, form.causeIdx) && nbPhotos === 0 && (
                     <div style={{marginTop:8,background:C.red+'22',borderRadius:8,padding:'8px 12px',color:C.red,fontSize:13,fontWeight:700,textAlign:'center'}}>
                       📸 Photo obligatoire car écart &gt; 1 unité
                     </div>
@@ -4243,7 +4543,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
             </div>
 
             {/* Photos */}
-            <div style={{background:card,borderRadius:14,padding:'16px',marginBottom:16,border:`2px solid ${photoObligatoire(ajust, form.cause, form.causeIdx)&&photoFiles.length===0?C.red:photoFiles.length>0?C.green:bdr}`}}>
+            <div style={{background:card,borderRadius:14,padding:'16px',marginBottom:16,border:`2px solid ${photoObligatoire(ajust, form.cause, form.causeIdx)&&nbPhotos===0?C.red:nbPhotos>0?C.green:bdr}`}}>
               <div style={{fontSize:15,fontWeight:800,marginBottom:10}}>
                 📸 Photos {photoObligatoire(ajust, form.cause, form.causeIdx)?'(obligatoire — écart > 1)':'(optionnel)'}
               </div>
@@ -4252,7 +4552,16 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                   {photoPreviews.map((p,i) => (
                     <div key={i} style={{position:'relative'}}>
                       <img src={p} style={{width:'100%',borderRadius:10,height:isMobile?160:120,objectFit:'cover'}} alt={`Photo ${i+1}`}/>
-                      <button onClick={()=>{setPhotoFiles(prev=>prev.filter((_,j)=>j!==i));setPhotoPreviews(prev=>prev.filter((_,j)=>j!==i))}}
+                      <button onClick={()=>{
+                          // En mode édition, les premières previews sont des URLs existantes (editKeptPhotos)
+                          if (editNegId && i < editKeptPhotos.length) {
+                            setEditKeptPhotos(prev => prev.filter((_,j)=>j!==i))
+                          } else {
+                            const newFileIdx = editNegId ? i - editKeptPhotos.length : i
+                            setPhotoFiles(prev => prev.filter((_,j)=>j!==newFileIdx))
+                          }
+                          setPhotoPreviews(prev => prev.filter((_,j)=>j!==i))
+                        }}
                         style={{position:'absolute',top:4,right:4,background:C.red,border:'none',borderRadius:'50%',width:24,height:24,color:'#fff',cursor:'pointer',fontSize:12,fontWeight:700}}>✕</button>
                     </div>
                   ))}
@@ -4260,7 +4569,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
               )}
               <button type="button" onClick={()=>photoRef.current?.click()}
                 style={{...btnStyle,background:C.blue,fontSize:15,padding:'14px 0'}}>
-                📷 {photoPreviews.length > 0 ? 'Ajouter une autre photo' : 'Prendre une photo'}
+                📷 {nbPhotos > 0 ? 'Ajouter une autre photo' : 'Prendre une photo'}
               </button>
             </div>
 
@@ -4294,9 +4603,9 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
             )}
 
             {/* Bouton soumettre */}
-            <button onClick={soumettre} disabled={loading||!allFormsComplet||(photoObligatoire(getAjust(Number(noteModal?.stock_negatif),form),form.cause)&&photoFiles.length===0)}
-              style={{...btnStyle,background:allFormsComplet&&(!photoObligatoire(ajust, form.cause, form.causeIdx)||photoFiles.length>0)?C.green:'#94a3b8',marginBottom:32,fontSize:18,padding:'18px 0'}}>
-              {loading?'Enregistrement...':'✅ Confirmer la vérification'}
+            <button onClick={soumettre} disabled={loading||!allFormsComplet||(photoObligatoire(getAjust(Number(noteModal?.stock_negatif),form),form.cause)&&nbPhotos===0)}
+              style={{...btnStyle,background:allFormsComplet&&(!photoObligatoire(ajust, form.cause, form.causeIdx)||nbPhotos>0)?C.green:'#94a3b8',marginBottom:32,fontSize:18,padding:'18px 0'}}>
+              {loading?'Enregistrement...':editNegId?'✅ Enregistrer la correction':'✅ Confirmer la vérification'}
             </button>
           </div>
         </div>
