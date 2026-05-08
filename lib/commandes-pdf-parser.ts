@@ -231,14 +231,38 @@ function parsePieceLine(line: string): { num_piece: string, qte_commandee: numbe
 }
 
 // Parse une ligne du bloc Commande/Réservation pour extraire l'employé.
+//
+// Format : "<date> <num_employe> <Nom, Prénom> <suite optionnelle>"
+//
+// Exemples :
 //   "2026-05-07 945 Pothier, Anthony 1"
 //   "2024-12-04 176 Mouralian, Imad 116909 Facture Service 1 #21913 Banville, Carol"
 //   "2024-12-04 176 Mouralian, Imad 116909 Facture Service -2 Annulée par la facturation"
+//   "2025-04-09 20714 Briand, Thierry Albert 1"          ← prénom en 2 mots
 //
-// Format : <date> <num_employe (1-4 digits)> <Nom, Prénom> <suite>
+// Stratégie en 2 temps : on match d'abord le préfixe "<date> <num>" puis on
+// cherche le 1er pattern "Nom, Prénom" dans le reste.
 function parseEmployeLine(line: string): string | null {
-  const m = /^\d{4}-\d{2}-\d{2}\s+\d{1,5}\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+,\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+(?:\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+)?)(?=\s+(?:\d|#|Facture|Annul|$))/.exec(line)
-  return m ? m[1].trim() : null
+  // 1) Le préfixe : date + numéro d'employé
+  const prefMatch = /^\s*\d{4}-\d{2}-\d{2}\s+\d{1,6}\s+(.+)$/.exec(line)
+  if (!prefMatch) return null
+  const rest = prefMatch[1]
+
+  // 2) Le 1er "Nom, Prénom [Prénom2 [Prénom3]]" — on s'arrête à un chiffre,
+  //    un #, ou un mot-clé connu (Facture, Annulé, Type, etc.)
+  const nameMatch = /^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+,\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+(?:\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+){0,2})/.exec(rest)
+  if (!nameMatch) return null
+
+  return nameMatch[1].replace(/\s+/g, ' ').trim()
+}
+
+// Recherche permissive d'un nom d'employé dans une ligne — utilisée en
+// fallback si le format strict ne matche pas.
+function chercherNomEmploye(line: string): string | null {
+  // Cherche "Mot, Mot [Mot [Mot]]" précédé d'un espace ou début de ligne,
+  // suivi d'un chiffre/#/fin.
+  const m = /(?:^|\s)([A-ZÀ-Ÿ][a-zà-ÿA-ZÀ-Ÿ'\-]+,\s+[A-ZÀ-Ÿ][a-zà-ÿA-ZÀ-Ÿ'\-]+(?:\s+[A-ZÀ-Ÿ][a-zà-ÿA-ZÀ-Ÿ'\-]+){0,2})/.exec(line)
+  return m ? m[1].replace(/\s+/g, ' ').trim() : null
 }
 
 export async function parseCommandesPdf(buffer: Buffer | Uint8Array): Promise<CommandesParseResult> {
@@ -291,13 +315,40 @@ export async function parseCommandesPdf(buffer: Buffer | Uint8Array): Promise<Co
         if (piece) pieces.push(piece)
       }
 
-      // Trouver le nom_employe : 1re ligne après idxHeaderCmd qui matche le
-      // format "<date> <num_employe> <Nom, Prénom> ...". On cherche dans toute
-      // la page (en-tête de bloc Commande/Réservation pas toujours détecté).
+      // Trouver le nom_employe — stratégie en 3 phases pour être robuste :
+      //
+      // Phase 1 : 1re ligne qui matche le format strict "<date> <num> <Nom, Prénom>"
+      // Phase 2 : 1re ligne après une ligne contenant "Nom Employé" (= header de bloc)
+      // Phase 3 : recherche permissive d'un pattern "Nom, Prénom" dans toutes
+      //           les lignes de la page après l'en-tête de commande
       let nom_employe: string | null = null
+
+      // Phase 1
       for (let k = idxHeaderCmd + 2; k < lines.length; k++) {
         const m = parseEmployeLine(lines[k])
         if (m) { nom_employe = m; break }
+      }
+
+      // Phase 2
+      if (!nom_employe) {
+        for (let k = idxHeaderCmd + 2; k < lines.length - 1; k++) {
+          if (/Nom\s+Employé/i.test(lines[k])) {
+            const candidat = chercherNomEmploye(lines[k + 1])
+            if (candidat) { nom_employe = candidat; break }
+          }
+        }
+      }
+
+      // Phase 3 — fallback : 1er "Nom, Prénom" trouvé dans la zone après
+      // les pièces (en évitant d'attraper le "Commandé Par" du header).
+      if (!nom_employe && idxHeaderPiece >= 0) {
+        for (let k = idxHeaderPiece + 1; k < lines.length; k++) {
+          // Skip lignes qui sont clairement des pièces ou pieds de page
+          if (parsePieceLine(lines[k])) continue
+          if (/^Coût\s+Total|^Déduction|^Montant|^Core|^Coût\s+Net|^Nombre/i.test(lines[k])) continue
+          const candidat = chercherNomEmploye(lines[k])
+          if (candidat) { nom_employe = candidat; break }
+        }
       }
 
       // Émettre une entrée par pièce
