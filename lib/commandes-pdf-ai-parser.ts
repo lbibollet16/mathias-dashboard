@@ -1,15 +1,12 @@
 // Parser IA des PDF "Liste commande" Traction.
-// On extrait le texte brut avec unpdf puis on demande à Claude (via Vercel
-// AI Gateway) de produire un JSON structuré conforme au schéma Zod.
-// C'est plus robuste qu'un parser regex parce que le PDF Traction a des
-// colonnes de longueur variable (descriptions, noms de fournisseurs).
+// On envoie le PDF DIRECTEMENT à Claude (vision native, supportée via le
+// Vercel AI Gateway). Pas besoin d'extraction texte préalable — Claude lit
+// la mise en page du tableau et nous renvoie un JSON structuré.
 //
-// Requiert AI_GATEWAY_API_KEY dans l'env (Vercel déploie aussi via OIDC
-// si l'API key n'est pas définie).
+// Requiert AI_GATEWAY_API_KEY dans l'env.
 
-import { generateObject } from 'ai'
+import { generateText, Output } from 'ai'
 import { z } from 'zod'
-import { extractText } from 'unpdf'
 
 export interface AiParsedCommande {
   num_commande:    string
@@ -27,107 +24,101 @@ export interface AiParsedCommande {
 export interface AiParseResult {
   success:    boolean
   commandes:  AiParsedCommande[]
-  rawText:    string
+  duree_ms?:  number
   erreur?:    string
 }
 
 const CommandeSchema = z.object({
-  num_commande:    z.string().describe('Numéro de commande Traction (ex: M1C0036824)'),
-  statut:          z.string().describe('Statut : "Transmise", "Fermée", "Réception Partielle", etc.'),
-  date_commande:   z.string().nullable().describe('Date au format YYYY-MM-DD, ou null si absente'),
-  num_fournisseur: z.string().nullable().describe('Numéro fournisseur (ex: 20740)'),
-  nom_fournisseur: z.string().nullable().describe('Nom du fournisseur (ex: "Kawasaki Canada Inc (Andre)")'),
-  commande_par:    z.string().nullable().describe('Personne qui a passé la commande (format "Nom, Prénom")'),
-  num_piece:       z.string().describe('Numéro de pièce (ex: 2020 ou KAW-1234)'),
-  qte_commandee:   z.number().describe('Quantité commandée (entier)'),
-  description:     z.string().nullable().describe('Description de la pièce'),
-  nom_employe:     z.string().nullable().describe('Nom de l\'employé qui suit la commande (format "Nom, Prénom")'),
+  num_commande:    z.string(),
+  statut:          z.string(),
+  date_commande:   z.string().nullable(),
+  num_fournisseur: z.string().nullable(),
+  nom_fournisseur: z.string().nullable(),
+  commande_par:    z.string().nullable(),
+  num_piece:       z.string(),
+  qte_commandee:   z.number(),
+  description:     z.string().nullable(),
+  nom_employe:     z.string().nullable(),
 })
 
 const ResponseSchema = z.object({
-  commandes: z.array(CommandeSchema).describe('Liste de toutes les commandes trouvées dans le document'),
+  commandes: z.array(CommandeSchema),
 })
 
-const SYSTEM_PROMPT = `Tu es un assistant qui extrait les lignes de commande d'un PDF de gestion des commandes Traction (logiciel de pièces marine au Québec).
+const SYSTEM_PROMPT = `Tu extrais les lignes d'un tableau "Liste des commandes" Traction (logiciel de pièces marine au Québec).
 
-Le document contient un tableau avec les colonnes suivantes :
+Le PDF contient un tableau avec ces colonnes :
 - # Commande (ex: M1C0036824)
 - Statut (Transmise / Fermée / Réception Partielle / Annulée)
-- Date (format YYYY-MM-DD)
-- # Fournisseur (4-6 chiffres, ex: 20740)
-- Nom du fournisseur (peut contenir des espaces et des parenthèses)
-- Commandé Par (format "Nom, Prénom")
-- # Pièce (alphanumérique, ex: 2020 ou KAW-1234)
-- Qte Comm (quantité, entier)
-- Description (description de la pièce, peut contenir des tirets)
-- Nom Employé (format "Nom, Prénom")
+- Date (YYYY-MM-DD)
+- # Fournisseur (4-6 chiffres)
+- Nom du fournisseur
+- Commandé Par (Nom, Prénom)
+- # Pièce (alphanumérique)
+- Qte Comm (entier)
+- Description
+- Nom Employé (Nom, Prénom)
 
-Extrais TOUTES les lignes de commande du document. Une même commande (#Commande) peut apparaître plusieurs fois si elle contient plusieurs pièces — dans ce cas, crée une entrée par ligne.
-
-IGNORE les en-têtes de colonnes, les pieds de page, les numéros de page et les totaux.
-
-Si une valeur n'est pas présente, retourne null (sauf pour num_commande, statut, num_piece et qte_commandee qui sont obligatoires).
-
-Sois rigoureux : ne saute aucune ligne, même si le formatage est inhabituel.`
+Extrais TOUTES les lignes. Une même commande peut apparaître plusieurs fois (plusieurs pièces). IGNORE les en-têtes, pieds de page, numéros de page et totaux. Si une valeur manque : retourne null. num_commande, statut, num_piece et qte_commandee sont obligatoires.`
 
 export async function parseCommandesPdfAvecIA(buffer: Buffer | Uint8Array): Promise<AiParseResult> {
+  const t0 = Date.now()
   try {
-    // Étape 1 — extraire le texte brut du PDF avec unpdf
+    // On envoie le PDF directement à Claude (vision/file native via AI Gateway).
+    // Note : la donnée doit être un Uint8Array pur (pas un Buffer Node).
     const src = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer as any)
     const ab = new ArrayBuffer(src.byteLength)
     const data = new Uint8Array(ab)
     data.set(src)
-    const ext = await extractText(data, { mergePages: true })
-    const rawText = (typeof ext.text === 'string' ? ext.text : (ext.text as string[]).join('\n')).trim()
 
-    if (!rawText || rawText.length < 50) {
-      return {
-        success: false,
-        commandes: [],
-        rawText,
-        erreur: 'PDF vide ou texte non extractible',
-      }
-    }
-
-    // Étape 2 — envoyer le texte à l'IA pour structuration
-    const { object } = await generateObject({
+    const result = await generateText({
       model: 'anthropic/claude-haiku-4.5',
-      schema: ResponseSchema,
-      schemaName: 'CommandesTraction',
-      schemaDescription: 'Liste des commandes Traction extraites du PDF',
       system: SYSTEM_PROMPT,
-      prompt: `Voici le texte extrait du PDF "Liste commande" Traction. Extrais toutes les commandes.
-
-\`\`\`
-${rawText}
-\`\`\``,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'file',
+              mediaType: 'application/pdf',
+              data,
+              filename: 'liste-commande.pdf',
+            },
+            {
+              type: 'text',
+              text: 'Extrais toutes les lignes de commande de ce PDF.',
+            },
+          ],
+        },
+      ],
+      output: Output.object({ schema: ResponseSchema }),
       temperature: 0,
     })
 
-    // Normalisation : zod .nullable() peut produire `undefined`, on uniformise en null
-    const commandes: AiParsedCommande[] = object.commandes.map((c: any) => ({
-      num_commande:    c.num_commande,
-      statut:          c.statut,
+    const object = result.output as z.infer<typeof ResponseSchema>
+    const commandes: AiParsedCommande[] = (object.commandes || []).map((c: any) => ({
+      num_commande:    String(c.num_commande || ''),
+      statut:          String(c.statut || ''),
       date_commande:   c.date_commande ?? null,
       num_fournisseur: c.num_fournisseur ?? null,
       nom_fournisseur: c.nom_fournisseur ?? null,
       commande_par:    c.commande_par ?? null,
-      num_piece:       c.num_piece,
+      num_piece:       String(c.num_piece || ''),
       qte_commandee:   typeof c.qte_commandee === 'number' ? c.qte_commandee : 0,
       description:     c.description ?? null,
       nom_employe:     c.nom_employe ?? null,
-    }))
+    })).filter(c => c.num_commande && c.num_piece)
 
     return {
       success: true,
       commandes,
-      rawText,
+      duree_ms: Date.now() - t0,
     }
   } catch (e: any) {
     return {
       success: false,
       commandes: [],
-      rawText: '',
+      duree_ms: Date.now() - t0,
       erreur: e.message || String(e),
     }
   }

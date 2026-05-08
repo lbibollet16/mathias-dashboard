@@ -4,7 +4,8 @@ import { parseCommandesPdf } from '@/lib/commandes-pdf-parser'
 import { parseCommandesPdfAvecIA } from '@/lib/commandes-pdf-ai-parser'
 
 export const runtime = 'nodejs'
-export const maxDuration = 90  // l'IA peut prendre 10-30s sur un gros PDF
+export const maxDuration = 60  // l'IA peut prendre 10-30s sur un gros PDF
+export const dynamic = 'force-dynamic'
 
 // POST multipart/form-data — upload du PDF "Liste commande" Traction.
 //
@@ -32,52 +33,59 @@ export async function POST(req: NextRequest) {
 
     const buf = Buffer.from(await file.arrayBuffer())
 
+    // ── Mode diagnostic : on utilise TOUJOURS le parser regex (rapide, fiable),
+    //    juste pour dumper les lignes brutes et voir ce que le PDF contient.
+    if (diagnostic) {
+      const r = await parseCommandesPdf(buf)
+      if (!r.success) return NextResponse.json({ erreur: r.erreur || 'Erreur extraction PDF' }, { status: 500 })
+      return NextResponse.json({
+        diagnostic: true,
+        moteur: 'regex (diagnostic)',
+        nb_lignes_brutes: r.rawLines.length,
+        nb_commandes_parsees: r.commandes.length,
+        rawText: r.rawLines.join('\n').slice(0, 8000),
+        commandes: r.commandes,
+        warnings: r.warnings,
+      })
+    }
+
     // ── Choix du moteur de parsing ──────────────────────────────
     let commandes: any[] = []
-    let rawTexte = ''
     let warnings: string[] = []
     let moteurUtilise = moteur
+    let dureeMsIa: number | undefined
 
     if (moteur === 'regex') {
       const r = await parseCommandesPdf(buf)
       if (!r.success) return NextResponse.json({ erreur: r.erreur }, { status: 500 })
       commandes = r.commandes
-      rawTexte = r.rawLines.join('\n')
       warnings = r.warnings
     } else {
-      // Moteur IA (défaut)
-      const r = await parseCommandesPdfAvecIA(buf)
+      // Moteur IA (défaut) — envoie le PDF directement à Claude.
+      // On wrappe par sécurité même si la fonction interne a déjà un try/catch.
+      let r: Awaited<ReturnType<typeof parseCommandesPdfAvecIA>>
+      try {
+        r = await parseCommandesPdfAvecIA(buf)
+      } catch (eIa: any) {
+        r = { success: false, commandes: [], erreur: eIa.message || String(eIa) }
+      }
+      dureeMsIa = r.duree_ms
       if (r.success) {
         commandes = r.commandes
-        rawTexte = r.rawText
         moteurUtilise = 'ia'
       } else {
-        // Fallback automatique sur le parser regex si l'IA échoue
-        // (typiquement : pas d'AI_GATEWAY_API_KEY configurée)
         warnings.push(`IA indisponible (${r.erreur}) — fallback regex`)
         const rg = await parseCommandesPdf(buf)
         if (!rg.success) {
           return NextResponse.json({
             erreur: `IA et regex ont échoué. IA: ${r.erreur}. Regex: ${rg.erreur}`,
+            duree_ms_ia: dureeMsIa,
           }, { status: 500 })
         }
         commandes = rg.commandes
-        rawTexte = rg.rawLines.join('\n')
         warnings = warnings.concat(rg.warnings)
         moteurUtilise = 'regex (fallback)'
       }
-    }
-
-    if (diagnostic) {
-      return NextResponse.json({
-        diagnostic: true,
-        moteur: moteurUtilise,
-        nb_lignes_brutes: rawTexte.split('\n').length,
-        nb_commandes_parsees: commandes.length,
-        rawText: rawTexte.slice(0, 8000),  // tronqué pour pas exploser le payload
-        commandes,
-        warnings,
-      })
     }
 
     if (commandes.length === 0) {
@@ -85,7 +93,7 @@ export async function POST(req: NextRequest) {
         erreur: 'Aucune commande détectée dans le PDF',
         moteur: moteurUtilise,
         warnings,
-        rawText: rawTexte.slice(0, 4000),
+        duree_ms_ia: dureeMsIa,
       }, { status: 400 })
     }
 
@@ -192,9 +200,16 @@ export async function POST(req: NextRequest) {
       updated,
       deactivated,
       nb_commandes_parsees: commandes.length,
+      duree_ms_ia: dureeMsIa,
       warnings,
     })
   } catch (e: any) {
-    return NextResponse.json({ erreur: e.message || String(e) }, { status: 500 })
+    // Filet ultime : si quoi que ce soit a échappé aux catches internes,
+    // on renvoie toujours du JSON (pas la page d'erreur HTML de Vercel).
+    console.error('[commandes-attente/import] erreur non gérée :', e)
+    return NextResponse.json({
+      erreur: e?.message || String(e) || 'Erreur inconnue',
+      stack: process.env.NODE_ENV === 'development' ? e?.stack : undefined,
+    }, { status: 500 })
   }
 }
