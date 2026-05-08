@@ -1,21 +1,23 @@
-// Parser des PDF "Liste des commandes" Traction.
-// Mêmes principes que scoa-parser : on extrait les text items via unpdf,
-// on les regroupe par coordonnée Y (tolérance ±2pt), on trie par X
-// pour reconstruire les lignes du tableau, puis on parse.
+// Parser des PDF "Liste des Pièces sur la commande" Traction.
 //
-// Colonnes attendues (dans cet ordre dans le PDF Traction) :
-//   #Commande | Statut | Date | #Fourn | Nom | Commandé Par |
-//   #Pièce | Qte Comm | Description | Nom Employé
+// Format réel du PDF (vu via diagnostic) :
+//   - Rapport multi-pages, UNE commande par page
+//   - Header de commande sur une ligne :
+//       <#Cmd> <Statut> <Date> [<Date Réception>] <#Fourn> <Nom Fourn...>
+//       <Type> <Commandé Par "Nom, Prénom"> <Autorisé Par "Nom, Prénom">
+//   - 0..N lignes de pièces :
+//       <#Pièce> <#Fourn> <Qte> [colonnes optionnelles] <Description...> <Coût>
+//   - Bloc "Commande" ou "Réservation" qui contient le nom de l'employé suiveur
 //
-// Une ligne = une (#commande, #piece). Une même #commande peut donc
-// apparaître plusieurs fois (plusieurs pièces sur la même commande).
+// On extrait UNE LIGNE PAR PIÈCE. Les commandes sans pièces sont ignorées
+// (rien à suivre).
 
 import { extractTextItems } from 'unpdf'
 
 export interface ParsedCommande {
   num_commande:     string
   statut:           string
-  date_commande:    string | null      // YYYY-MM-DD
+  date_commande:    string | null
   num_fournisseur:  string | null
   nom_fournisseur:  string | null
   commande_par:     string | null
@@ -28,25 +30,26 @@ export interface ParsedCommande {
 export interface CommandesParseResult {
   success:    boolean
   commandes:  ParsedCommande[]
-  rawLines:   string[]                 // pour debug / mode diagnostic
+  rawLines:   string[]
   warnings:   string[]
   erreur?:    string
 }
 
-// Format Traction : M1C suivi de chiffres (ex: M1C0036824).
-// On reste tolérant : préfixe alphanumérique de 2-4 caractères + chiffres.
-const NUM_CMD_RE = /^[A-Z]{1,4}\d{4,}$/i
-const DATE_RE    = /^(\d{4})-(\d{2})-(\d{2})$/
-const STATUTS    = ['Transmise', 'Fermée', 'Fermee', 'Réception Partielle', 'Reception Partielle', 'Annulée', 'Annulee']
+// Statuts connus (peuvent être combinés avec un slash : "Transmise/Fermée")
+const STATUT_RE = /^(Transmise(?:\/Fermée)?|Fermée|Réception Partielle|Annulée|Annulee)$/i
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+// Types de commande Traction (entre nom_fourn et commandé_par)
+const TYPE_RE = /^(Stock|Retour au Fournisseur|Réception|Réception Partielle|Garantie|Spécial|Special|Vente|Achat|Transfert)$/
+// Format "Nom, Prénom" (avec accents)
+const NOM_PRENOM_RE = /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+,\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\- ]+$/
 
 function parseInt0(s: string): number {
   const n = parseInt(s.replace(/[^\d-]/g, ''), 10)
   return isNaN(n) ? 0 : n
 }
 
-// Regroupe les text items par Y (tolérance ±2), trie chaque ligne par X,
-// puis joint les tokens avec un espace simple.
-function buildLines(pageItems: any[]): { text: string, items: any[] }[] {
+// Regroupe les text items par Y (tolérance ±2pt), trie par X.
+function buildLines(pageItems: any[]): string[] {
   const rowsByY = new Map<number, any[]>()
   for (const it of pageItems) {
     if (!it || typeof it.str !== 'string') continue
@@ -60,138 +63,183 @@ function buildLines(pageItems: any[]): { text: string, items: any[] }[] {
     rowsByY.get(key)!.push(it)
   }
   const sortedYs = [...rowsByY.keys()].sort((a, b) => b - a) // haut → bas
-  const out: { text: string, items: any[] }[] = []
+  const out: string[] = []
   for (const y of sortedYs) {
     const row = rowsByY.get(y)!.sort((a, b) => a.x - b.x)
     const text = row.map(r => String(r.str).trim()).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
-    if (text) out.push({ text, items: row })
+    if (text) out.push(text)
   }
   return out
 }
 
-// Parse une ligne en repérant les ancres :
-//   - num_commande (premier token alphanumérique en début OU dans la ligne)
-//   - statut (Transmise / Fermée / Réception Partielle…)
-//   - date YYYY-MM-DD
-//   - #fournisseur (entier 4-6 chiffres)
-//   - #piece (entier ou alphanumérique)
-//   - qte (entier petit)
-// Le reste est texte.
-function parseCommandeLine(line: string, items: any[]): ParsedCommande | null {
-  // On utilise les items triés par X pour avoir un découpage colonnaire
-  // plus robuste qu'un simple split(' ') (utile quand un nom contient
-  // des espaces).
-  const tokens = items
-    .map(i => ({ s: String(i.str).trim(), x: i.x }))
-    .filter(t => t.s.length > 0)
+// Détecte une ligne d'en-tête de commande :
+//   "#Commande Statut Date Réception #Fourn Nom Type de Commande Commandé Par Autorisé Par Transport. %Esc."
+function isHeaderColumnLine(line: string): boolean {
+  return /#Commande\s+Statut/i.test(line) && /Commandé\s+Par/i.test(line)
+}
 
+// Détecte la ligne d'en-tête des pièces :
+//   "# Pièce #Fourn Comm Réserv Local.1 ..."
+function isHeaderPieceLine(line: string): boolean {
+  return /#\s*Pièce/i.test(line) && /#Fourn/i.test(line) && /(Comm|Retour)\b/i.test(line)
+}
+
+// Détecte la ligne d'en-tête du bloc Commande/Réservation :
+//   "Date # Employé Nom Employé Qte Remarque:"
+function isHeaderEmployeLine(line: string): boolean {
+  return /^Date\b.*#?\s*Employé\b.*Nom\s+Employé/i.test(line)
+}
+
+// Parse la ligne header d'une commande.
+//   "DS05072026 Transmise/Fermée 2026-05-07 100010 Kimpex Stock Pothier, Anthony Pothier, Anthony"
+//   "M1C0036138 Réception Partielle 2024-09-19 2024-09-20 48312 HLC-VÉLO Stock Voghel, Cynthia Voghel, Cynthia"
+function parseHeaderCommande(line: string): {
+  num_commande: string,
+  statut: string,
+  date_commande: string | null,
+  num_fournisseur: string | null,
+  nom_fournisseur: string | null,
+  commande_par: string | null,
+} | null {
+  const tokens = line.split(/\s+/)
   if (tokens.length < 6) return null
 
-  const firstTok = tokens[0].s
-  if (!NUM_CMD_RE.test(firstTok)) return null
-  const num_commande = firstTok
+  const num_commande = tokens[0]
+  if (!num_commande || num_commande.length < 4) return null
 
-  // Statut : on cherche le 1er match d'un statut connu dans les tokens 1..6
-  let statutIdx = -1
+  // Statut : 1 ou 2 tokens (ex: "Réception Partielle" = 2 tokens)
   let statut = ''
-  for (let i = 1; i < Math.min(tokens.length, 8); i++) {
-    for (const st of STATUTS) {
-      // Le statut peut s'étaler sur plusieurs tokens (ex: "Réception Partielle")
-      const joined2 = tokens.slice(i, i + 2).map(t => t.s).join(' ')
-      const joined1 = tokens[i].s
-      if (joined1.toLowerCase() === st.toLowerCase()) { statut = joined1; statutIdx = i; break }
-      if (joined2.toLowerCase() === st.toLowerCase()) { statut = joined2; statutIdx = i; break }
-    }
-    if (statutIdx >= 0) break
+  let i = 1
+  if (STATUT_RE.test(tokens[i])) { statut = tokens[i]; i++ }
+  else if (i + 1 < tokens.length && STATUT_RE.test(tokens[i] + ' ' + tokens[i + 1])) {
+    statut = tokens[i] + ' ' + tokens[i + 1]; i += 2
   }
-  if (statutIdx < 0) return null
+  else return null
 
-  // Date : 1er token après le statut qui matche YYYY-MM-DD
-  const afterStatutStart = statutIdx + (statut.includes(' ') ? 2 : 1)
-  let dateIdx = -1
+  // Dates : 1 ou 2 dates YYYY-MM-DD
   let date_commande: string | null = null
-  for (let i = afterStatutStart; i < Math.min(tokens.length, afterStatutStart + 4); i++) {
-    if (DATE_RE.test(tokens[i].s)) { date_commande = tokens[i].s; dateIdx = i; break }
-  }
-  if (dateIdx < 0) return null
+  if (i < tokens.length && DATE_RE.test(tokens[i])) { date_commande = tokens[i]; i++ }
+  else return null
+  // Date réception (optionnelle) — on l'ignore
+  if (i < tokens.length && DATE_RE.test(tokens[i])) i++
 
-  // #Fournisseur : 1er entier 4-6 chiffres après la date
-  let fournIdx = -1
+  // #Fourn : entier 4-6 chiffres
   let num_fournisseur: string | null = null
-  for (let i = dateIdx + 1; i < Math.min(tokens.length, dateIdx + 4); i++) {
-    if (/^\d{4,6}$/.test(tokens[i].s)) { num_fournisseur = tokens[i].s; fournIdx = i; break }
-  }
-  if (fournIdx < 0) return null
+  if (i < tokens.length && /^\d{4,6}$/.test(tokens[i])) { num_fournisseur = tokens[i]; i++ }
+  else return null
 
-  // À partir d'ici, on a besoin de repérer #Pièce + Qte.
-  // Stratégie : on parcourt les tokens depuis la fin pour trouver
-  // le premier couple (alphanum_piece, entier_qte) plausible, sachant
-  // que le nom employé suit (et peut contenir une virgule).
-  //
-  // Le layout Traction typique est :
-  //   ... #Fourn  Nom Fournisseur (long)  Commandé Par (Nom, Prénom)
-  //       #Pièce  Qte  Description (long)  Nom Employé (Nom, Prénom)
-  //
-  // Mais parfois tout est sur une seule ligne. On utilise donc
-  // les coordonnées X pour découper en blocs.
-  //
-  // On scanne après fournIdx et on cherche un token qui ressemble à
-  // un #pièce suivi d'un petit entier (qte).
-  let pieceIdx = -1
-  let num_piece = ''
-  let qte_commandee = 0
-  for (let i = fournIdx + 1; i < tokens.length - 1; i++) {
-    const a = tokens[i].s
-    const b = tokens[i + 1].s
-    const aIsPiece = /^[A-Z0-9][A-Z0-9\-_.\/]{1,30}$/i.test(a) && /\d/.test(a)
-    const bIsQte = /^\d{1,5}$/.test(b)
-    if (aIsPiece && bIsQte) {
-      pieceIdx = i
-      num_piece = a
-      qte_commandee = parseInt0(b)
-      break
-    }
-  }
-  if (pieceIdx < 0) return null
+  // À partir d'ici : <Nom Fourn (1+ tokens)> <Type (1+ tokens)> <Commandé Par "Nom, Prénom"> <Autorisé Par "Nom, Prénom">
+  // On parcourt à l'envers depuis la fin pour repérer les 2 paires "Nom, Prénom".
+  // "Nom, Prénom" peut occuper 2 tokens (cas usuel) ou plus si le prénom contient
+  // des espaces (ex: "Briand, Thierry Albert"). Stratégie : chercher la 1re virgule
+  // depuis la droite, puis le couple "Nom, Prénom" (ou plus).
+  const tail = tokens.slice(i)
+  if (tail.length < 4) return { num_commande, statut, date_commande, num_fournisseur, nom_fournisseur: null, commande_par: null }
 
-  // Bloc fournisseur + commandé par : entre fournIdx+1 et pieceIdx-1
-  const blocFourn = tokens.slice(fournIdx + 1, pieceIdx).map(t => t.s).join(' ').trim()
-  // Heuristique : "Nom, Prénom" en fin = commandé par
-  let nom_fournisseur: string | null = blocFourn || null
-  let commande_par:    string | null = null
-  const cpMatch = /(.*?)\s+([A-ZÀ-Ÿ][A-Za-zÀ-ÿ'\-]+,\s+[A-Za-zÀ-ÿ'\-]+)\s*$/.exec(blocFourn)
-  if (cpMatch) {
-    nom_fournisseur = cpMatch[1].trim() || null
-    commande_par = cpMatch[2].trim()
+  // Trouver le démarrage du dernier "Nom, ..." en cherchant un token finissant par ","
+  // puis remonter jusqu'au type connu.
+  // Plus simple : trouver TOUTES les positions où un token finit par "," (= Nom, ...)
+  const commaIdxs: number[] = []
+  for (let k = 0; k < tail.length; k++) {
+    if (/,$/.test(tail[k])) commaIdxs.push(k)
+  }
+  // On s'attend à 2 virgules : Commandé Par et Autorisé Par.
+  // S'il n'y en a qu'une, c'est seulement Commandé Par (peut arriver).
+  if (commaIdxs.length === 0) {
+    return { num_commande, statut, date_commande, num_fournisseur, nom_fournisseur: tail.join(' ') || null, commande_par: null }
   }
 
-  // Bloc description + employé : après qte
-  const blocAfter = tokens.slice(pieceIdx + 2).map(t => t.s).join(' ').trim()
-  let description: string | null = blocAfter || null
-  let nom_employe: string | null = null
-  const emMatch = /(.*?)\s+([A-ZÀ-Ÿ][A-Za-zÀ-ÿ'\-]+,\s+[A-Za-zÀ-ÿ'\-]+)\s*$/.exec(blocAfter)
-  if (emMatch) {
-    description = emMatch[1].trim() || null
-    nom_employe = emMatch[2].trim()
+  // Le 1er "Nom, ..." commence à commaIdxs[0] (le mot avec la virgule)
+  const premiereVirgIdx = commaIdxs[0]
+  const commandeParStart = premiereVirgIdx
+  // Le type vient juste avant le 1er "Nom,"
+  const typeIdx = commandeParStart - 1
+  if (typeIdx < 0) {
+    return { num_commande, statut, date_commande, num_fournisseur, nom_fournisseur: null, commande_par: null }
   }
 
-  return {
-    num_commande,
-    statut,
-    date_commande,
-    num_fournisseur,
-    nom_fournisseur,
-    commande_par,
-    num_piece,
-    qte_commandee,
-    description,
-    nom_employe,
+  // Reconstruction : nom_fourn = tail[0..typeIdx-1], type = tail[typeIdx] (peut être 1-3 tokens)
+  // On vérifie si tail[typeIdx] est un type connu, sinon on essaie typeIdx-1 + typeIdx.
+  let typeStart = typeIdx
+  if (!TYPE_RE.test(tail[typeStart])) {
+    // Essayer 2 tokens : "Retour au" + "Fournisseur" → 3 tokens
+    // ou "Réception" + "Partielle" → 2 tokens
+    const t2 = (tail[typeStart - 1] + ' ' + tail[typeStart])
+    const t3 = typeStart >= 2 ? (tail[typeStart - 2] + ' ' + tail[typeStart - 1] + ' ' + tail[typeStart]) : ''
+    if (TYPE_RE.test(t3)) typeStart -= 2
+    else if (TYPE_RE.test(t2)) typeStart -= 1
+    // Sinon on ne reconnaît pas le type, mais pas grave — on garde tout
   }
+
+  const nom_fournisseur = tail.slice(0, typeStart).join(' ').trim() || null
+
+  // commande_par = du premier "Nom," jusqu'à la 2e virgule (exclue)
+  let commande_par: string | null = null
+  if (commaIdxs.length >= 2) {
+    // Tokens entre la 1re virgule et la 2e virgule (exclusive)
+    commande_par = tail.slice(commandeParStart, commaIdxs[1]).join(' ').trim()
+  } else {
+    // Tout le reste
+    commande_par = tail.slice(commandeParStart).join(' ').trim()
+  }
+  // Nettoyage : si le pattern "Nom, Prénom" n'est pas reconnu, on le laisse tel quel
+  return { num_commande, statut, date_commande, num_fournisseur, nom_fournisseur, commande_par }
+}
+
+// Parse une ligne de pièce.
+//   "365005 100010 1 PS2AA 23 MBTZ10S BATTERIE QUADFLEX MO 87,49 N N 1"
+//   "9931-819 44405 1 1 7 DECK LIGHT,WHT10-30V,LED,680 96,52 N N D 1"
+function parsePieceLine(line: string): { num_piece: string, qte_commandee: number, description: string | null } | null {
+  const tokens = line.split(/\s+/)
+  if (tokens.length < 4) return null
+
+  const num_piece = tokens[0]
+  // Le #pièce doit contenir au moins un chiffre OU une lettre majuscule
+  if (!/[0-9A-Z]/i.test(num_piece) || num_piece.length < 2) return null
+
+  // tokens[1] = #fourn (entier 4-6 chiffres)
+  if (!/^\d{4,6}$/.test(tokens[1])) return null
+
+  // tokens[2] = qte_comm (petit entier)
+  if (!/^\d{1,5}$/.test(tokens[2])) return null
+  const qte_commandee = parseInt0(tokens[2])
+
+  // Le reste : on cherche le coût (nombre avec virgule décimale) qui sépare
+  // la description du bloc final (N N <stock>).
+  // Format des nombres Traction : "87,49" ou "87.49"
+  const COUT_RE = /^-?\d+[,.]\d{1,4}$/
+  let coutIdx = -1
+  for (let k = tokens.length - 1; k >= 3; k--) {
+    if (COUT_RE.test(tokens[k])) { coutIdx = k; break }
+  }
+  // La description est entre tokens[3..coutIdx-1] (en filtrant les codes
+  // de localisation qui sont en début).
+  // Stratégie simple : on prend tous les tokens entre 3 et coutIdx-1.
+  // Les premiers tokens (codes de localisation) seront inclus dans la
+  // description — pas idéal mais pas grave pour le suivi.
+  let description: string | null = null
+  if (coutIdx > 3) {
+    description = tokens.slice(3, coutIdx).join(' ').trim() || null
+  } else if (coutIdx === -1) {
+    // Pas de coût détecté — prendre tout après tokens[2]
+    description = tokens.slice(3).join(' ').trim() || null
+  }
+  // Nettoyage : enlever des codes de localisation purement alphanumériques
+  // courts en début (mais c'est risqué — on laisse tel quel)
+
+  return { num_piece, qte_commandee, description }
+}
+
+// Parse une ligne du bloc Commande/Réservation pour extraire l'employé.
+//   "2026-05-07 945 Pothier, Anthony 1"
+//   "2024-12-04 176 Mouralian, Imad 116909 Facture Service 1 #21913 Banville, Carol"
+function parseEmployeLine(line: string): string | null {
+  const m = /^\d{4}-\d{2}-\d{2}\s+\d+\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+,\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\- ]+?)(?:\s+\d|\s+#|$)/.exec(line)
+  return m ? m[1].trim() : null
 }
 
 export async function parseCommandesPdf(buffer: Buffer | Uint8Array): Promise<CommandesParseResult> {
   try {
-    // unpdf veut un Uint8Array dont .buffer est un ArrayBuffer "pur"
     const src = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer as any)
     const ab = new ArrayBuffer(src.byteLength)
     const data = new Uint8Array(ab)
@@ -204,15 +252,65 @@ export async function parseCommandesPdf(buffer: Buffer | Uint8Array): Promise<Co
 
     for (let p = 0; p < r.items.length; p++) {
       const lines = buildLines(r.items[p] as any[])
-      for (const { text, items } of lines) {
-        rawLines.push(text)
-        // Skip headers / pieds
-        if (/^(#?\s*Commande|Statut|Page\s+\d+|Imprim|Total)/i.test(text)) continue
-        const cmd = parseCommandeLine(text, items)
-        if (cmd) commandes.push(cmd)
-        else if (NUM_CMD_RE.test(text.split(/\s+/)[0] || '')) {
-          warnings.push(`Ligne non parsée : ${text.slice(0, 140)}`)
+      for (const l of lines) rawLines.push(l)
+
+      // Trouver l'index de l'en-tête colonne de commande
+      const idxHeaderCmd = lines.findIndex(isHeaderColumnLine)
+      if (idxHeaderCmd < 0) continue
+
+      // La ligne juste après contient les valeurs de la commande
+      const ligneCmd = lines[idxHeaderCmd + 1]
+      if (!ligneCmd) continue
+      const header = parseHeaderCommande(ligneCmd)
+      if (!header) {
+        warnings.push(`Page ${p + 1}: header commande non parsable : ${ligneCmd.slice(0, 120)}`)
+        continue
+      }
+
+      // Trouver l'index de l'en-tête colonne des pièces
+      const idxHeaderPiece = lines.findIndex(isHeaderPieceLine)
+      if (idxHeaderPiece < 0) continue  // commande sans pièces
+
+      // Trouver la fin de la zone "pièces" : ligne qui commence par "Coût Total"
+      // ou une ligne "Commande" / "Réservation" qui marque le bloc Employé.
+      let idxFinPieces = lines.length
+      for (let k = idxHeaderPiece + 1; k < lines.length; k++) {
+        const l = lines[k]
+        if (/^Coût\s+Total\s+de\s+la\s+Commande/i.test(l)) { idxFinPieces = k; break }
+        if (/^(Commande|Réservation)$/i.test(l)) { idxFinPieces = k; break }
+        if (isHeaderEmployeLine(l)) { idxFinPieces = k; break }
+      }
+
+      // Parser les lignes de pièces
+      const pieces: { num_piece: string, qte_commandee: number, description: string | null }[] = []
+      for (let k = idxHeaderPiece + 1; k < idxFinPieces; k++) {
+        const piece = parsePieceLine(lines[k])
+        if (piece) pieces.push(piece)
+      }
+
+      // Trouver le nom_employe (1er bloc Commande/Réservation après les pièces)
+      let nom_employe: string | null = null
+      for (let k = idxFinPieces; k < lines.length; k++) {
+        if (isHeaderEmployeLine(lines[k]) && k + 1 < lines.length) {
+          nom_employe = parseEmployeLine(lines[k + 1])
+          if (nom_employe) break
         }
+      }
+
+      // Émettre une entrée par pièce
+      for (const piece of pieces) {
+        commandes.push({
+          num_commande:    header.num_commande,
+          statut:          header.statut,
+          date_commande:   header.date_commande,
+          num_fournisseur: header.num_fournisseur,
+          nom_fournisseur: header.nom_fournisseur,
+          commande_par:    header.commande_par,
+          num_piece:       piece.num_piece,
+          qte_commandee:   piece.qte_commandee,
+          description:     piece.description,
+          nom_employe,
+        })
       }
     }
 

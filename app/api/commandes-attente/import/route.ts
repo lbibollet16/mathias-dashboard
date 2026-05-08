@@ -4,7 +4,7 @@ import { parseCommandesPdf } from '@/lib/commandes-pdf-parser'
 import { parseCommandesPdfAvecIA } from '@/lib/commandes-pdf-ai-parser'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60  // l'IA peut prendre 10-30s sur un gros PDF
+export const maxDuration = 300  // l'IA peut prendre 60-180s sur un gros PDF
 export const dynamic = 'force-dynamic'
 
 // POST multipart/form-data — upload du PDF "Liste commande" Traction.
@@ -27,7 +27,9 @@ export async function POST(req: NextRequest) {
     const form = await req.formData()
     const file = form.get('file') as File | null
     const diagnostic = String(form.get('diagnostic') || '') === '1'
-    const moteur = String(form.get('moteur') || 'ia').toLowerCase()
+    // Moteur par défaut = regex (rapide, adapté au format multi-page Traction).
+    // L'IA reste en option ("moteur=ia") pour les cas où le regex galère.
+    const moteur = String(form.get('moteur') || 'regex').toLowerCase()
 
     if (!file) return NextResponse.json({ erreur: 'Fichier requis' }, { status: 400 })
 

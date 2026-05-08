@@ -765,6 +765,7 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
   const [recherche, setRecherche] = useState('')
   const [diagOutput, setDiagOutput] = useState<any|null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const fileRefIa = useRef<HTMLInputElement>(null)
   const fileRefDiag = useRef<HTMLInputElement>(null)
 
   useEffect(() => { charger() }, [])
@@ -782,22 +783,22 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
     } finally { setLoading(false) }
   }
 
-  async function importerPdf(file: File) {
+  async function importerPdf(file: File, moteur: 'regex'|'ia' = 'regex') {
     setImporting(true)
-    setMsg({type:'info', text:'Import en cours…'})
+    setMsg({type:'info', text: moteur === 'ia' ? 'Import IA en cours… (peut prendre 1-3 min)' : 'Import en cours…'})
     try {
       const fd = new FormData()
       fd.append('file', file)
+      fd.append('moteur', moteur)
       const r = await fetch('/api/commandes-attente/import', { method:'POST', body: fd })
       const d = await r.json()
       if (!r.ok || d.erreur) {
         setMsg({type:'err', text: d.erreur || 'Erreur import'})
-        // Si le PDF a échoué, on affiche les lignes brutes pour debug
         if (d.rawLines) setDiagOutput({ rawLines: d.rawLines, commandes: [], note: 'Échec parsing — lignes brutes ci-dessous' })
       } else {
         setMsg({
           type:'ok',
-          text:`✅ ${d.nb_commandes_parsees} commandes lues — ${d.inserted} nouvelles, ${d.updated} mises à jour, ${d.deactivated} reçues/fermées.`,
+          text:`✅ ${d.nb_commandes_parsees} commandes lues (moteur ${d.moteur}) — ${d.inserted} nouvelles, ${d.updated} mises à jour, ${d.deactivated} reçues/fermées.`,
         })
         await charger()
       }
@@ -966,7 +967,14 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
             type="file"
             accept="application/pdf,.pdf"
             style={{display:'none'}}
-            onChange={e => { const f = e.target.files?.[0]; if (f) importerPdf(f) }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) importerPdf(f, 'regex') }}
+          />
+          <input
+            ref={fileRefIa}
+            type="file"
+            accept="application/pdf,.pdf"
+            style={{display:'none'}}
+            onChange={e => { const f = e.target.files?.[0]; if (f) importerPdf(f, 'ia') }}
           />
           <input
             ref={fileRefDiag}
@@ -979,12 +987,19 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
             disabled={importing}
             onClick={()=>fileRef.current?.click()}
             style={{background:importing?sub:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 18px',fontWeight:800,cursor:importing?'not-allowed':'pointer',fontSize:13}}>
-            {importing ? '⏳ Import…' : '🤖 Importer PDF (IA)'}
+            {importing ? '⏳ Import…' : '📥 Importer PDF'}
+          </button>
+          <button
+            disabled={importing}
+            onClick={()=>fileRefIa.current?.click()}
+            title="Mode IA — plus précis mais beaucoup plus lent (1-3 min). Utile si l'import standard rate des lignes."
+            style={{background:'transparent',color:C.blue,border:`1px solid ${C.blue}`,borderRadius:8,padding:'10px 14px',fontWeight:700,cursor:importing?'not-allowed':'pointer',fontSize:12}}>
+            🤖 Mode IA
           </button>
           <button
             disabled={importing}
             onClick={()=>fileRefDiag.current?.click()}
-            title="Affiche les lignes brutes extraites du PDF — utile si l'import échoue"
+            title="Affiche les lignes brutes extraites du PDF — utile si l'import rate"
             style={{background:'transparent',color:sub,border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 14px',fontWeight:700,cursor:importing?'not-allowed':'pointer',fontSize:12}}>
             🔍 Diagnostic
           </button>
