@@ -113,6 +113,9 @@ export default function Dashboard() {
   const [negsVerifies, setNegsVerifies] = useState<any[]>([])
   const [validationsCompta, setValidationsCompta] = useState<any[]>([])
   const [retoursActifsGlobal, setRetoursActifsGlobal] = useState<any[]>([])
+  const [commandesAttenteGlobal, setCommandesAttenteGlobal] = useState<any[]>([])
+  const [forceMesSuivis, setForceMesSuivis] = useState(false)  // déclenche le filtre dans CommandesAttenteTab
+  const [notifVuGlobal, setNotifVuGlobal] = useState(false)
   const [fournituresData, setFournituresData] = useState<{catalogue:any[],demandes:any[]}>({catalogue:[],demandes:[]}) // principal -> [alternatifs]
   const [altReverse, setAltReverse] = useState<Map<string,string>>(new Map()) // alternatif -> principal
   const [iFile, setIFile]   = useState<File|null>(null)
@@ -174,7 +177,7 @@ export default function Dashboard() {
   async function fetchAll() {
     setLoading(true)
     try {
-      const [d, l, n, a, f, nv, vc, ret] = await Promise.all([
+      const [d, l, n, a, f, nv, vc, ret, cmdAtt] = await Promise.all([
         fetch('/api/calculateur').then(r=>r.json()),
         fetch('/api/lots').then(r=>r.json()),
         fetch('/api/negatifs').then(r=>r.json()),
@@ -183,12 +186,14 @@ export default function Dashboard() {
         fetch('/api/negatifs-verifies').then(r=>r.json()),
         fetch('/api/validations-comptables').then(r=>r.json()),
         fetch('/api/comptabilite/retours?actifs=1').then(r=>r.json()).catch(()=>[]),
+        fetch('/api/commandes-attente').then(r=>r.json()).catch(()=>({lignes:[]})),
       ])
       setData(d); setLots(Array.isArray(l)?l:[]); setNegs(Array.isArray(n)?n:[])
       if(f&&f.catalogue) setFournituresData(f)
       if(Array.isArray(nv)) setNegsVerifies(nv)
       if(Array.isArray(vc)) setValidationsCompta(vc)
       if(Array.isArray(ret)) setRetoursActifsGlobal(ret)
+      if(cmdAtt && Array.isArray(cmdAtt.lignes)) setCommandesAttenteGlobal(cmdAtt.lignes)
       // Construire les maps d'alternatives
       if (Array.isArray(a)) {
         const fwd = new Map<string,string[]>()
@@ -406,6 +411,45 @@ export default function Dashboard() {
                   📦 Voir Inventaire ({nbCpt})
                 </button>
               )}
+            </div>
+          )
+        })()}
+
+        {/* Bandeau global — suivis Commandes en attente (≥10j + plan d'action + match employé ≥85%) */}
+        {(() => {
+          if (notifVuGlobal) return null
+          if (tab === 'commandes_attente') return null  // bandeau interne au tab dans ce cas
+          const moi = profil?.nom || profil?.email || ''
+          if (!moi) return null
+          const mesSuivis = (commandesAttenteGlobal || []).filter((l:any) => {
+            const ref = l.date_commande ? new Date(l.date_commande + 'T00:00:00') : new Date(l.date_premiere_vue)
+            const ageJours = Math.max(0, Math.floor((Date.now() - ref.getTime()) / 86400000))
+            return ageJours >= 10
+              && l.plan_action && l.plan_action.length > 0
+              && matchNomEmploye(l.nom_employe, moi) >= 0.85
+          })
+          if (mesSuivis.length === 0) return null
+          return (
+            <div style={{background:'#fff4e5',border:'2px solid #f9ab00',borderRadius:10,padding:'12px 16px',marginBottom:14,display:'flex',alignItems:'center',gap:14,flexWrap:'wrap',animation:'pulseSuiv 2s ease-in-out infinite'}}>
+              <style>{`@keyframes pulseSuiv { 0%,100%{box-shadow:0 0 0 0 rgba(249,171,0,.4)} 50%{box-shadow:0 0 0 8px rgba(249,171,0,0)} }`}</style>
+              <span style={{fontSize:24}}>🔔</span>
+              <div style={{flex:1,minWidth:200}}>
+                <div style={{fontSize:13,fontWeight:900,color:'#b06a00'}}>
+                  {mesSuivis.length === 1 ? '1 suivi à faire (commande en retard)' : `${mesSuivis.length} suivis à faire (commandes en retard)`}
+                </div>
+                <div style={{fontSize:11,color:'#5f6368',marginTop:2}}>
+                  {mesSuivis.length === 1 ? 'Une commande' : 'Des commandes'} en retard (≥10j) avec un plan d'action en cours t'attend{mesSuivis.length === 1 ? '' : 'ent'}.
+                </div>
+              </div>
+              <button onClick={()=>{ setTab('commandes_attente'); setForceMesSuivis(true) }}
+                style={{background:'#f9ab00',color:'#fff',border:'none',borderRadius:8,padding:'9px 14px',fontWeight:800,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+                ⏳ Voir mes suivis ({mesSuivis.length})
+              </button>
+              <button onClick={()=>setNotifVuGlobal(true)}
+                title="Masquer (jusqu'au prochain rechargement)"
+                style={{background:'transparent',border:'none',color:sub,cursor:'pointer',fontSize:14}}>
+                ✕
+              </button>
             </div>
           )
         })()}
@@ -739,7 +783,7 @@ export default function Dashboard() {
         {/* ── NÉGATIFS ────────────────────────────────────────────── */}
         {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts} negsVerifies={negsVerifies} setNegsVerifies={setNegsVerifies} profil={profil} data={data} lancerSync={lancerSync} syncing={syncing} syncLog={syncLog} validationsCompta={validationsCompta} retoursActifs={retoursActifsGlobal} setRetoursActifs={setRetoursActifsGlobal}/>}
         {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts} fournituresData={fournituresData} setFournituresData={setFournituresData} profil={profil} validationsCompta={validationsCompta}/>}
-        {tab==='commandes_attente' && <CommandesAttenteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
+        {tab==='commandes_attente' && <CommandesAttenteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} forceMesSuivis={forceMesSuivis} setForceMesSuivis={setForceMesSuivis}/>}
         {tab==='inventaire' && <InventaireTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} validationsCompta={validationsCompta} retoursActifs={retoursActifsGlobal} setRetoursActifs={setRetoursActifsGlobal}/>}
         {tab==='comptabilite' && <ComptabiliteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} validationsCompta={validationsCompta} setValidationsCompta={setValidationsCompta}/>}
         {tab==='amazon' && <AmazonTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
@@ -797,7 +841,7 @@ function matchNomEmploye(pdfNom: string | null | undefined, userNom: string | nu
   return inter / Math.min(a.size, b.size)
 }
 
-function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
+function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, forceMesSuivis, setForceMesSuivis}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const [lignes, setLignes] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -808,6 +852,7 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
   const [filtEmploye, setFiltEmploye] = useState('ALL')
   const [filtAge, setFiltAge] = useState('ALL')      // ALL | 0-5 | 5-10 | 10+
   const [filtCommandePar, setFiltCommandePar] = useState('ALL')
+  const [filtMesSuivisSeul, setFiltMesSuivisSeul] = useState(false)
   const [recherche, setRecherche] = useState('')
   const [diagOutput, setDiagOutput] = useState<any|null>(null)
   const [historique, setHistorique] = useState<{commandeId: number, items: any[]}|null>(null)
@@ -818,6 +863,22 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
   const moiNom = profil?.nom || profil?.email || ''
 
   useEffect(() => { charger() }, [])
+
+  // Quand on arrive depuis le bandeau global "Voir mes suivis" :
+  // on active le filtre mes-suivis-seul + on met l'âge sur 10+, et on
+  // reset l'indicateur global pour ne pas re-déclencher au prochain montage.
+  useEffect(() => {
+    if (forceMesSuivis) {
+      setFiltMesSuivisSeul(true)
+      setFiltAge('10+')
+      setFiltFourn('ALL')
+      setFiltStatut('ALL')
+      setFiltEmploye('ALL')
+      setFiltCommandePar('ALL')
+      setRecherche('')
+      if (typeof setForceMesSuivis === 'function') setForceMesSuivis(false)
+    }
+  }, [forceMesSuivis, setForceMesSuivis])
 
   async function charger() {
     setLoading(true)
@@ -918,6 +979,7 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
   const commandeurs  = [...new Set(enriched.map(l => l.commande_par).filter(Boolean))].sort()
 
   const filtres = (l:any) => {
+    if (filtMesSuivisSeul && matchNomEmploye(l.nom_employe, moiNom) < 0.85) return false
     if (filtFourn !== 'ALL' && l.nom_fournisseur !== filtFourn) return false
     if (filtStatut !== 'ALL' && l.statut !== filtStatut) return false
     if (filtEmploye !== 'ALL' && l.nom_employe !== filtEmploye) return false
@@ -1049,7 +1111,7 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
               Tu as {mesSuivis.length === 1 ? 'une commande' : 'des commandes'} en retard (≥10j) avec un plan d'action en cours. Action attendue.
             </div>
           </div>
-          <button onClick={()=>{setFiltAge('10+'); setFiltEmploye(moiNom)}}
+          <button onClick={()=>{ setFiltMesSuivisSeul(true); setFiltAge('10+'); setFiltEmploye('ALL') }}
             style={{background:C.red,color:'#fff',border:'none',borderRadius:8,padding:'9px 14px',fontWeight:800,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
             Voir mes suivis ({mesSuivis.length})
           </button>
@@ -1238,9 +1300,17 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
             <option value="ALL">Tous les employés</option>
             {employes.map(e => <option key={e} value={e}>{e}</option>)}
           </select>
-          {(filtAge!=='ALL'||filtStatut!=='ALL'||filtFourn!=='ALL'||filtCommandePar!=='ALL'||filtEmploye!=='ALL'||recherche) && (
+          {moiNom && (
             <button
-              onClick={()=>{setFiltAge('ALL');setFiltStatut('ALL');setFiltFourn('ALL');setFiltCommandePar('ALL');setFiltEmploye('ALL');setRecherche('')}}
+              onClick={()=>setFiltMesSuivisSeul(!filtMesSuivisSeul)}
+              title="Filtrer pour ne montrer que les commandes qui te sont associées (match nom à ≥85%)"
+              style={{padding:'8px 12px',border:`1px solid ${filtMesSuivisSeul?C.blue:bdr}`,borderRadius:6,background:filtMesSuivisSeul?C.blue:'transparent',color:filtMesSuivisSeul?'#fff':sub,fontSize:11,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+              {filtMesSuivisSeul ? '✓ Mes suivis' : '👤 Mes suivis'}
+            </button>
+          )}
+          {(filtAge!=='ALL'||filtStatut!=='ALL'||filtFourn!=='ALL'||filtCommandePar!=='ALL'||filtEmploye!=='ALL'||filtMesSuivisSeul||recherche) && (
+            <button
+              onClick={()=>{setFiltAge('ALL');setFiltStatut('ALL');setFiltFourn('ALL');setFiltCommandePar('ALL');setFiltEmploye('ALL');setFiltMesSuivisSeul(false);setRecherche('')}}
               style={{padding:'8px 12px',border:'none',borderRadius:6,background:C.red+'22',color:C.red,fontSize:11,fontWeight:700,cursor:'pointer'}}>
               ✕ Réinit. filtres
             </button>
