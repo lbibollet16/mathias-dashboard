@@ -990,6 +990,17 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
           </button>
         </div>
 
+        {/* Paramètres exacts à utiliser dans Traction pour générer le PDF */}
+        <div style={{marginTop:12,padding:'10px 12px',background:dark?'#0f1a2b':'#eaf2ff',border:`1px solid ${C.blue}33`,borderLeft:`3px solid ${C.blue}`,borderRadius:6,fontSize:11,lineHeight:1.7,color:dark?'#cfe1ff':'#1a3a6a'}}>
+          <div style={{fontWeight:800,marginBottom:4,color:C.blue}}>📄 Paramètres Traction pour générer le PDF</div>
+          <div><b>Importer :</b> Lautopak — Menu 247</div>
+          <div><b>Impression :</b> Détaillée par pièces</div>
+          <div><b>Type de commande :</b> *Tous*</div>
+          <div><b>Réceptions partielles :</b> back-order seulement <span style={{color:C.green,fontWeight:700}}>☑ cocher</span></div>
+          <div><b>Afficher les quantités commandées à 0 :</b> <span style={{color:C.red,fontWeight:700}}>☐ décocher</span></div>
+          <div><b>Statut :</b> Transmise/Fermée <span style={{color:C.green,fontWeight:700}}>☑ cocher</span> &nbsp; · &nbsp; Réception Partielle <span style={{color:C.green,fontWeight:700}}>☑ cocher</span></div>
+        </div>
+
         {msg && (
           <div style={{marginTop:10,padding:'9px 12px',borderRadius:6,fontSize:12,fontWeight:600,
             background: msg.type==='ok' ? '#e6f4ea' : msg.type==='err' ? '#fce8e6' : '#e8f0fe',
