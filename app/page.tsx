@@ -8,10 +8,10 @@ const supabaseCli = createClient(
 )
 
 const ROLES_ONGLETS: Record<string, string[]> = {
-  admin:        ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon','scoa','utilisateurs'],
-  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon','scoa'],
-  commis:       ['commandes','fournitures','retours'],
-  employe_piece: ['fournitures','negatifs','inventaire','retours'],
+  admin:        ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','scoa','utilisateurs'],
+  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','scoa'],
+  commis:       ['commandes','commandes_attente','fournitures','retours'],
+  employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours'],
 }
 
 interface Item {
@@ -351,7 +351,7 @@ export default function Dashboard() {
 
       {/* TABS */}
       <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,overflowX:'auto',display:'flex',WebkitOverflowScrolling:'touch',scrollbarWidth:'none',gap:isMobile?2:0}}>
-        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},{id:'scoa',l:isMobile?'🏍 SCOA':'🏍 SCOA'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>(profil?.onglets_custom && Array.isArray(profil.onglets_custom) && profil.onglets_custom.length>0 ? profil.onglets_custom : (ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis'])).includes(t.id)).map(t=>(
+        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'commandes_attente',l:isMobile?'⏳':'⏳ Commandes en attente'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},{id:'scoa',l:isMobile?'🏍 SCOA':'🏍 SCOA'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>(profil?.onglets_custom && Array.isArray(profil.onglets_custom) && profil.onglets_custom.length>0 ? profil.onglets_custom : (ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis'])).includes(t.id)).map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:isMobile?'12px 14px':'12px 16px',border:'none',background:tab===t.id?(dark?'#1a233a':'#dbeafe'):'transparent',cursor:'pointer',fontSize:isMobile?14:13,fontWeight:tab===t.id?800:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',borderRadius:isMobile?'8px 8px 0 0':0,transition:'all .15s',whiteSpace:'nowrap',flexShrink:0}}>
             {t.l}
           </button>
@@ -727,6 +727,7 @@ export default function Dashboard() {
         {/* ── NÉGATIFS ────────────────────────────────────────────── */}
         {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts} negsVerifies={negsVerifies} setNegsVerifies={setNegsVerifies} profil={profil} data={data} lancerSync={lancerSync} syncing={syncing} syncLog={syncLog} validationsCompta={validationsCompta} retoursActifs={retoursActifsGlobal} setRetoursActifs={setRetoursActifsGlobal}/>}
         {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts} fournituresData={fournituresData} setFournituresData={setFournituresData} profil={profil} validationsCompta={validationsCompta}/>}
+        {tab==='commandes_attente' && <CommandesAttenteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
         {tab==='inventaire' && <InventaireTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} validationsCompta={validationsCompta} retoursActifs={retoursActifsGlobal} setRetoursActifs={setRetoursActifsGlobal}/>}
         {tab==='comptabilite' && <ComptabiliteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} validationsCompta={validationsCompta} setValidationsCompta={setValidationsCompta}/>}
         {tab==='amazon' && <AmazonTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
@@ -735,6 +736,292 @@ export default function Dashboard() {
         {tab==='fournitures' && <FournituresTab fournituresData={fournituresData} setFournituresData={setFournituresData} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} data={data} profil={profil}/>}
       </div>
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}*{box-sizing:border-box}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-thumb{background:${dark?'#444':'#ccc'};border-radius:3px}#inline-scanner video{object-fit:cover!important;width:100%!important;height:100%!important}#inline-scanner img{display:none!important}`}</style>
+    </div>
+  )
+}
+
+// ── Commandes en attente (suivi import PDF Traction) ────────────────────────
+const PLANS_ACTION_CMD = [
+  '',
+  '📞 Relancer le fournisseur',
+  '📧 Email envoyé, en attente réponse',
+  '⏰ Délai accepté (en attente)',
+  '🔄 Chercher substitution',
+  '🚨 Escalader au gestionnaire',
+  '✅ Réception imminente confirmée',
+  '❌ Annuler la commande',
+] as const
+
+function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+  const [lignes, setLignes] = useState<any[]>([])
+  const [seuil, setSeuil] = useState<number>(5)
+  const [seuilDraft, setSeuilDraft] = useState<string>('5')
+  const [loading, setLoading] = useState(true)
+  const [importing, setImporting] = useState(false)
+  const [msg, setMsg] = useState<{type:'ok'|'err'|'info', text:string}|null>(null)
+  const [filtFourn, setFiltFourn] = useState('ALL')
+  const [filtStatut, setFiltStatut] = useState('ALL')
+  const [recherche, setRecherche] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { charger() }, [])
+
+  async function charger() {
+    setLoading(true)
+    try {
+      const r = await fetch('/api/commandes-attente')
+      if (r.ok) {
+        const d = await r.json()
+        setLignes(d.lignes || [])
+        setSeuil(d.seuil_jours || 5)
+        setSeuilDraft(String(d.seuil_jours || 5))
+      }
+    } finally { setLoading(false) }
+  }
+
+  async function importerPdf(file: File) {
+    setImporting(true)
+    setMsg({type:'info', text:'Import en cours…'})
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const r = await fetch('/api/commandes-attente/import', { method:'POST', body: fd })
+      const d = await r.json()
+      if (!r.ok || d.erreur) {
+        setMsg({type:'err', text: d.erreur || 'Erreur import'})
+      } else {
+        setMsg({
+          type:'ok',
+          text:`✅ ${d.nb_commandes_parsees} commandes lues — ${d.inserted} nouvelles, ${d.updated} mises à jour, ${d.deactivated} reçues/fermées.`,
+        })
+        await charger()
+      }
+    } catch (e:any) {
+      setMsg({type:'err', text: e.message || String(e)})
+    } finally {
+      setImporting(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  async function sauverSeuil() {
+    const n = parseInt(seuilDraft, 10)
+    if (isNaN(n) || n < 1) { setSeuilDraft(String(seuil)); return }
+    const r = await fetch('/api/commandes-attente', {
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ config: { seuil_jours: n } }),
+    })
+    const d = await r.json()
+    if (r.ok) {
+      setSeuil(d.seuil_jours)
+      setMsg({type:'ok', text:`Seuil mis à jour : ${d.seuil_jours} jours`})
+      setTimeout(()=>setMsg(null), 2500)
+    }
+  }
+
+  async function patcherLigne(id: number, patch: {remarque?: string, plan_action?: string}) {
+    setLignes(prev => prev.map(l => l.id===id ? {...l, ...patch, date_action: new Date().toISOString()} : l))
+    await fetch('/api/commandes-attente', {
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id, ...patch }),
+    })
+  }
+
+  // Calcul de l'âge en jours par ligne
+  const enriched = lignes.map(l => {
+    const ageMs = Date.now() - new Date(l.date_premiere_vue).getTime()
+    const ageJours = Math.floor(ageMs / 86400000)
+    return { ...l, ageJours }
+  })
+
+  const fournisseurs = [...new Set(enriched.map(l => l.nom_fournisseur).filter(Boolean))].sort()
+  const statuts = [...new Set(enriched.map(l => l.statut).filter(Boolean))].sort()
+
+  const filtres = (l:any) => {
+    if (filtFourn !== 'ALL' && l.nom_fournisseur !== filtFourn) return false
+    if (filtStatut !== 'ALL' && l.statut !== filtStatut) return false
+    if (recherche.trim()) {
+      const q = recherche.toLowerCase()
+      const hay = `${l.num_commande} ${l.num_piece} ${l.description||''} ${l.nom_fournisseur||''} ${l.commande_par||''} ${l.nom_employe||''}`.toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  }
+
+  const enRetard = enriched.filter(l => l.ageJours >= seuil).filter(filtres)
+  const aTemps   = enriched.filter(l => l.ageJours <  seuil).filter(filtres)
+
+  const ageBadge = (j:number) => {
+    const col = j>=seuil ? C.red : j>=Math.max(1, seuil-2) ? C.yellow : C.green
+    return <span style={{background:col+'22',color:col,padding:'3px 10px',borderRadius:20,fontWeight:700,fontSize:12,whiteSpace:'nowrap'}}>{j} j</span>
+  }
+
+  const statutBadge = (s:string) => {
+    const sl = s.toLowerCase()
+    const col = sl.includes('partielle') ? C.yellow
+              : sl.includes('ferm') ? C.green
+              : sl.includes('annul') ? C.red
+              : C.blue
+    return <span style={{background:col+'22',color:col,padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:700}}>{s}</span>
+  }
+
+  const renderLigne = (l:any, urgent:boolean) => (
+    <tr key={l.id} style={{background: urgent ? (dark?'#2b1113':'#fff5f5') : 'transparent', borderLeft: urgent ? `4px solid ${C.red}` : '4px solid transparent'}}>
+      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontSize:12}}>{l.num_commande}</td>
+      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>{l.date_commande || '—'}</td>
+      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`}}>{statutBadge(l.statut)}</td>
+      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub}}>{l.num_fournisseur || '—'}</td>
+      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11,fontWeight:600}}>{l.nom_fournisseur || '—'}</td>
+      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>{l.commande_par || '—'}</td>
+      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontSize:12}}>{l.num_piece}</td>
+      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{l.qte_commandee}</td>
+      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11,maxWidth:200}}>{l.description || '—'}</td>
+      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>{l.nom_employe || '—'}</td>
+      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{ageBadge(l.ageJours)}</td>
+      <td style={{padding:'6px',borderBottom:`1px solid ${bdr}`,minWidth:160}}>
+        <input
+          type="text"
+          defaultValue={l.remarque || ''}
+          onBlur={e => { if (e.target.value !== (l.remarque||'')) patcherLigne(l.id, {remarque: e.target.value}) }}
+          placeholder="Remarque…"
+          style={{width:'100%',padding:'5px 7px',border:`1px solid ${bdr}`,borderRadius:5,fontSize:11,background:dark?'#1a1a1a':'#fff',color:dark?'#eee':'#222'}}
+        />
+      </td>
+      <td style={{padding:'6px',borderBottom:`1px solid ${bdr}`,minWidth:200}}>
+        <select
+          value={l.plan_action || ''}
+          onChange={e => patcherLigne(l.id, {plan_action: e.target.value})}
+          style={{width:'100%',padding:'5px 7px',border:`1px solid ${bdr}`,borderRadius:5,fontSize:11,background:dark?'#1a1a1a':'#fff',color:dark?'#eee':'#222',fontWeight:l.plan_action?700:400}}>
+          {PLANS_ACTION_CMD.map(p => <option key={p} value={p}>{p || '—'}</option>)}
+        </select>
+      </td>
+    </tr>
+  )
+
+  const colonnes = ['#Commande','Date','Statut','#Fourn','Nom Fournisseur','Cmdé Par','#Pièce','Qte','Description','Employé','Âge','Remarque','Plan d\'action']
+  const tableTop = (
+    <thead>
+      <tr style={{background:thBg}}>
+        {colonnes.map(c => <th key={c} style={{padding:'9px 8px',textAlign:'left',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`,whiteSpace:'nowrap'}}>{c}</th>)}
+      </tr>
+    </thead>
+  )
+
+  return (
+    <div>
+      {/* Header — import + config */}
+      <div style={{...S.card, background:card, border:`1px solid ${bdr}`, padding:14, marginBottom:14}}>
+        <div style={{display:'flex',gap:14,alignItems:'center',flexWrap:'wrap'}}>
+          <div style={{flex:1,minWidth:220}}>
+            <div style={{fontSize:18,fontWeight:900,color:C.blue}}>⏳ Commandes en attente</div>
+            <div style={{fontSize:11,color:sub,marginTop:3}}>Importe ton PDF "Liste commande" Traction. Les pièces qui restent au même statut depuis ≥ {seuil} jours apparaissent en suivi.</div>
+          </div>
+
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <span style={{fontSize:12,color:sub}}>Seuil :</span>
+            <input
+              type="number" min={1} max={365}
+              value={seuilDraft}
+              onChange={e=>setSeuilDraft(e.target.value)}
+              onBlur={sauverSeuil}
+              onKeyDown={e=>{ if (e.key==='Enter') (e.target as HTMLInputElement).blur() }}
+              style={{width:60,padding:'7px 8px',border:`1px solid ${bdr}`,borderRadius:6,background:dark?'#1a1a1a':'#fff',color:dark?'#eee':'#222',fontSize:13,fontWeight:700,textAlign:'center'}}
+            />
+            <span style={{fontSize:12,color:sub}}>jours</span>
+          </div>
+
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            style={{display:'none'}}
+            onChange={e => { const f = e.target.files?.[0]; if (f) importerPdf(f) }}
+          />
+          <button
+            disabled={importing}
+            onClick={()=>fileRef.current?.click()}
+            style={{background:importing?sub:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 18px',fontWeight:800,cursor:importing?'not-allowed':'pointer',fontSize:13}}>
+            {importing ? '⏳ Import…' : '📥 Importer PDF'}
+          </button>
+        </div>
+
+        {msg && (
+          <div style={{marginTop:10,padding:'9px 12px',borderRadius:6,fontSize:12,fontWeight:600,
+            background: msg.type==='ok' ? '#e6f4ea' : msg.type==='err' ? '#fce8e6' : '#e8f0fe',
+            color: msg.type==='ok' ? C.green : msg.type==='err' ? C.red : C.blue}}>
+            {msg.text}
+          </div>
+        )}
+      </div>
+
+      {loading ? (
+        <div style={{textAlign:'center',padding:40,color:sub}}>Chargement…</div>
+      ) : enriched.length === 0 ? (
+        <div style={{...S.card, background:card, border:`1px solid ${bdr}`, padding:30, textAlign:'center', color:sub}}>
+          Aucune commande en attente. Importe ton PDF Traction pour commencer.
+        </div>
+      ) : <>
+        {/* Filtres */}
+        <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
+          <input
+            placeholder="🔍 Recherche (n° commande, pièce, description…)"
+            value={recherche}
+            onChange={e=>setRecherche(e.target.value)}
+            style={{flex:1,minWidth:220,padding:'8px 12px',border:`1px solid ${bdr}`,borderRadius:6,background:card,color:dark?'#eee':'#222',fontSize:12}}
+          />
+          <select value={filtFourn} onChange={e=>setFiltFourn(e.target.value)}
+            style={{padding:'8px 10px',border:`1px solid ${bdr}`,borderRadius:6,background:card,color:dark?'#eee':'#222',fontSize:12}}>
+            <option value="ALL">Tous les fournisseurs</option>
+            {fournisseurs.map(f => <option key={f} value={f}>{f}</option>)}
+          </select>
+          <select value={filtStatut} onChange={e=>setFiltStatut(e.target.value)}
+            style={{padding:'8px 10px',border:`1px solid ${bdr}`,borderRadius:6,background:card,color:dark?'#eee':'#222',fontSize:12}}>
+            <option value="ALL">Tous les statuts</option>
+            {statuts.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+
+        {/* 🚨 Suivi à faire */}
+        <div style={{...S.card, background:card, border:`2px solid ${enRetard.length>0?C.red:bdr}`, padding:0, marginBottom:14, overflow:'hidden'}}>
+          <div style={{padding:'12px 14px',background: enRetard.length>0 ? '#fce8e6' : (dark?'#1a1a1a':'#f8f9fa'),borderBottom:`1px solid ${bdr}`,display:'flex',alignItems:'center',gap:10}}>
+            <span style={{fontSize:18}}>🚨</span>
+            <span style={{fontSize:14,fontWeight:900,color:enRetard.length>0?C.red:sub}}>Suivi à faire</span>
+            <span style={{fontSize:12,color:sub}}>— {enRetard.length} pièce(s) au même statut depuis ≥ {seuil} jours</span>
+          </div>
+          {enRetard.length === 0 ? (
+            <div style={{padding:20,textAlign:'center',color:sub,fontSize:12}}>Tout va bien : aucune pièce en retard.</div>
+          ) : (
+            <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',minWidth:1300}}>
+                {tableTop}
+                <tbody>{enRetard.map(l => renderLigne(l, true))}</tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* 📋 Toutes les commandes en attente (en cours) */}
+        <div style={{...S.card, background:card, border:`1px solid ${bdr}`, padding:0, overflow:'hidden'}}>
+          <div style={{padding:'12px 14px',background:dark?'#1a1a1a':'#f8f9fa',borderBottom:`1px solid ${bdr}`,display:'flex',alignItems:'center',gap:10}}>
+            <span style={{fontSize:18}}>📋</span>
+            <span style={{fontSize:14,fontWeight:900}}>Commandes en cours</span>
+            <span style={{fontSize:12,color:sub}}>— {aTemps.length} pièce(s) dans les délais</span>
+          </div>
+          {aTemps.length === 0 ? (
+            <div style={{padding:20,textAlign:'center',color:sub,fontSize:12}}>Rien à afficher avec ces filtres.</div>
+          ) : (
+            <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',minWidth:1300}}>
+                {tableTop}
+                <tbody>{aTemps.map(l => renderLigne(l, false))}</tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </>}
     </div>
   )
 }
@@ -3450,6 +3737,7 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
     { id: 'retours',     label: '🔄 Retours RMA',         desc: 'Gestion des retours fournisseurs' },
     { id: 'negatifs',    label: '🔴 Pièces Négatives',    desc: 'Suivi des pièces en négatif' },
     { id: 'commandes',   label: '📋 Commandes du jour',   desc: 'Commandes journalières' },
+    { id: 'commandes_attente', label: '⏳ Commandes en attente', desc: 'Suivi des commandes Traction non reçues' },
     { id: 'fournitures', label: '💡 Suggestions',         desc: 'Suggestions de réapprovisionnement' },
     { id: 'inventaire',  label: '📦 Inventaire',          desc: 'Inventaire cyclique et comptage' },
     { id: 'comptabilite',label: '💰 Comptabilité',        desc: 'Validation comptable et historique' },
@@ -3459,10 +3747,10 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
   ]
 
   const ROLES_LEGACY: Record<string, string[]> = {
-    admin:         ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon','scoa','utilisateurs'],
-    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','fournitures','inventaire','comptabilite','amazon','scoa'],
-    commis:        ['commandes','fournitures','retours'],
-    employe_piece: ['fournitures','negatifs','inventaire','retours'],
+    admin:         ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','scoa','utilisateurs'],
+    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','scoa'],
+    commis:        ['commandes','commandes_attente','fournitures','retours'],
+    employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours'],
   }
 
   const ROLES = [
@@ -5553,7 +5841,9 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [auditStats, setAuditStats] = useState<any>({})
   const [auditFiltre, setAuditFiltre] = useState<'tous'|'restants'|'comptes'|'ecarts'>('ecarts')
   const [auditSearch, setAuditSearch] = useState('')
-  const [auditInput, setAuditInput] = useState<Record<string, {warehouse?:string, fbm?:string}>>({})
+  const [auditInput, setAuditInput] = useState<Record<string, {total?:string}>>({})
+  const [showFinaliseModal, setShowFinaliseModal] = useState(false)
+  const [showFbaReconcil, setShowFbaReconcil] = useState(false)
   const [newAuditMois, setNewAuditMois] = useState(() => {
     const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
   })
@@ -6523,12 +6813,12 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         setOpenAudit(j.audit)
         setAuditCounts(j.counts || [])
         setAuditStats(j.stats || {})
-        // Pré-remplir inputs avec le comptage warehouse combiné
-        const pre: Record<string, {warehouse?:string, fbm?:string}> = {}
+        // Pré-remplir input "total compté" avec la somme des champs existants.
+        // Migration douce : un audit historique avec hub=3, fbm=2 affiche 5.
+        const pre: Record<string, {total?:string}> = {}
         for (const c of (j.counts || [])) {
           pre[c.base_code] = {
-            warehouse: c.warehouse_compte != null ? String(c.warehouse_compte) : '',
-            fbm: c.fbm_compte != null ? String(c.fbm_compte) : '',
+            total: c.total_compte != null ? String(c.total_compte) : '',
           }
         }
         setAuditInput(pre)
@@ -6575,9 +6865,12 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   async function sauvegarderComptage(base_code: string) {
     if (!openAudit) return
     const input = auditInput[base_code] || {}
-    const body: any = { base_code, counted_by: profil?.email || profil?.nom || 'Inconnu' }
-    if (input.warehouse !== undefined) body.warehouse_compte = input.warehouse === '' ? null : Number(input.warehouse)
-    if (input.fbm !== undefined)       body.fbm_compte = input.fbm === '' ? null : Number(input.fbm)
+    if (input.total === undefined) return
+    const body: any = {
+      base_code,
+      counted_by: profil?.email || profil?.nom || 'Inconnu',
+      total_compte: input.total === '' ? null : Number(input.total),
+    }
     try {
       await fetch(`/api/amazon/audits/${openAudit.id}`, {
         method: 'PATCH',
@@ -6588,15 +6881,41 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     } catch (e:any) { alert(e.message) }
   }
 
+  async function marquerRestantsZero() {
+    if (!openAudit) return
+    const restants = (auditCounts || []).filter((c:any) =>
+      Number(c.total_theorique_net||0) > 0 && c.total_compte == null
+    ).length
+    if (restants === 0) { alert('Aucun SKU restant à marquer.'); return }
+    if (!confirm(`Marquer les ${restants} SKU non comptés à 0 ?\n\nCela signifie : "physiquement, je n'en ai trouvé aucun". Tu pourras revenir corriger après en éditant la ligne.`)) return
+    try {
+      const r = await fetch(`/api/amazon/audits/${openAudit.id}`, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ action: 'mark_zero_remaining', counted_by: profil?.email || profil?.nom || 'Inconnu' })
+      })
+      const j = await r.json()
+      if (j.success) {
+        await chargerAuditDetail(openAudit.id)
+      } else {
+        alert(j.erreur || 'Erreur')
+      }
+    } catch (e:any) { alert(e.message) }
+  }
+
+  function ouvrirFinalisation() {
+    setShowFinaliseModal(true)
+  }
+
   async function finaliserAudit() {
     if (!openAudit) return
-    if (!confirm(`Finaliser l'audit ${openAudit.label} ? Il passera en statut 'terminé'.`)) return
     try {
       await fetch(`/api/amazon/audits/${openAudit.id}`, {
         method: 'PATCH',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ action: 'finalize', finished_by: profil?.email || profil?.nom || 'Inconnu' })
       })
+      setShowFinaliseModal(false)
       await chargerAudits()
       await chargerAuditDetail(openAudit.id)
     } catch (e:any) { alert(e.message) }
@@ -6617,8 +6936,13 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 
   async function rafraichirAudit() {
     if (!openAudit) return
-    if (!confirm(`Rafraîchir les valeurs théoriques de l'audit "${openAudit.label}" ?\n\nLes quantités FBA Amazon, FBA Traction, HUB et FBM seront recalculées à partir du dernier snapshot + des mappings actuels.\n\nLes comptages physiques déjà saisis sont préservés.`)) return
+    if (!confirm(`Rafraîchir les valeurs théoriques de l'audit "${openAudit.label}" ?\n\nLe stock Traction sera d'abord re-syncronisé depuis le feed, puis les théoriques (FBA Amazon, FBA Traction, HUB, FBM) seront recalculés.\n\nLes comptages physiques déjà saisis sont préservés.`)) return
     try {
+      // 1. Re-sync Traction depuis le feed pour avoir le stock actuel
+      const rSync = await fetch('/api/amazon/sync-traction', { method: 'POST' })
+      const jSync = await rSync.json()
+      if (jSync.erreur) { alert('Erreur sync Traction : ' + jSync.erreur); return }
+      // 2. Recalculer les théoriques de l'audit avec le nouveau snapshot
       const r = await fetch(`/api/amazon/audits/${openAudit.id}/refresh`, { method: 'POST' })
       const j = await r.json()
       if (j.success) {
@@ -6666,21 +6990,15 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     URL.revokeObjectURL(url)
   }
 
-  // Feuille de comptage simplifiée pour aller au warehouse.
-  //   mode='tout'   : tous les SKU avec stock attendu > 0 (W ou FBM)
+  // Feuille de comptage simplifiée — un seul champ "Compté" par SKU.
+  //   mode='tout'   : tous les SKU avec stock physique attendu > 0
   //   mode='ecarts' : seulement ceux avec écart non nul (recomptage)
   function exporterFeuilleComptage(mode: 'tout' | 'ecarts') {
     if (!openAudit || !auditCounts.length) return
     let rows = auditCounts.filter((c:any) => {
-      const w = Number(c.warehouse_theorique_net||0)
-      const fbm = Number(c.fbm_theorique||0)
-      // Toujours exclure les bases sans stock attendu nulle part
-      if (w === 0 && fbm === 0) return false
-      if (mode === 'ecarts') {
-        const wEcart = c.warehouse_ecart != null && Number(c.warehouse_ecart) !== 0
-        const fbmEcart = c.fbm_ecart != null && Number(c.fbm_ecart) !== 0
-        return wEcart || fbmEcart
-      }
+      const tot = Number(c.total_theorique_net||0)
+      if (tot === 0) return false
+      if (mode === 'ecarts') return !!c.has_ecart_total
       return true
     })
     if (rows.length === 0) {
@@ -6689,37 +7007,19 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         : 'Aucun base product à compter.')
       return
     }
-    // Tri : Warehouse en priorité, puis FBM, puis alphabétique
-    rows = rows.sort((a:any, b:any) => {
-      const aW = Number(a.warehouse_theorique_net||0) > 0 ? 0 : 1
-      const bW = Number(b.warehouse_theorique_net||0) > 0 ? 0 : 1
-      if (aW !== bW) return aW - bW
-      return String(a.base_code).localeCompare(String(b.base_code))
-    })
+    rows = rows.sort((a:any, b:any) => String(a.base_code).localeCompare(String(b.base_code)))
 
-    const headers = [
-      'Base', 'Description',
-      'Warehouse attendu', 'Warehouse compté', 'Écart W',
-      'FBM attendu', 'FBM compté', 'Écart FBM',
-      'Notes / commentaires comptage'
-    ]
+    const headers = ['Base SKU', 'Description', 'Théorique', 'Compté', 'Écart', 'Notes']
     const csvRows = rows.map((c:any) => {
-      const wAtt = Number(c.warehouse_theorique_net||0)
-      const fbmAtt = Number(c.fbm_theorique||0)
-      // Pour le recomptage, on pré-remplit le compté précédent pour comparaison
-      const wCompte = mode === 'ecarts' && c.warehouse_compte != null ? c.warehouse_compte : ''
-      const fbmCompte = mode === 'ecarts' && c.fbm_compte != null ? c.fbm_compte : ''
-      const wEcart = mode === 'ecarts' && c.warehouse_ecart != null ? c.warehouse_ecart : ''
-      const fbmEcart = mode === 'ecarts' && c.fbm_ecart != null ? c.fbm_ecart : ''
+      const theo = Number(c.total_theorique_net||0)
+      const compte = mode === 'ecarts' && c.total_compte != null ? c.total_compte : ''
+      const ecart = mode === 'ecarts' && c.total_ecart != null ? c.total_ecart : ''
       return [
         c.base_code,
         (c.description||'').replace(/"/g,'""'),
-        wAtt > 0 ? wAtt : '',
-        wCompte,
-        wEcart,
-        fbmAtt > 0 ? fbmAtt : '',
-        fbmCompte,
-        fbmEcart,
+        theo > 0 ? theo : '',
+        compte,
+        ecart,
         ''
       ].map(v => `"${v}"`).join(',')
     })
@@ -10820,9 +11120,13 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         const fmt$ = (n: number) => `${n>=0?'':'−'}${Math.abs(n).toFixed(2)}$`
         const fmtDate = (d:string) => d ? new Date(d).toLocaleDateString('fr-CA',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'
         const filteredCounts = (auditCounts || []).filter((c:any) => {
-          if (auditFiltre === 'restants' && c.compte) return false
-          if (auditFiltre === 'comptes' && !c.compte) return false
-          if (auditFiltre === 'ecarts' && !c.has_ecart) return false
+          // Vue simple : on ne montre que les SKU avec stock physique attendu chez Mathias
+          // (sauf le filtre "tous" qui inclut tout pour debug).
+          const aCompter = Number(c.total_theorique_net || 0) > 0
+          if (auditFiltre !== 'tous' && !aCompter) return false
+          if (auditFiltre === 'restants' && c.total_compte != null) return false
+          if (auditFiltre === 'comptes' && c.total_compte == null) return false
+          if (auditFiltre === 'ecarts' && !c.has_ecart_total) return false
           if (auditSearch) {
             const q = auditSearch.trim().toLowerCase()
             if (!String(c.base_code||'').toLowerCase().includes(q) && !String(c.description||'').toLowerCase().includes(q)) return false
@@ -10955,7 +11259,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     🔄 Rafraîchir théoriques
                   </button>
                   {!termine ? (
-                    <button onClick={finaliserAudit}
+                    <button onClick={ouvrirFinalisation}
                       style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
                       ✓ Finaliser
                     </button>
@@ -10968,265 +11272,123 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 </div>
               </div>
 
-              {/* Résumé "stock physique attendu" */}
-              {(() => {
-                let totalWhse = 0, totalFbm = 0, totalAmz = 0, nbOublis = 0
-                for (const c of auditCounts) {
-                  totalWhse += Number(c.warehouse_theorique_net||0)
-                  totalFbm  += Number(c.fbm_theorique||0)
-                  totalAmz  += Number(c.fba_amazon_theorique||0)
-                  if (c.has_oubli) nbOublis++
-                }
-                const totalWarehouse = totalWhse + totalFbm
-                return (
-                  <div style={{background:card,border:`2px solid ${C.blue}`,borderRadius:10,padding:'12px 16px',marginBottom:10}}>
-                    <div style={{fontSize:11,fontWeight:800,color:C.blue,textTransform:'uppercase',marginBottom:8}}>
-                      🏭 Stock physique attendu au warehouse (déductions Amazon appliquées)
-                    </div>
-                    <div style={{display:'flex',gap:16,flexWrap:'wrap',alignItems:'center',fontSize:12}}>
-                      <div><span style={{color:sub}}>Warehouse (HUB+SP net) : </span><strong style={{color:C.blue,fontSize:16}}>{totalWhse}</strong></div>
-                      <div style={{color:sub}}>+</div>
-                      <div><span style={{color:sub}}>FBM : </span><strong style={{color:C.yellow,fontSize:16}}>{totalFbm}</strong></div>
-                      <div style={{color:sub}}>=</div>
-                      <div style={{background:C.green+'22',padding:'4px 12px',borderRadius:8}}>
-                        <span style={{color:sub}}>Total à trouver : </span><strong style={{color:C.green,fontSize:18}}>{totalWarehouse}</strong> unités
-                      </div>
-                      <div style={{color:sub,marginLeft:'auto',fontSize:11}}>
-                        (déduit : <strong>{totalAmz}</strong> chez Amazon • {nbOublis>0?<>🏷 <strong>{nbOublis}</strong> oublis à tagger</>:'pas d\'oubli'})
-                      </div>
-                    </div>
-                  </div>
-                )
-              })()}
-
-              {/* Stats */}
+              {/* Stats simples — vue compteur */}
               <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(6,1fr)',gap:8,marginBottom:10}}>
-                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
-                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Total</div>
-                  <div style={{fontSize:20,fontWeight:900}}>{auditStats.total||0}</div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',borderLeft:`4px solid ${sub}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>SKU à compter</div>
+                  <div style={{fontSize:24,fontWeight:900}}>{auditStats.a_compter||0}</div>
                 </div>
-                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.green}`}}>
-                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Comptés</div>
-                  <div style={{fontSize:20,fontWeight:900,color:C.green}}>{auditStats.comptes||0}</div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',borderLeft:`4px solid ${C.green}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>✓ Comptés</div>
+                  <div style={{fontSize:24,fontWeight:900,color:C.green}}>{auditStats.a_compter_comptes||0}</div>
                 </div>
-                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.yellow}`}}>
-                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Restants</div>
-                  <div style={{fontSize:20,fontWeight:900,color:C.yellow}}>{auditStats.restants||0}</div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',borderLeft:`4px solid ${C.yellow}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>⏳ Restants</div>
+                  <div style={{fontSize:24,fontWeight:900,color:C.yellow}}>{auditStats.a_compter_restants||0}</div>
                 </div>
-                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.red}`}}>
-                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Avec écart</div>
-                  <div style={{fontSize:20,fontWeight:900,color:C.red}}>{auditStats.avec_ecart||0}</div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',borderLeft:`4px solid ${C.red}`}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>⚠️ Avec écart</div>
+                  <div style={{fontSize:24,fontWeight:900,color:C.red}}>{auditStats.a_compter_avec_ecart||0}</div>
                 </div>
-                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.red}`}}>
-                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Valeur écart</div>
-                  <div style={{fontSize:16,fontWeight:900,color:C.red}}>{fmt$(auditStats.valeur_ecart_abs||0)}</div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',borderLeft:`4px solid ${C.red}`}} title="Valeur des SKU dont le compté est inférieur au théorique (manquant physiquement)">
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>💸 Manques $</div>
+                  <div style={{fontSize:18,fontWeight:900,color:C.red}}>−{fmt$(auditStats.valeur_manques||0).replace('−','')}</div>
                 </div>
-                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
-                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Warehouse comptés</div>
-                  <div style={{fontSize:14,fontWeight:900}}><span style={{color:C.green}}>{auditStats.total_warehouse_compte||0}</span>/<span style={{color:sub}}>{auditStats.total_warehouse_theorique_net||0}</span></div>
+                <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',borderLeft:`4px solid ${C.blue}`}} title="Valeur des SKU dont le compté est supérieur au théorique (surplus physique)">
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>📦 Surplus $</div>
+                  <div style={{fontSize:18,fontWeight:900,color:C.blue}}>+{fmt$(auditStats.valeur_surplus||0).replace('−','')}</div>
                 </div>
               </div>
 
               {/* Filtres */}
               <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:10,display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
-                <input value={auditSearch} onChange={e=>setAuditSearch(e.target.value)} placeholder="🔍 Base code ou description..."
-                  style={{...S,maxWidth:260,fontSize:12,padding:'7px 10px'}}/>
+                <input value={auditSearch} onChange={e=>setAuditSearch(e.target.value)} placeholder="🔍 SKU ou description..."
+                  style={{...S,maxWidth:260,fontSize:13,padding:'8px 12px'}}/>
                 <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
                   {[
-                    {id:'restants', label:`⏳ Restants (${auditStats.restants||0})`, color:C.yellow},
-                    {id:'comptes', label:`✓ Comptés (${auditStats.comptes||0})`, color:C.green},
-                    {id:'ecarts', label:`⚠️ Avec écart (${auditStats.avec_ecart||0})`, color:C.red},
+                    {id:'restants', label:`⏳ Restants (${auditStats.a_compter_restants||0})`, color:C.yellow},
+                    {id:'comptes', label:`✓ Comptés (${auditStats.a_compter_comptes||0})`, color:C.green},
+                    {id:'ecarts', label:`⚠️ Avec écart (${auditStats.a_compter_avec_ecart||0})`, color:C.red},
                     {id:'tous', label:`Tous (${auditStats.total||0})`, color:sub},
                   ].map(f => (
                     <button key={f.id} onClick={()=>setAuditFiltre(f.id as any)}
-                      style={{padding:'6px 11px',borderRadius:14,border:`1px solid ${auditFiltre===f.id?f.color:bdr}`,background:auditFiltre===f.id?f.color+'22':'transparent',color:auditFiltre===f.id?f.color:sub,fontWeight:700,cursor:'pointer',fontSize:11}}>
+                      style={{padding:'7px 13px',borderRadius:14,border:`1px solid ${auditFiltre===f.id?f.color:bdr}`,background:auditFiltre===f.id?f.color+'22':'transparent',color:auditFiltre===f.id?f.color:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
                       {f.label}
                     </button>
                   ))}
                 </div>
+                {!termine && (auditStats.a_compter_restants||0) > 0 && (
+                  <button onClick={marquerRestantsZero}
+                    title="Marque les SKU non comptés à 0 (pour clore l'audit quand tu n'en as physiquement plus)"
+                    style={{marginLeft:'auto',background:'transparent',border:`1px solid ${C.yellow}`,color:C.yellow,borderRadius:8,padding:'7px 12px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                    ⏭ Marquer le reste à 0
+                  </button>
+                )}
               </div>
 
-              {/* Liste compacte des comptages */}
+              {/* Liste compteur — un seul champ Compté par SKU */}
               <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden'}}>
                 {filteredCounts.length === 0
-                  ? <div style={{textAlign:'center',padding:30,color:sub,fontSize:13}}>Aucun résultat</div>
+                  ? <div style={{textAlign:'center',padding:40,color:sub,fontSize:13}}>Aucun résultat</div>
                   : <div style={{overflowX:'auto'}}>
-                      <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-                        {(() => {
-                          const colInfos: Record<string, string> = {
-                            base: "Base SKU produit — obtenu en retirant les préfixes FBA-/FBM-/HUB-/A pour regrouper les variantes d'un même produit physique sous une seule ligne.",
-                            description: "Nom du produit dans Traction (DescFra).",
-                            fba_traction: "📦 Stock LAUTOPAK/Traction qui devrait être au FBA Amazon — somme des pk_codes FBA-xxx de ce base SKU.",
-                            fba_amz: "Chez Amazon FBA : ce qu'Amazon DIT avoir physiquement (fulfillable + inbound + reserved). Lecture seule, pas de comptage manuel.",
-                            fba_ecart: "Δ FBA = Chez Amazon − FBA théo Traction. 0 = parfait sync. Rouge si écart → réclamer à Amazon ou ajuster LAUTOPAK.",
-                            fbm_theo: "🏠 FBM prêt à expédier (Mathias) — stock Traction sous pk_codes FBM-xxx. À compter physiquement chez toi.",
-                            fbm_compte: "Quantité physique comptée des FBM-xxx chez Mathias. Auto-save au blur.",
-                            hub_theo: "🏭 Surplus HUB (Mathias) — stock Traction sous pk_codes HUB-xxx. Overstock à compter chez toi.",
-                            hub_compte: "Quantité physique comptée du HUB-xxx + sans-préfixe chez Mathias. Auto-save au blur.",
-                            oubli: "🏷 À tagger (oubli) — pk_codes Traction sans préfixe FBA/FBM/HUB. À retagger dans LAUTOPAK après l'audit. Compté avec le champ HUB.",
-                            total_theo: "Quantité totale dans le système (théorique) = FBA Amazon + FBM théo + HUB théo + SP théo. Ce que tu DEVRAIS avoir au total dans tous les emplacements physiques.",
-                            total_compte: "Quantité totale physique comptée = Chez Amazon FBA + FBM compté + HUB compté. S'ajuste en temps réel pendant que tu saisis. Δ = écart avec le total théo.",
-                            ecart: "Valeur $ de l'écart total. Calcul : (écart FBM + écart HUB+SP) × coût unitaire Traction.",
-                          }
-                          const IHeader = ({id, label, align, color}: {id: string, label: React.ReactNode, align?: any, color?: string}) => {
-                            const open = auditInfoCol === id
-                            return (
-                              <th style={{padding:'8px 10px',textAlign:align||'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:color||sub,borderBottom:`1px solid ${bdr}`,position:'relative'}}>
-                                <div style={{display:'inline-flex',alignItems:'center',gap:4,justifyContent:align==='right'?'flex-end':align==='center'?'center':'flex-start',width:'100%'}}>
-                                  <span>{label}</span>
-                                  <button onClick={(e:any)=>{e.stopPropagation(); setAuditInfoCol(open?null:id)}}
-                                    style={{background:open?C.blue:'transparent',color:open?'#fff':sub,border:`1px solid ${open?C.blue:bdr}`,borderRadius:'50%',width:14,height:14,fontSize:9,fontWeight:900,cursor:'pointer',padding:0,display:'inline-flex',alignItems:'center',justifyContent:'center',lineHeight:1}}>
-                                    i
-                                  </button>
-                                </div>
-                              </th>
-                            )
-                          }
-                          return (
-                            <thead>
-                              <tr style={{background:thBg}}>
-                                <IHeader id="base" label="Base SKU" />
-                                <IHeader id="description" label="Description" />
-                                {/* FBA (côté Amazon) */}
-                                <IHeader id="fba_traction" label="📦 FBA théo (Traction)" align="right" color={C.blue} />
-                                <IHeader id="fba_amz" label="Chez Amazon FBA" align="right" color={C.blue} />
-                                <IHeader id="fba_ecart" label="ΔFBA" align="right" color={C.red} />
-                                {/* FBM (chez Mathias, prêt à expédier) */}
-                                <IHeader id="fbm_theo" label="🏠 FBM Mathias théo" align="right" color={C.yellow} />
-                                <IHeader id="fbm_compte" label="FBM compté" align="center" color={C.green} />
-                                {/* HUB (surplus chez Mathias) */}
-                                <IHeader id="hub_theo" label="🏭 HUB Surplus théo" align="right" color={C.blue} />
-                                <IHeader id="hub_compte" label="HUB compté" align="center" color={C.green} />
-                                <IHeader id="oubli" label="🏷 À tagger" align="center" color={C.yellow} />
-                                {/* Totaux + écarts */}
-                                <IHeader id="total_theo" label="Total théo" align="right" color={C.blue} />
-                                <IHeader id="total_compte" label="Total compté / Δ" align="center" color={C.green} />
-                                <IHeader id="ecart" label="Écart $" align="right" color={C.red} />
-                                <th style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}></th>
-                              </tr>
-                              {auditInfoCol && (
-                                <tr>
-                                  <td colSpan={14} style={{padding:0,borderBottom:`2px solid ${C.blue}`}}>
-                                    <div style={{background:dark?'#1a233a':'#e8f0fe',padding:'12px 16px',display:'flex',alignItems:'flex-start',gap:10,lineHeight:1.6}}>
-                                      <div style={{fontSize:16,color:C.blue}}>ⓘ</div>
-                                      <div style={{flex:1,fontSize:12,color:dark?'#e8e8e8':'#1a1a1a',whiteSpace:'normal',textTransform:'none',fontWeight:400}}>
-                                        {colInfos[auditInfoCol] || 'Pas de description'}
-                                      </div>
-                                      <button onClick={()=>setAuditInfoCol(null)}
-                                        style={{background:'transparent',border:'none',color:sub,fontSize:18,cursor:'pointer',padding:'0 4px',lineHeight:1}}>
-                                        ×
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              )}
-                            </thead>
-                          )
-                        })()}
+                      <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                        <thead>
+                          <tr style={{background:thBg}}>
+                            <th style={{padding:'10px 12px',textAlign:'left',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>SKU</th>
+                            <th style={{padding:'10px 12px',textAlign:'left',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Description</th>
+                            <th style={{padding:'10px 12px',textAlign:'right',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`1px solid ${bdr}`}}>Théorique</th>
+                            <th style={{padding:'10px 12px',textAlign:'center',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.green,borderBottom:`1px solid ${bdr}`}}>Compté</th>
+                            <th style={{padding:'10px 12px',textAlign:'center',fontSize:11,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`1px solid ${bdr}`}}>Écart</th>
+                            <th style={{padding:'10px 12px',textAlign:'right',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Valeur</th>
+                            <th style={{padding:'10px 12px',textAlign:'center',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Statut</th>
+                          </tr>
+                        </thead>
                         <tbody>
                           {filteredCounts.map((c:any) => {
                             const input = auditInput[c.base_code] || {}
-                            const valEcart = Math.abs(Number(c.valeur_warehouse_ecart||0)) + Math.abs(Number(c.valeur_fbm_ecart||0))
-                            const fbaT = Number(c.fba_traction_theorique||0)
-                            const fbaA = Number(c.fba_amazon_theorique||0)
-                            const fbaEcart = fbaA - fbaT
-                            const fbmT = Number(c.fbm_theorique||0)
-                            const hubT = Number(c.hub_theorique||0)
-                            const spT = Number(c.sans_prefix_theorique||0)
-                            // Total théorique = ce que le système attend physiquement à tous les emplacements
-                            const totalTheo = fbaA + fbmT + hubT + spT
-                            // Total compté physique : valeur live du formulaire (priorité) sinon valeur sauvée
-                            const fbmCompteSaved = c.fbm_compte != null ? Number(c.fbm_compte) : null
-                            const whseCompteSaved = c.hub_compte != null ? Number(c.hub_compte) : null
-                            const fbmInputVal = (input.fbm !== undefined && input.fbm !== '') ? Number(input.fbm) : null
-                            const whseInputVal = (input.warehouse !== undefined && input.warehouse !== '') ? Number(input.warehouse) : null
-                            const fbmCompte = fbmInputVal != null ? fbmInputVal : fbmCompteSaved
-                            const whseCompte = whseInputVal != null ? whseInputVal : whseCompteSaved
-                            const fbmTouched = fbmInputVal != null || fbmCompteSaved != null
-                            const whseTouched = whseInputVal != null || whseCompteSaved != null
-                            const totalCompte = fbaA + (fbmCompte || 0) + (whseCompte || 0)
-                            const deltaTotal = totalTheo - totalCompte
-                            // Lignes auto-validées : aucun stock warehouse à compter (FBA Amazon seulement)
-                            const noWhseToCount = fbmT === 0 && hubT === 0 && spT === 0
-                            const fullCounted = noWhseToCount || (
-                              (fbmT === 0 || fbmTouched) && ((hubT === 0 && spT === 0) || whseTouched)
-                            )
-                            const match = fullCounted && Math.abs(deltaTotal) <= 1
+                            const theo = Number(c.total_theorique_net||0)
+                            // Valeur live (input non sauvegardé) > valeur sauvée
+                            const inputVal = input.total !== undefined && input.total !== '' ? Number(input.total) : null
+                            const savedVal = c.total_compte != null ? Number(c.total_compte) : null
+                            const compte = inputVal != null ? inputVal : savedVal
+                            const ecart = compte != null ? compte - theo : null
+                            const valeur = ecart != null ? ecart * Number(c.coutant||0) : null
+                            const isCompte = savedVal != null
+                            const hasEcart = ecart != null && ecart !== 0
+                            const rowBg = !isCompte
+                              ? 'transparent'
+                              : hasEcart
+                                ? (dark?'#2b1113':'#fff8f8')
+                                : (dark?'#0d2a18':'#e6f4ea')
                             return (
-                              <tr key={c.base_code} style={{background:match?(dark?'#0d2a18':'#e6f4ea'):(c.has_ecart?(dark?'#2b1113':'#fce8e6'):c.compte?(dark?'#1a1a1a':'#f8f9fa'):'transparent')}}>
-                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{c.base_code}</td>
-                                <td style={{padding:'6px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={c.description}>{c.description||'—'}</td>
-                                {/* FBA bloc */}
-                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:fbaT>0?C.blue:sub}} title="Stock théorique LAUTOPAK sous ce pk_code">
-                                  {fbaT>0 && <div style={{fontSize:9,fontFamily:'monospace',color:sub,fontWeight:400,lineHeight:1}}>FBA-{c.base_code}</div>}
-                                  <div style={{fontSize:14}}>{fbaT||''}</div>
+                              <tr key={c.base_code} style={{background:rowBg,borderLeft:isCompte?`3px solid ${hasEcart?C.red:C.green}`:`3px solid transparent`}}>
+                                <td style={{padding:'10px 12px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:800,fontSize:14}}>{c.base_code}</td>
+                                <td style={{padding:'10px 12px',borderBottom:`1px solid ${bdr}`,fontSize:12,color:sub,maxWidth:280,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={c.description}>{c.description||'—'}</td>
+                                <td style={{padding:'10px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,fontSize:16,color:C.blue}}>{theo}</td>
+                                <td style={{padding:'8px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                                  <input type="number" disabled={termine}
+                                    value={input.total ?? ''}
+                                    onChange={e=>setAuditInput(prev=>({...prev,[c.base_code]:{total:e.target.value}}))}
+                                    onBlur={()=>sauvegarderComptage(c.base_code)}
+                                    onKeyDown={(e:any)=>{ if (e.key === 'Enter') { e.target.blur() } }}
+                                    style={{width:90,padding:'9px 10px',fontSize:16,fontWeight:800,border:`2px solid ${!isCompte?bdr:hasEcart?C.red:C.green}`,borderRadius:8,textAlign:'center',background:dark?'#1a1a1a':'#fff',color:dark?'#fff':'#000'}}/>
                                 </td>
-                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:fbaA>0?C.blue:sub}} title="Ce qu'Amazon déclare avoir physiquement">{fbaA||''}</td>
-                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,fontSize:13,color:Math.abs(fbaEcart)<=1?C.green:C.red}}>
-                                  {fbaT===0&&fbaA===0?'—':(fbaEcart>0?'+':'')+fbaEcart}
+                                <td style={{padding:'10px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                                  {ecart == null
+                                    ? <span style={{color:sub,fontSize:12}}>—</span>
+                                    : ecart === 0
+                                      ? <span style={{color:C.green,fontWeight:900,fontSize:14}}>✓ 0</span>
+                                      : <span style={{background:(ecart<0?C.red:C.blue)+'22',color:ecart<0?C.red:C.blue,padding:'4px 10px',borderRadius:8,fontWeight:900,fontSize:14}}>{ecart>0?'+':''}{ecart}</span>}
                                 </td>
-                                {/* FBM bloc */}
-                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:fbmT>0?C.yellow:sub}} title="Stock théorique LAUTOPAK sous ce pk_code">
-                                  {fbmT>0 && <div style={{fontSize:9,fontFamily:'monospace',color:sub,fontWeight:400,lineHeight:1}}>FBM-{c.base_code}</div>}
-                                  <div style={{fontSize:14}}>{fbmT||''}</div>
+                                <td style={{padding:'10px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,fontSize:12,color:!valeur||valeur===0?sub:valeur<0?C.red:C.blue}}>
+                                  {valeur==null||valeur===0?'—':fmt$(valeur)}
                                 </td>
-                                <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                                  {fbmT>0 ? (
-                                    <input type="number" disabled={termine} value={input.fbm ?? ''}
-                                      onChange={e=>setAuditInput(prev=>({...prev,[c.base_code]:{...prev[c.base_code],fbm:e.target.value}}))}
-                                      onBlur={()=>sauvegarderComptage(c.base_code)}
-                                      style={{width:55,padding:'4px 6px',fontSize:12,border:`2px solid ${c.fbm_ecart==null?bdr:c.fbm_ecart===0?C.green:C.red}`,borderRadius:5,textAlign:'center',background:dark?'#1a1a1a':'#fff',color:dark?'#fff':'#000'}}/>
-                                  ) : <span style={{color:sub,fontSize:10}}>—</span>}
-                                  {c.fbm_ecart!=null && c.fbm_ecart !== 0 && <div style={{fontSize:9,color:C.red,fontWeight:700}}>{c.fbm_ecart>0?'+':''}{c.fbm_ecart}</div>}
-                                </td>
-                                {/* HUB bloc */}
-                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:hubT>0?C.blue:sub}} title="Stock théorique LAUTOPAK sous ce pk_code">
-                                  {hubT>0 && <div style={{fontSize:9,fontFamily:'monospace',color:sub,fontWeight:400,lineHeight:1}}>HUB-{c.base_code}</div>}
-                                  <div style={{fontSize:14}}>{hubT||''}</div>
-                                </td>
-                                <td style={{padding:'4px 6px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                                  {(hubT>0 || spT>0) ? (
-                                    <input type="number" disabled={termine} value={input.warehouse ?? ''}
-                                      onChange={e=>setAuditInput(prev=>({...prev,[c.base_code]:{...prev[c.base_code],warehouse:e.target.value}}))}
-                                      onBlur={()=>sauvegarderComptage(c.base_code)}
-                                      placeholder={spT>0 ? `+${spT} SP` : ''}
-                                      style={{width:55,padding:'4px 6px',fontSize:12,border:`2px solid ${c.warehouse_ecart==null?bdr:c.warehouse_ecart===0?C.green:C.red}`,borderRadius:5,textAlign:'center',background:dark?'#1a1a1a':'#fff',color:dark?'#fff':'#000'}}/>
-                                  ) : <span style={{color:sub,fontSize:10}}>—</span>}
-                                  {c.warehouse_ecart!=null && c.warehouse_ecart !== 0 && <div style={{fontSize:9,color:C.red,fontWeight:700}}>{c.warehouse_ecart>0?'+':''}{c.warehouse_ecart}</div>}
-                                </td>
-                                {/* SP (oubli) */}
-                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
-                                  {c.has_oubli
-                                    ? <span title={`${spT} unités sans préfixe — à retagger HUB-xxx, FBM-xxx ou FBA-xxx dans LAUTOPAK après l'audit`}
-                                            style={{background:C.yellow+'22',color:C.yellow,padding:'2px 6px',borderRadius:8,fontSize:10,fontWeight:700,whiteSpace:'nowrap'}}>
-                                        🏷 {spT}
-                                      </span>
-                                    : <span style={{color:sub,fontSize:10}}>—</span>}
-                                </td>
-                                {/* Total théorique (ce que le système attend physiquement) */}
-                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,fontSize:14,color:totalTheo>0?C.blue:sub}}
-                                    title={`Chez Amazon FBA ${fbaA} + FBM Mathias ${fbmT} + HUB Surplus ${hubT} + À tagger ${spT}`}>
-                                  {totalTheo || '—'}
-                                </td>
-                                {/* Total compté physique (live) + Δ */}
-                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}
-                                    title={`Chez Amazon FBA ${fbaA} + FBM Mathias ${fbmCompte ?? 0} + HUB Surplus ${whseCompte ?? 0}`}>
-                                  {fullCounted ? (
-                                    match ? (
-                                      <span style={{color:C.green,fontWeight:900,fontSize:13}}>{totalCompte} ✓</span>
-                                    ) : (
-                                      <span>
-                                        <span style={{fontWeight:800,fontSize:13}}>{totalCompte}</span>
-                                        <span style={{marginLeft:6,padding:'2px 6px',background:C.red+'22',color:C.red,borderRadius:6,fontSize:11,fontWeight:800}}>{deltaTotal>0?'+':''}{deltaTotal}</span>
-                                      </span>
-                                    )
-                                  ) : (
-                                    <span style={{color:sub,fontSize:11}}>{totalCompte || '—'} <span style={{fontSize:9}}>(en cours)</span></span>
-                                  )}
-                                </td>
-                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:valEcart>0?C.red:sub,fontSize:11}}>{valEcart>0?fmt$((c.valeur_warehouse_ecart||0)+(c.valeur_fbm_ecart||0)):'—'}</td>
-                                <td style={{padding:'6px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>
-                                  {c.compte && <span style={{color:C.green,fontSize:14}}>✓</span>}
+                                <td style={{padding:'10px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>
+                                  {!isCompte
+                                    ? <span style={{color:C.yellow,fontSize:11,fontWeight:700}}>⏳ Restant</span>
+                                    : hasEcart
+                                      ? <span style={{color:C.red,fontSize:11,fontWeight:700}}>⚠️ Écart</span>
+                                      : <span style={{color:C.green,fontSize:18,fontWeight:900}}>✓</span>}
                                 </td>
                               </tr>
                             )
@@ -11236,6 +11398,121 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     </div>
                 }
               </div>
+
+              {/* Réconciliation FBA Amazon vs Traction (vue admin/compta repliable) */}
+              {(() => {
+                const fbaRows = (auditCounts || []).filter((c:any) =>
+                  Number(c.fba_amazon_theorique||0) > 0 || Number(c.fba_traction_theorique||0) > 0
+                ).filter((c:any) => {
+                  const fbaT = Number(c.fba_traction_theorique||0)
+                  const fbaA = Number(c.fba_amazon_theorique||0)
+                  return Math.abs(fbaA - fbaT) > 1
+                })
+                if (fbaRows.length === 0) return null
+                return (
+                  <div style={{marginTop:14,background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+                    <button onClick={()=>setShowFbaReconcil(!showFbaReconcil)}
+                      style={{width:'100%',background:'transparent',border:'none',padding:'12px 16px',display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer',color:dark?'#fff':'#1a1a1a'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:10}}>
+                        <span style={{fontSize:13,fontWeight:800}}>📦 Réconciliation FBA Amazon ↔ Traction</span>
+                        <span style={{background:C.red+'22',color:C.red,padding:'2px 8px',borderRadius:8,fontSize:11,fontWeight:700}}>{fbaRows.length} écart{fbaRows.length>1?'s':''}</span>
+                      </div>
+                      <span style={{color:sub,fontSize:13}}>{showFbaReconcil ? '▼' : '▶'}</span>
+                    </button>
+                    {showFbaReconcil && (
+                      <div style={{borderTop:`1px solid ${bdr}`,overflowX:'auto'}}>
+                        <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                          <thead><tr style={{background:thBg}}>
+                            <th style={{padding:'8px 12px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>SKU</th>
+                            <th style={{padding:'8px 12px',textAlign:'left',fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`1px solid ${bdr}`}}>Description</th>
+                            <th style={{padding:'8px 12px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`1px solid ${bdr}`}}>FBA Traction</th>
+                            <th style={{padding:'8px 12px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.blue,borderBottom:`1px solid ${bdr}`}}>Chez Amazon</th>
+                            <th style={{padding:'8px 12px',textAlign:'right',fontSize:10,fontWeight:700,textTransform:'uppercase',color:C.red,borderBottom:`1px solid ${bdr}`}}>Δ FBA</th>
+                          </tr></thead>
+                          <tbody>
+                            {fbaRows.map((c:any) => {
+                              const fbaT = Number(c.fba_traction_theorique||0)
+                              const fbaA = Number(c.fba_amazon_theorique||0)
+                              const d = fbaA - fbaT
+                              return (
+                                <tr key={c.base_code}>
+                                  <td style={{padding:'7px 12px',borderBottom:`1px solid ${bdr}`,fontFamily:'monospace',fontWeight:700}}>{c.base_code}</td>
+                                  <td style={{padding:'7px 12px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={c.description}>{c.description||'—'}</td>
+                                  <td style={{padding:'7px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700}}>{fbaT}</td>
+                                  <td style={{padding:'7px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700}}>{fbaA}</td>
+                                  <td style={{padding:'7px 12px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:900,color:d<0?C.red:C.blue}}>{d>0?'+':''}{d}</td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* Modal de finalisation intelligente */}
+              {showFinaliseModal && !termine && (() => {
+                const restants = (auditCounts || []).filter((c:any) =>
+                  Number(c.total_theorique_net||0) > 0 && c.total_compte == null
+                ).length
+                const avecEcart = auditStats.a_compter_avec_ecart || 0
+                return (
+                  <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+                       onClick={()=>setShowFinaliseModal(false)}>
+                    <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:14,maxWidth:520,width:'100%',border:`2px solid ${C.green}`,padding:22,boxShadow:'0 10px 40px rgba(0,0,0,.4)'}}>
+                      <div style={{fontSize:18,fontWeight:900,color:C.green,marginBottom:6}}>✓ Finaliser l'audit</div>
+                      <div style={{fontSize:12,color:sub,marginBottom:16}}>{openAudit.label} — {openAudit.mois}</div>
+
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+                        <div style={{background:dark?'#0d2a18':'#e6f4ea',borderRadius:10,padding:'12px',textAlign:'center',border:`1px solid ${C.green}33`}}>
+                          <div style={{fontSize:10,color:sub,textTransform:'uppercase',fontWeight:700}}>Comptés</div>
+                          <div style={{fontSize:24,fontWeight:900,color:C.green}}>{auditStats.a_compter_comptes||0}</div>
+                        </div>
+                        <div style={{background:restants>0?(dark?'#2b2411':'#fffcf5'):(dark?'#1a1a1a':'#f8f9fa'),borderRadius:10,padding:'12px',textAlign:'center',border:`1px solid ${restants>0?C.yellow+'66':bdr}`}}>
+                          <div style={{fontSize:10,color:sub,textTransform:'uppercase',fontWeight:700}}>Restants</div>
+                          <div style={{fontSize:24,fontWeight:900,color:restants>0?C.yellow:sub}}>{restants}</div>
+                        </div>
+                      </div>
+
+                      {restants > 0 && (
+                        <div style={{background:dark?'#2b2411':'#fef9e6',border:`1px solid ${C.yellow}`,borderRadius:10,padding:'12px 14px',marginBottom:14,fontSize:12,color:dark?'#ffc107':'#856404',lineHeight:1.5}}>
+                          ⚠️ Il reste <strong>{restants} SKU non comptés</strong>. Tu peux soit :
+                          <ul style={{margin:'8px 0 0 0',paddingLeft:18}}>
+                            <li>Les marquer à 0 (si tu n'en as physiquement plus)</li>
+                            <li>Les laisser tels quels (l'audit se ferme avec ces SKU non comptés)</li>
+                            <li>Annuler et continuer à compter</li>
+                          </ul>
+                        </div>
+                      )}
+
+                      {avecEcart > 0 && (
+                        <div style={{background:dark?'#2b1113':'#fce8e6',border:`1px solid ${C.red}`,borderRadius:10,padding:'12px 14px',marginBottom:14,fontSize:12,color:C.red,lineHeight:1.5}}>
+                          ⚠️ <strong>{avecEcart} SKU avec écart</strong> — vérifie l'onglet <strong>Avec écart</strong> avant de finaliser. Manques : <strong>{fmt$(auditStats.valeur_manques||0).replace('−','')}</strong> · Surplus : <strong>+{fmt$(auditStats.valeur_surplus||0).replace('−','')}</strong>
+                        </div>
+                      )}
+
+                      <div style={{display:'flex',gap:8,justifyContent:'flex-end',flexWrap:'wrap'}}>
+                        <button onClick={()=>setShowFinaliseModal(false)}
+                          style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'10px 16px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                          Annuler
+                        </button>
+                        {restants > 0 && (
+                          <button onClick={async()=>{ await marquerRestantsZero() }}
+                            style={{background:'transparent',border:`1px solid ${C.yellow}`,color:C.yellow,borderRadius:8,padding:'10px 16px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                            ⏭ Marquer reste à 0
+                          </button>
+                        )}
+                        <button onClick={finaliserAudit}
+                          style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'10px 18px',fontWeight:800,cursor:'pointer',fontSize:13}}>
+                          ✓ Finaliser maintenant
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
           )}
         </div>
