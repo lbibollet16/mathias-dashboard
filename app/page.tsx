@@ -763,7 +763,9 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
   const [filtFourn, setFiltFourn] = useState('ALL')
   const [filtStatut, setFiltStatut] = useState('ALL')
   const [recherche, setRecherche] = useState('')
+  const [diagOutput, setDiagOutput] = useState<any|null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const fileRefDiag = useRef<HTMLInputElement>(null)
 
   useEffect(() => { charger() }, [])
 
@@ -790,6 +792,8 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
       const d = await r.json()
       if (!r.ok || d.erreur) {
         setMsg({type:'err', text: d.erreur || 'Erreur import'})
+        // Si le PDF a échoué, on affiche les lignes brutes pour debug
+        if (d.rawLines) setDiagOutput({ rawLines: d.rawLines, commandes: [], note: 'Échec parsing — lignes brutes ci-dessous' })
       } else {
         setMsg({
           type:'ok',
@@ -802,6 +806,30 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
     } finally {
       setImporting(false)
       if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  async function diagnostiquerPdf(file: File) {
+    setImporting(true)
+    setDiagOutput(null)
+    setMsg({type:'info', text:'Diagnostic en cours…'})
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('diagnostic', '1')
+      const r = await fetch('/api/commandes-attente/import', { method:'POST', body: fd })
+      const d = await r.json()
+      if (!r.ok || d.erreur) {
+        setMsg({type:'err', text: d.erreur || 'Erreur diagnostic'})
+      } else {
+        setMsg({type:'ok', text:`Diagnostic : ${d.nb_lignes_brutes} lignes brutes, ${d.nb_commandes_parsees} commandes reconnues.`})
+        setDiagOutput(d)
+      }
+    } catch (e:any) {
+      setMsg({type:'err', text: e.message || String(e)})
+    } finally {
+      setImporting(false)
+      if (fileRefDiag.current) fileRefDiag.current.value = ''
     }
   }
 
@@ -940,11 +968,25 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
             style={{display:'none'}}
             onChange={e => { const f = e.target.files?.[0]; if (f) importerPdf(f) }}
           />
+          <input
+            ref={fileRefDiag}
+            type="file"
+            accept="application/pdf,.pdf"
+            style={{display:'none'}}
+            onChange={e => { const f = e.target.files?.[0]; if (f) diagnostiquerPdf(f) }}
+          />
           <button
             disabled={importing}
             onClick={()=>fileRef.current?.click()}
             style={{background:importing?sub:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 18px',fontWeight:800,cursor:importing?'not-allowed':'pointer',fontSize:13}}>
-            {importing ? '⏳ Import…' : '📥 Importer PDF'}
+            {importing ? '⏳ Import…' : '🤖 Importer PDF (IA)'}
+          </button>
+          <button
+            disabled={importing}
+            onClick={()=>fileRefDiag.current?.click()}
+            title="Affiche les lignes brutes extraites du PDF — utile si l'import échoue"
+            style={{background:'transparent',color:sub,border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 14px',fontWeight:700,cursor:importing?'not-allowed':'pointer',fontSize:12}}>
+            🔍 Diagnostic
           </button>
         </div>
 
@@ -953,6 +995,26 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
             background: msg.type==='ok' ? '#e6f4ea' : msg.type==='err' ? '#fce8e6' : '#e8f0fe',
             color: msg.type==='ok' ? C.green : msg.type==='err' ? C.red : C.blue}}>
             {msg.text}
+          </div>
+        )}
+
+        {diagOutput && (
+          <div style={{marginTop:12,border:`1px solid ${bdr}`,borderRadius:6,overflow:'hidden'}}>
+            <div style={{padding:'8px 12px',background:dark?'#1a1a1a':'#f8f9fa',display:'flex',alignItems:'center',gap:10,borderBottom:`1px solid ${bdr}`}}>
+              <span style={{fontSize:13,fontWeight:800}}>🔍 Diagnostic PDF</span>
+              {diagOutput.moteur && <span style={{fontSize:11,color:sub}}>moteur : {diagOutput.moteur}</span>}
+              <span style={{fontSize:11,color:sub}}>{diagOutput.commandes?.length || 0} commandes reconnues</span>
+              <button onClick={()=>setDiagOutput(null)} style={{marginLeft:'auto',background:'transparent',border:'none',color:sub,cursor:'pointer',fontSize:13}}>✕</button>
+            </div>
+            <div style={{padding:10,maxHeight:380,overflow:'auto',fontFamily:'ui-monospace,monospace',fontSize:11,whiteSpace:'pre-wrap',background:dark?'#0d0d0d':'#fff'}}>
+              {diagOutput.note && <div style={{color:C.red,fontWeight:700,marginBottom:8}}>{diagOutput.note}</div>}
+              <div style={{fontWeight:700,marginBottom:4,color:C.blue}}>— Texte brut extrait du PDF (premiers 8000 car) —</div>
+              <div>{diagOutput.rawText || (diagOutput.rawLines || []).join('\n')}</div>
+              {diagOutput.commandes && diagOutput.commandes.length > 0 && <>
+                <div style={{fontWeight:700,marginTop:14,marginBottom:4,color:C.green}}>— Commandes parsées (JSON) —</div>
+                <div>{JSON.stringify(diagOutput.commandes, null, 2)}</div>
+              </>}
+            </div>
           </div>
         )}
       </div>

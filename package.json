@@ -9,12 +9,14 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.43.0",
+    "ai": "^6.0.176",
     "multer": "^2.1.1",
     "next": "^16.2.1",
     "react": "^18",
     "react-dom": "^18",
     "unpdf": "^1.6.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^20",
