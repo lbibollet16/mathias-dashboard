@@ -746,11 +746,44 @@ const PLANS_ACTION_CMD = [
   '📞 Relancer le fournisseur',
   '📧 Email envoyé, en attente réponse',
   '⏰ Délai accepté (en attente)',
+  '🔁 BO',
   '🔄 Chercher substitution',
   '🚨 Escalader au gestionnaire',
   '✅ Réception imminente confirmée',
   '❌ Annuler la commande',
 ] as const
+
+// Le plan d'action « BO » nécessite une date_bo obligatoire
+const PLAN_BO = '🔁 BO'
+
+// Fuzzy match pour rapprocher le nom du PDF Traction ("Pothier, Anthony") du
+// nom de l'utilisateur connecté ("Anthony Pothier" ou variantes). On
+// tokenise, normalise et compte le pourcentage de tokens partagés.
+function matchNomEmploye(pdfNom: string | null | undefined, userNom: string | null | undefined): number {
+  if (!pdfNom || !userNom) return 0
+  const tokenize = (s: string) => new Set(
+    s.toLowerCase()
+     .normalize('NFD').replace(/[̀-ͯ]/g, '')   // retire accents
+     .replace(/[,.]/g, ' ')
+     .split(/\s+/)
+     .filter(t => t.length >= 2)
+  )
+  const a = tokenize(pdfNom)
+  const b = tokenize(userNom)
+  if (a.size === 0 || b.size === 0) return 0
+  let inter = 0
+  let interLong = 0  // tokens partagés de longueur ≥ 4 (= noms/prénoms réels)
+  for (const t of a) {
+    if (b.has(t)) {
+      inter++
+      if (t.length >= 4) interLong++
+    }
+  }
+  // Faux positif si les seuls tokens partagés sont des mots courts
+  if (interLong === 0) return 0
+  // Score = ratio par rapport à la liste la plus courte (containment)
+  return inter / Math.min(a.size, b.size)
+}
 
 function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
@@ -765,9 +798,12 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
   const [filtCommandePar, setFiltCommandePar] = useState('ALL')
   const [recherche, setRecherche] = useState('')
   const [diagOutput, setDiagOutput] = useState<any|null>(null)
+  const [historique, setHistorique] = useState<{commandeId: number, items: any[]}|null>(null)
+  const [notifVu, setNotifVu] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const fileRefIa = useRef<HTMLInputElement>(null)
   const fileRefDiag = useRef<HTMLInputElement>(null)
+  const moiNom = profil?.nom || profil?.email || ''
 
   useEffect(() => { charger() }, [])
 
@@ -833,13 +869,24 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
     }
   }
 
-  async function patcherLigne(id: number, patch: {remarque?: string, plan_action?: string}) {
+  async function patcherLigne(id: number, patch: {remarque?: string, plan_action?: string, date_bo?: string|null}) {
     setLignes(prev => prev.map(l => l.id===id ? {...l, ...patch, date_action: new Date().toISOString()} : l))
     await fetch('/api/commandes-attente', {
       method:'PATCH',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ id, ...patch }),
+      body: JSON.stringify({ id, ...patch, modifie_par: moiNom }),
     })
+  }
+
+  async function ouvrirHistorique(commandeId: number) {
+    setHistorique({ commandeId, items: [] })
+    try {
+      const r = await fetch(`/api/commandes-attente/historique?commande_id=${commandeId}`)
+      if (r.ok) {
+        const d = await r.json()
+        setHistorique({ commandeId, items: d.historique || [] })
+      }
+    } catch {}
   }
 
   // Calcul de l'âge en jours = aujourd'hui - date_commande (fallback :
@@ -877,6 +924,16 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
   const aSurveil  = filtered.filter(l => l.ageJours >= 5 && l.ageJours < 10)
   const aTemps    = filtered.filter(l => l.ageJours < 5)
 
+  // Notifications pour l'utilisateur connecté :
+  // commandes en retard (≥10j) AVEC un plan d'action rempli ET dont le
+  // nom_employe matche le nom de l'utilisateur à ≥85%.
+  const mesSuivis = enriched.filter(l =>
+    l.ageJours >= 10
+    && l.plan_action
+    && l.plan_action.length > 0
+    && matchNomEmploye(l.nom_employe, moiNom) >= 0.85
+  )
+
   const ageBadge = (j:number) => {
     const t = trancheAge(j)
     const col = t === '10+' ? C.red : t === '5-10' ? C.yellow : C.green
@@ -892,7 +949,10 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
     return <span style={{background:col+'22',color:col,padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:700}}>{s}</span>
   }
 
-  const renderLigne = (l:any, urgent:boolean) => (
+  const renderLigne = (l:any, urgent:boolean) => {
+    const isBO = l.plan_action === PLAN_BO
+    const boManquante = isBO && !l.date_bo
+    return (
     <tr key={l.id} style={{background: urgent ? (dark?'#2b1113':'#fff5f5') : 'transparent', borderLeft: urgent ? `4px solid ${C.red}` : '4px solid transparent'}}>
       <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontSize:12}}>{l.num_commande}</td>
       <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>{l.date_commande || '—'}</td>
@@ -904,6 +964,7 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
       <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:700}}>{l.qte_commandee}</td>
       <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11,maxWidth:200}}>{l.description || '—'}</td>
       <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>{l.nom_employe || '—'}</td>
+      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub}}>{l.num_facture || '—'}</td>
       <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}>{ageBadge(l.ageJours)}</td>
       <td style={{padding:'6px',borderBottom:`1px solid ${bdr}`,minWidth:160}}>
         <input
@@ -914,18 +975,43 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
           style={{width:'100%',padding:'5px 7px',border:`1px solid ${bdr}`,borderRadius:5,fontSize:11,background:dark?'#1a1a1a':'#fff',color:dark?'#eee':'#222'}}
         />
       </td>
-      <td style={{padding:'6px',borderBottom:`1px solid ${bdr}`,minWidth:200}}>
-        <select
-          value={l.plan_action || ''}
-          onChange={e => patcherLigne(l.id, {plan_action: e.target.value})}
-          style={{width:'100%',padding:'5px 7px',border:`1px solid ${bdr}`,borderRadius:5,fontSize:11,background:dark?'#1a1a1a':'#fff',color:dark?'#eee':'#222',fontWeight:l.plan_action?700:400}}>
-          {PLANS_ACTION_CMD.map(p => <option key={p} value={p}>{p || '—'}</option>)}
-        </select>
+      <td style={{padding:'6px',borderBottom:`1px solid ${bdr}`,minWidth:220}}>
+        <div style={{display:'flex',gap:4,alignItems:'center'}}>
+          <select
+            value={l.plan_action || ''}
+            onChange={e => {
+              const next = e.target.value
+              const patch: any = { plan_action: next }
+              // Si on passe à autre chose que BO, on efface la date_bo
+              if (next !== PLAN_BO && l.date_bo) patch.date_bo = null
+              patcherLigne(l.id, patch)
+            }}
+            style={{flex:1,padding:'5px 7px',border:`1px solid ${boManquante?C.red:bdr}`,borderRadius:5,fontSize:11,background:dark?'#1a1a1a':'#fff',color:dark?'#eee':'#222',fontWeight:l.plan_action?700:400}}>
+            {PLANS_ACTION_CMD.map(p => <option key={p} value={p}>{p || '—'}</option>)}
+          </select>
+          <button
+            onClick={()=>ouvrirHistorique(l.id)}
+            title="Voir l'historique des modifications"
+            style={{background:'transparent',border:`1px solid ${bdr}`,borderRadius:4,padding:'4px 6px',cursor:'pointer',fontSize:11,color:sub}}>
+            🕐
+          </button>
+        </div>
+        {isBO && (
+          <input
+            type="date"
+            value={l.date_bo || ''}
+            onChange={e => patcherLigne(l.id, {date_bo: e.target.value || null})}
+            required
+            style={{marginTop:4,width:'100%',padding:'4px 6px',border:`1px solid ${boManquante?C.red:bdr}`,borderRadius:4,fontSize:11,background:dark?'#1a1a1a':'#fff',color:boManquante?C.red:(dark?'#eee':'#222'),fontWeight:700}}
+            placeholder="Date BO obligatoire"
+          />
+        )}
       </td>
     </tr>
-  )
+    )
+  }
 
-  const colonnes = ['#Commande','Date','Statut','#Fourn','Nom Fournisseur','Cmdé Par','#Pièce','Qte','Description','Employé','Âge','Remarque','Plan d\'action']
+  const colonnes = ['#Commande','Date','Statut','#Fourn','Nom Fournisseur','Cmdé Par','#Pièce','Qte','Description','Employé','#Facture','Âge','Remarque','Plan d\'action']
   const tableTop = (
     <thead>
       <tr style={{background:thBg}}>
@@ -936,6 +1022,73 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
 
   return (
     <div>
+      {/* 🔔 Notification : commandes en retard de l'utilisateur avec plan d'action */}
+      {mesSuivis.length > 0 && !notifVu && (
+        <div style={{background:'#fce8e6',border:`2px solid ${C.red}`,borderRadius:10,padding:'12px 16px',marginBottom:14,display:'flex',alignItems:'center',gap:14,flexWrap:'wrap',animation:'pulseRet 2s ease-in-out infinite'}}>
+          <style>{`@keyframes pulseRet { 0%,100%{box-shadow:0 0 0 0 rgba(217,48,37,.4)} 50%{box-shadow:0 0 0 8px rgba(217,48,37,0)} }`}</style>
+          <span style={{fontSize:24}}>🔔</span>
+          <div style={{flex:1,minWidth:200}}>
+            <div style={{fontSize:13,fontWeight:900,color:C.red}}>
+              {mesSuivis.length === 1
+                ? '1 suivi à faire'
+                : `${mesSuivis.length} suivis à faire`}
+            </div>
+            <div style={{fontSize:11,color:'#5f6368',marginTop:2}}>
+              Tu as {mesSuivis.length === 1 ? 'une commande' : 'des commandes'} en retard (≥10j) avec un plan d'action en cours. Action attendue.
+            </div>
+          </div>
+          <button onClick={()=>{setFiltAge('10+'); setFiltEmploye(moiNom)}}
+            style={{background:C.red,color:'#fff',border:'none',borderRadius:8,padding:'9px 14px',fontWeight:800,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+            Voir mes suivis ({mesSuivis.length})
+          </button>
+          <button onClick={()=>setNotifVu(true)}
+            title="Masquer (jusqu'au prochain rechargement)"
+            style={{background:'transparent',border:'none',color:sub,cursor:'pointer',fontSize:14}}>
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Modal historique d'une commande */}
+      {historique && (
+        <div onClick={()=>setHistorique(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,maxWidth:680,width:'100%',maxHeight:'80vh',overflow:'auto'}}>
+            <div style={{padding:'14px 18px',borderBottom:`1px solid ${bdr}`,display:'flex',alignItems:'center',gap:10}}>
+              <span style={{fontSize:16,fontWeight:900}}>🕐 Historique des modifications</span>
+              <button onClick={()=>setHistorique(null)} style={{marginLeft:'auto',background:'transparent',border:'none',color:sub,cursor:'pointer',fontSize:16}}>✕</button>
+            </div>
+            <div style={{padding:16}}>
+              {historique.items.length === 0 ? (
+                <div style={{color:sub,fontSize:12,textAlign:'center',padding:20}}>Aucune modification enregistrée pour cette commande.</div>
+              ) : (
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                  <thead>
+                    <tr style={{background:thBg}}>
+                      <th style={{padding:'8px',textAlign:'left',borderBottom:`1px solid ${bdr}`}}>Date</th>
+                      <th style={{padding:'8px',textAlign:'left',borderBottom:`1px solid ${bdr}`}}>Par</th>
+                      <th style={{padding:'8px',textAlign:'left',borderBottom:`1px solid ${bdr}`}}>Champ</th>
+                      <th style={{padding:'8px',textAlign:'left',borderBottom:`1px solid ${bdr}`}}>Avant</th>
+                      <th style={{padding:'8px',textAlign:'left',borderBottom:`1px solid ${bdr}`}}>Après</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historique.items.map(h => (
+                      <tr key={h.id}>
+                        <td style={{padding:'7px',borderBottom:`1px solid ${bdr}`,whiteSpace:'nowrap',fontSize:11,color:sub}}>{new Date(h.modifie_le).toLocaleString('fr-CA')}</td>
+                        <td style={{padding:'7px',borderBottom:`1px solid ${bdr}`,fontSize:11,fontWeight:600}}>{h.modifie_par || '—'}</td>
+                        <td style={{padding:'7px',borderBottom:`1px solid ${bdr}`,fontSize:11}}><span style={{background:dark?'#222':'#eef',padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700}}>{h.champ}</span></td>
+                        <td style={{padding:'7px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis'}}>{h.valeur_avant || '∅'}</td>
+                        <td style={{padding:'7px',borderBottom:`1px solid ${bdr}`,fontSize:11,fontWeight:600,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis'}}>{h.valeur_apres || '∅'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header — import + config */}
       <div style={{...S.card, background:card, border:`1px solid ${bdr}`, padding:14, marginBottom:14}}>
         <div style={{display:'flex',gap:14,alignItems:'center',flexWrap:'wrap'}}>

@@ -19,6 +19,7 @@ export interface AiParsedCommande {
   qte_commandee:   number
   description:     string | null
   nom_employe:     string | null
+  num_facture:     string | null
 }
 
 export interface AiParseResult {
@@ -39,6 +40,7 @@ const CommandeSchema = z.object({
   qte_commandee:   z.number(),
   description:     z.string().nullable(),
   nom_employe:     z.string().nullable(),
+  num_facture:     z.string().nullable(),
 })
 
 const ResponseSchema = z.object({
@@ -73,11 +75,14 @@ FORMAT DU RAPPORT — c'est un rapport MULTI-PAGES. CHAQUE PAGE = UNE commande. 
    → num_piece="301612", qte_commandee=1, description="Deck Suction Fitting 1 1/2\""
 
 8. (Optionnel) Bloc "Commande" ou "Réservation" :
-   "Date # Employé Nom Employé Qte Remarque:"
-   "<Date> <#Employé> <Nom Employé "Nom, Prénom"> <Qte> ..."
+   "Date # Employé Nom Employé [#Facture Type] Qte Remarque:"
+   "<Date> <#Employé> <Nom Employé "Nom, Prénom"> [<#Facture>] [<Type>] <Qte> ..."
 
-   EXEMPLE : "2026-05-07 945 Pothier, Anthony 1"
-   → nom_employe="Pothier, Anthony"
+   EXEMPLE (Commande sans facture) : "2026-05-07 945 Pothier, Anthony 1"
+   → nom_employe="Pothier, Anthony", num_facture=null
+
+   EXEMPLE (Réservation avec facture) : "2024-12-04 176 Mouralian, Imad 116909 Facture Service 1 #21913 Banville, Carol"
+   → nom_employe="Mouralian, Imad", num_facture="116909"
 
 9. Pied de page : "Coût Total de la Commande: ..."
 10. "X / Y" (numéro de page)
@@ -136,6 +141,7 @@ export async function parseCommandesPdfAvecIA(buffer: Buffer | Uint8Array): Prom
       qte_commandee:   typeof c.qte_commandee === 'number' ? c.qte_commandee : 0,
       description:     c.description ?? null,
       nom_employe:     c.nom_employe ?? null,
+      num_facture:     c.num_facture ?? null,
     })).filter(c => c.num_commande && c.num_piece)
 
     return {

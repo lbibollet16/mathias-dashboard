@@ -135,6 +135,7 @@ export async function POST(req: NextRequest) {
         qte_commandee:   typeof c.qte_commandee === 'number' ? c.qte_commandee : 0,
         description:     c.description,
         nom_employe:     c.nom_employe,
+        num_facture:     c.num_facture ?? null,
       }
 
       if (!ex) {

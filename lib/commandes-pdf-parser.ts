@@ -25,6 +25,7 @@ export interface ParsedCommande {
   qte_commandee:    number
   description:      string | null
   nom_employe:      string | null
+  num_facture:      string | null
 }
 
 export interface CommandesParseResult {
@@ -230,39 +231,48 @@ function parsePieceLine(line: string): { num_piece: string, qte_commandee: numbe
   return { num_piece, qte_commandee, description }
 }
 
-// Parse une ligne du bloc Commande/Réservation pour extraire l'employé.
+// Parse une ligne du bloc Commande/Réservation et retourne nom_employe
+// + num_facture (présent uniquement dans le bloc Réservation).
 //
-// Format : "<date> <num_employe> <Nom, Prénom> <suite optionnelle>"
+// Format : "<date> <num_employe> <Nom, Prénom> [<#Facture>] [<Type>] <Qte> [<remarque>]"
 //
 // Exemples :
 //   "2026-05-07 945 Pothier, Anthony 1"
+//      → { nom: "Pothier, Anthony", facture: null }   (pas de #Facture)
 //   "2024-12-04 176 Mouralian, Imad 116909 Facture Service 1 #21913 Banville, Carol"
-//   "2024-12-04 176 Mouralian, Imad 116909 Facture Service -2 Annulée par la facturation"
-//   "2025-04-09 20714 Briand, Thierry Albert 1"          ← prénom en 2 mots
-//
-// Stratégie en 2 temps : on match d'abord le préfixe "<date> <num>" puis on
-// cherche le 1er pattern "Nom, Prénom" dans le reste.
-function parseEmployeLine(line: string): string | null {
+//      → { nom: "Mouralian, Imad", facture: "116909" }
+//   "2025-04-09 20714 Briand, Thierry Albert 1"
+//      → { nom: "Briand, Thierry Albert", facture: null }
+function parseEmployeLine(line: string): { nom: string, facture: string | null } | null {
   // 1) Le préfixe : date + numéro d'employé
   const prefMatch = /^\s*\d{4}-\d{2}-\d{2}\s+\d{1,6}\s+(.+)$/.exec(line)
   if (!prefMatch) return null
   const rest = prefMatch[1]
 
-  // 2) Le 1er "Nom, Prénom [Prénom2 [Prénom3]]" — on s'arrête à un chiffre,
-  //    un #, ou un mot-clé connu (Facture, Annulé, Type, etc.)
-  const nameMatch = /^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+,\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+(?:\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+){0,2})/.exec(rest)
+  // 2) Le 1er "Nom, Prénom [Prénom2 [Prénom3]]"
+  const nameMatch = /^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+,\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+(?:\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+){0,2})(.*)$/.exec(rest)
   if (!nameMatch) return null
 
-  return nameMatch[1].replace(/\s+/g, ' ').trim()
+  const nom = nameMatch[1].replace(/\s+/g, ' ').trim()
+  const apresNom = nameMatch[2]
+
+  // 3) Après le nom, le 1er token de 4-7 chiffres = #Facture (optionnel).
+  //    Si le 1er token est un petit entier (1-3 chiffres), c'est la Qte → pas de facture.
+  const factMatch = /^\s+(\d{4,7})\b/.exec(apresNom)
+  const facture = factMatch ? factMatch[1] : null
+
+  return { nom, facture }
 }
 
 // Recherche permissive d'un nom d'employé dans une ligne — utilisée en
-// fallback si le format strict ne matche pas.
-function chercherNomEmploye(line: string): string | null {
-  // Cherche "Mot, Mot [Mot [Mot]]" précédé d'un espace ou début de ligne,
-  // suivi d'un chiffre/#/fin.
-  const m = /(?:^|\s)([A-ZÀ-Ÿ][a-zà-ÿA-ZÀ-Ÿ'\-]+,\s+[A-ZÀ-Ÿ][a-zà-ÿA-ZÀ-Ÿ'\-]+(?:\s+[A-ZÀ-Ÿ][a-zà-ÿA-ZÀ-Ÿ'\-]+){0,2})/.exec(line)
-  return m ? m[1].replace(/\s+/g, ' ').trim() : null
+// fallback si le format strict ne matche pas. Retourne aussi un éventuel
+// numéro de facture trouvé sur la même ligne.
+function chercherNomEmploye(line: string): { nom: string, facture: string | null } | null {
+  const m = /(?:^|\s)([A-ZÀ-Ÿ][a-zà-ÿA-ZÀ-Ÿ'\-]+,\s+[A-ZÀ-Ÿ][a-zà-ÿA-ZÀ-Ÿ'\-]+(?:\s+[A-ZÀ-Ÿ][a-zà-ÿA-ZÀ-Ÿ'\-]+){0,2})(.*)$/.exec(line)
+  if (!m) return null
+  const nom = m[1].replace(/\s+/g, ' ').trim()
+  const factMatch = /^\s+(\d{4,7})\b/.exec(m[2])
+  return { nom, facture: factMatch ? factMatch[1] : null }
 }
 
 export async function parseCommandesPdf(buffer: Buffer | Uint8Array): Promise<CommandesParseResult> {
@@ -315,26 +325,26 @@ export async function parseCommandesPdf(buffer: Buffer | Uint8Array): Promise<Co
         if (piece) pieces.push(piece)
       }
 
-      // Trouver le nom_employe — stratégie en 3 phases pour être robuste :
+      // Trouver nom_employe + num_facture — 3 phases pour être robuste :
       //
-      // Phase 1 : 1re ligne qui matche le format strict "<date> <num> <Nom, Prénom>"
+      // Phase 1 : 1re ligne qui matche "<date> <num> <Nom, Prénom> [#Facture] ..."
       // Phase 2 : 1re ligne après une ligne contenant "Nom Employé" (= header de bloc)
-      // Phase 3 : recherche permissive d'un pattern "Nom, Prénom" dans toutes
-      //           les lignes de la page après l'en-tête de commande
+      // Phase 3 : recherche permissive de "Nom, Prénom" dans toute la zone après l'en-tête
       let nom_employe: string | null = null
+      let num_facture: string | null = null
 
       // Phase 1
       for (let k = idxHeaderCmd + 2; k < lines.length; k++) {
-        const m = parseEmployeLine(lines[k])
-        if (m) { nom_employe = m; break }
+        const r = parseEmployeLine(lines[k])
+        if (r) { nom_employe = r.nom; num_facture = r.facture; break }
       }
 
       // Phase 2
       if (!nom_employe) {
         for (let k = idxHeaderCmd + 2; k < lines.length - 1; k++) {
           if (/Nom\s+Employé/i.test(lines[k])) {
-            const candidat = chercherNomEmploye(lines[k + 1])
-            if (candidat) { nom_employe = candidat; break }
+            const r = chercherNomEmploye(lines[k + 1]) || (parseEmployeLine(lines[k + 1]) as any)
+            if (r) { nom_employe = r.nom; num_facture = r.facture; break }
           }
         }
       }
@@ -343,11 +353,10 @@ export async function parseCommandesPdf(buffer: Buffer | Uint8Array): Promise<Co
       // les pièces (en évitant d'attraper le "Commandé Par" du header).
       if (!nom_employe && idxHeaderPiece >= 0) {
         for (let k = idxHeaderPiece + 1; k < lines.length; k++) {
-          // Skip lignes qui sont clairement des pièces ou pieds de page
           if (parsePieceLine(lines[k])) continue
           if (/^Coût\s+Total|^Déduction|^Montant|^Core|^Coût\s+Net|^Nombre/i.test(lines[k])) continue
-          const candidat = chercherNomEmploye(lines[k])
-          if (candidat) { nom_employe = candidat; break }
+          const r = chercherNomEmploye(lines[k])
+          if (r) { nom_employe = r.nom; num_facture = r.facture; break }
         }
       }
 
@@ -364,6 +373,7 @@ export async function parseCommandesPdf(buffer: Buffer | Uint8Array): Promise<Co
           qte_commandee:   piece.qte_commandee,
           description:     piece.description,
           nom_employe,
+          num_facture,
         })
       }
     }
