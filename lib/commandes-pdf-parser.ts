@@ -233,8 +233,11 @@ function parsePieceLine(line: string): { num_piece: string, qte_commandee: numbe
 // Parse une ligne du bloc Commande/Réservation pour extraire l'employé.
 //   "2026-05-07 945 Pothier, Anthony 1"
 //   "2024-12-04 176 Mouralian, Imad 116909 Facture Service 1 #21913 Banville, Carol"
+//   "2024-12-04 176 Mouralian, Imad 116909 Facture Service -2 Annulée par la facturation"
+//
+// Format : <date> <num_employe (1-4 digits)> <Nom, Prénom> <suite>
 function parseEmployeLine(line: string): string | null {
-  const m = /^\d{4}-\d{2}-\d{2}\s+\d+\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+,\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\- ]+?)(?:\s+\d|\s+#|$)/.exec(line)
+  const m = /^\d{4}-\d{2}-\d{2}\s+\d{1,5}\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+,\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+(?:\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+)?)(?=\s+(?:\d|#|Facture|Annul|$))/.exec(line)
   return m ? m[1].trim() : null
 }
 
@@ -288,13 +291,13 @@ export async function parseCommandesPdf(buffer: Buffer | Uint8Array): Promise<Co
         if (piece) pieces.push(piece)
       }
 
-      // Trouver le nom_employe (1er bloc Commande/Réservation après les pièces)
+      // Trouver le nom_employe : 1re ligne après idxHeaderCmd qui matche le
+      // format "<date> <num_employe> <Nom, Prénom> ...". On cherche dans toute
+      // la page (en-tête de bloc Commande/Réservation pas toujours détecté).
       let nom_employe: string | null = null
-      for (let k = idxFinPieces; k < lines.length; k++) {
-        if (isHeaderEmployeLine(lines[k]) && k + 1 < lines.length) {
-          nom_employe = parseEmployeLine(lines[k + 1])
-          if (nom_employe) break
-        }
+      for (let k = idxHeaderCmd + 2; k < lines.length; k++) {
+        const m = parseEmployeLine(lines[k])
+        if (m) { nom_employe = m; break }
       }
 
       // Émettre une entrée par pièce

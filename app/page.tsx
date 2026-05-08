@@ -755,13 +755,14 @@ const PLANS_ACTION_CMD = [
 function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const [lignes, setLignes] = useState<any[]>([])
-  const [seuil, setSeuil] = useState<number>(5)
-  const [seuilDraft, setSeuilDraft] = useState<string>('5')
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
   const [msg, setMsg] = useState<{type:'ok'|'err'|'info', text:string}|null>(null)
   const [filtFourn, setFiltFourn] = useState('ALL')
   const [filtStatut, setFiltStatut] = useState('ALL')
+  const [filtEmploye, setFiltEmploye] = useState('ALL')
+  const [filtAge, setFiltAge] = useState('ALL')      // ALL | 0-5 | 5-10 | 10+
+  const [filtCommandePar, setFiltCommandePar] = useState('ALL')
   const [recherche, setRecherche] = useState('')
   const [diagOutput, setDiagOutput] = useState<any|null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -777,8 +778,6 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
       if (r.ok) {
         const d = await r.json()
         setLignes(d.lignes || [])
-        setSeuil(d.seuil_jours || 5)
-        setSeuilDraft(String(d.seuil_jours || 5))
       }
     } finally { setLoading(false) }
   }
@@ -834,22 +833,6 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
     }
   }
 
-  async function sauverSeuil() {
-    const n = parseInt(seuilDraft, 10)
-    if (isNaN(n) || n < 1) { setSeuilDraft(String(seuil)); return }
-    const r = await fetch('/api/commandes-attente', {
-      method:'PATCH',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ config: { seuil_jours: n } }),
-    })
-    const d = await r.json()
-    if (r.ok) {
-      setSeuil(d.seuil_jours)
-      setMsg({type:'ok', text:`Seuil mis à jour : ${d.seuil_jours} jours`})
-      setTimeout(()=>setMsg(null), 2500)
-    }
-  }
-
   async function patcherLigne(id: number, patch: {remarque?: string, plan_action?: string}) {
     setLignes(prev => prev.map(l => l.id===id ? {...l, ...patch, date_action: new Date().toISOString()} : l))
     await fetch('/api/commandes-attente', {
@@ -859,19 +842,28 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
     })
   }
 
-  // Calcul de l'âge en jours par ligne
+  // Calcul de l'âge en jours = aujourd'hui - date_commande (fallback :
+  // date_premiere_vue si la date de commande manque dans le PDF).
   const enriched = lignes.map(l => {
-    const ageMs = Date.now() - new Date(l.date_premiere_vue).getTime()
-    const ageJours = Math.floor(ageMs / 86400000)
+    const ref = l.date_commande ? new Date(l.date_commande + 'T00:00:00') : new Date(l.date_premiere_vue)
+    const ageJours = Math.max(0, Math.floor((Date.now() - ref.getTime()) / 86400000))
     return { ...l, ageJours }
   })
 
+  // Tranches d'âge fixes : 0-5j (vert), 5-10j (jaune), 10j+ (rouge)
+  const trancheAge = (j: number): '0-5'|'5-10'|'10+' => j < 5 ? '0-5' : j < 10 ? '5-10' : '10+'
+
   const fournisseurs = [...new Set(enriched.map(l => l.nom_fournisseur).filter(Boolean))].sort()
-  const statuts = [...new Set(enriched.map(l => l.statut).filter(Boolean))].sort()
+  const statuts      = [...new Set(enriched.map(l => l.statut).filter(Boolean))].sort()
+  const employes     = [...new Set(enriched.map(l => l.nom_employe).filter(Boolean))].sort()
+  const commandeurs  = [...new Set(enriched.map(l => l.commande_par).filter(Boolean))].sort()
 
   const filtres = (l:any) => {
     if (filtFourn !== 'ALL' && l.nom_fournisseur !== filtFourn) return false
     if (filtStatut !== 'ALL' && l.statut !== filtStatut) return false
+    if (filtEmploye !== 'ALL' && l.nom_employe !== filtEmploye) return false
+    if (filtCommandePar !== 'ALL' && l.commande_par !== filtCommandePar) return false
+    if (filtAge !== 'ALL' && trancheAge(l.ageJours) !== filtAge) return false
     if (recherche.trim()) {
       const q = recherche.toLowerCase()
       const hay = `${l.num_commande} ${l.num_piece} ${l.description||''} ${l.nom_fournisseur||''} ${l.commande_par||''} ${l.nom_employe||''}`.toLowerCase()
@@ -880,11 +872,14 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
     return true
   }
 
-  const enRetard = enriched.filter(l => l.ageJours >= seuil).filter(filtres)
-  const aTemps   = enriched.filter(l => l.ageJours <  seuil).filter(filtres)
+  const filtered  = enriched.filter(filtres)
+  const enRetard  = filtered.filter(l => l.ageJours >= 10)
+  const aSurveil  = filtered.filter(l => l.ageJours >= 5 && l.ageJours < 10)
+  const aTemps    = filtered.filter(l => l.ageJours < 5)
 
   const ageBadge = (j:number) => {
-    const col = j>=seuil ? C.red : j>=Math.max(1, seuil-2) ? C.yellow : C.green
+    const t = trancheAge(j)
+    const col = t === '10+' ? C.red : t === '5-10' ? C.yellow : C.green
     return <span style={{background:col+'22',color:col,padding:'3px 10px',borderRadius:20,fontWeight:700,fontSize:12,whiteSpace:'nowrap'}}>{j} j</span>
   }
 
@@ -946,20 +941,10 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
         <div style={{display:'flex',gap:14,alignItems:'center',flexWrap:'wrap'}}>
           <div style={{flex:1,minWidth:220}}>
             <div style={{fontSize:18,fontWeight:900,color:C.blue}}>⏳ Commandes en attente</div>
-            <div style={{fontSize:11,color:sub,marginTop:3}}>Importe ton PDF "Liste commande" Traction. Les pièces qui restent au même statut depuis ≥ {seuil} jours apparaissent en suivi.</div>
-          </div>
-
-          <div style={{display:'flex',alignItems:'center',gap:8}}>
-            <span style={{fontSize:12,color:sub}}>Seuil :</span>
-            <input
-              type="number" min={1} max={365}
-              value={seuilDraft}
-              onChange={e=>setSeuilDraft(e.target.value)}
-              onBlur={sauverSeuil}
-              onKeyDown={e=>{ if (e.key==='Enter') (e.target as HTMLInputElement).blur() }}
-              style={{width:60,padding:'7px 8px',border:`1px solid ${bdr}`,borderRadius:6,background:dark?'#1a1a1a':'#fff',color:dark?'#eee':'#222',fontSize:13,fontWeight:700,textAlign:'center'}}
-            />
-            <span style={{fontSize:12,color:sub}}>jours</span>
+            <div style={{fontSize:11,color:sub,marginTop:3}}>
+              Importe ton PDF "Liste commande" Traction. Les commandes absentes du nouveau PDF disparaissent automatiquement.
+              Échelle : <span style={{color:C.green,fontWeight:700}}>0–5j</span> · <span style={{color:C.yellow,fontWeight:700}}>5–10j</span> · <span style={{color:C.red,fontWeight:700}}>10j+</span>
+            </div>
           </div>
 
           <input
@@ -1049,27 +1034,68 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
             onChange={e=>setRecherche(e.target.value)}
             style={{flex:1,minWidth:220,padding:'8px 12px',border:`1px solid ${bdr}`,borderRadius:6,background:card,color:dark?'#eee':'#222',fontSize:12}}
           />
-          <select value={filtFourn} onChange={e=>setFiltFourn(e.target.value)}
-            style={{padding:'8px 10px',border:`1px solid ${bdr}`,borderRadius:6,background:card,color:dark?'#eee':'#222',fontSize:12}}>
-            <option value="ALL">Tous les fournisseurs</option>
-            {fournisseurs.map(f => <option key={f} value={f}>{f}</option>)}
+          <select value={filtAge} onChange={e=>setFiltAge(e.target.value)}
+            title="Filtrer par tranche d'âge depuis la date de commande"
+            style={{padding:'8px 10px',border:`1px solid ${bdr}`,borderRadius:6,background:card,color:dark?'#eee':'#222',fontSize:12,fontWeight:filtAge!=='ALL'?700:400}}>
+            <option value="ALL">Tous les âges</option>
+            <option value="0-5">🟢 0–5 jours</option>
+            <option value="5-10">🟡 5–10 jours</option>
+            <option value="10+">🔴 10 jours et plus</option>
           </select>
           <select value={filtStatut} onChange={e=>setFiltStatut(e.target.value)}
-            style={{padding:'8px 10px',border:`1px solid ${bdr}`,borderRadius:6,background:card,color:dark?'#eee':'#222',fontSize:12}}>
+            style={{padding:'8px 10px',border:`1px solid ${bdr}`,borderRadius:6,background:card,color:dark?'#eee':'#222',fontSize:12,fontWeight:filtStatut!=='ALL'?700:400}}>
             <option value="ALL">Tous les statuts</option>
             {statuts.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
+          <select value={filtFourn} onChange={e=>setFiltFourn(e.target.value)}
+            style={{padding:'8px 10px',border:`1px solid ${bdr}`,borderRadius:6,background:card,color:dark?'#eee':'#222',fontSize:12,fontWeight:filtFourn!=='ALL'?700:400}}>
+            <option value="ALL">Tous les fournisseurs</option>
+            {fournisseurs.map(f => <option key={f} value={f}>{f}</option>)}
+          </select>
+          <select value={filtCommandePar} onChange={e=>setFiltCommandePar(e.target.value)}
+            style={{padding:'8px 10px',border:`1px solid ${bdr}`,borderRadius:6,background:card,color:dark?'#eee':'#222',fontSize:12,fontWeight:filtCommandePar!=='ALL'?700:400}}>
+            <option value="ALL">Tous les commandeurs</option>
+            {commandeurs.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select value={filtEmploye} onChange={e=>setFiltEmploye(e.target.value)}
+            style={{padding:'8px 10px',border:`1px solid ${bdr}`,borderRadius:6,background:card,color:dark?'#eee':'#222',fontSize:12,fontWeight:filtEmploye!=='ALL'?700:400}}>
+            <option value="ALL">Tous les employés</option>
+            {employes.map(e => <option key={e} value={e}>{e}</option>)}
+          </select>
+          {(filtAge!=='ALL'||filtStatut!=='ALL'||filtFourn!=='ALL'||filtCommandePar!=='ALL'||filtEmploye!=='ALL'||recherche) && (
+            <button
+              onClick={()=>{setFiltAge('ALL');setFiltStatut('ALL');setFiltFourn('ALL');setFiltCommandePar('ALL');setFiltEmploye('ALL');setRecherche('')}}
+              style={{padding:'8px 12px',border:'none',borderRadius:6,background:C.red+'22',color:C.red,fontSize:11,fontWeight:700,cursor:'pointer'}}>
+              ✕ Réinit. filtres
+            </button>
+          )}
         </div>
 
-        {/* 🚨 Suivi à faire */}
+        {/* Compteurs des 3 tranches */}
+        <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap'}}>
+          <div style={{flex:1,minWidth:140,padding:'8px 12px',border:`1px solid ${bdr}`,borderLeft:`4px solid ${C.green}`,borderRadius:6,background:card}}>
+            <div style={{fontSize:11,color:sub}}>0–5 jours</div>
+            <div style={{fontSize:18,fontWeight:900,color:C.green}}>{aTemps.length}</div>
+          </div>
+          <div style={{flex:1,minWidth:140,padding:'8px 12px',border:`1px solid ${bdr}`,borderLeft:`4px solid ${C.yellow}`,borderRadius:6,background:card}}>
+            <div style={{fontSize:11,color:sub}}>5–10 jours</div>
+            <div style={{fontSize:18,fontWeight:900,color:C.yellow}}>{aSurveil.length}</div>
+          </div>
+          <div style={{flex:1,minWidth:140,padding:'8px 12px',border:`1px solid ${bdr}`,borderLeft:`4px solid ${C.red}`,borderRadius:6,background:card}}>
+            <div style={{fontSize:11,color:sub}}>10 jours et plus</div>
+            <div style={{fontSize:18,fontWeight:900,color:C.red}}>{enRetard.length}</div>
+          </div>
+        </div>
+
+        {/* 🚨 Suivi à faire (≥10j) */}
         <div style={{...S.card, background:card, border:`2px solid ${enRetard.length>0?C.red:bdr}`, padding:0, marginBottom:14, overflow:'hidden'}}>
           <div style={{padding:'12px 14px',background: enRetard.length>0 ? '#fce8e6' : (dark?'#1a1a1a':'#f8f9fa'),borderBottom:`1px solid ${bdr}`,display:'flex',alignItems:'center',gap:10}}>
             <span style={{fontSize:18}}>🚨</span>
             <span style={{fontSize:14,fontWeight:900,color:enRetard.length>0?C.red:sub}}>Suivi à faire</span>
-            <span style={{fontSize:12,color:sub}}>— {enRetard.length} pièce(s) au même statut depuis ≥ {seuil} jours</span>
+            <span style={{fontSize:12,color:sub}}>— {enRetard.length} pièce(s) en commande depuis 10 jours ou plus</span>
           </div>
           {enRetard.length === 0 ? (
-            <div style={{padding:20,textAlign:'center',color:sub,fontSize:12}}>Tout va bien : aucune pièce en retard.</div>
+            <div style={{padding:20,textAlign:'center',color:sub,fontSize:12}}>Tout va bien : aucune commande de 10 jours et plus.</div>
           ) : (
             <div style={{overflowX:'auto'}}>
               <table style={{width:'100%',borderCollapse:'collapse',minWidth:1300}}>
@@ -1080,20 +1106,20 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: an
           )}
         </div>
 
-        {/* 📋 Toutes les commandes en attente (en cours) */}
+        {/* 📋 Toutes les commandes (sauf 10j+) */}
         <div style={{...S.card, background:card, border:`1px solid ${bdr}`, padding:0, overflow:'hidden'}}>
           <div style={{padding:'12px 14px',background:dark?'#1a1a1a':'#f8f9fa',borderBottom:`1px solid ${bdr}`,display:'flex',alignItems:'center',gap:10}}>
             <span style={{fontSize:18}}>📋</span>
             <span style={{fontSize:14,fontWeight:900}}>Commandes en cours</span>
-            <span style={{fontSize:12,color:sub}}>— {aTemps.length} pièce(s) dans les délais</span>
+            <span style={{fontSize:12,color:sub}}>— {aTemps.length + aSurveil.length} pièce(s) de moins de 10 jours</span>
           </div>
-          {aTemps.length === 0 ? (
+          {(aTemps.length + aSurveil.length) === 0 ? (
             <div style={{padding:20,textAlign:'center',color:sub,fontSize:12}}>Rien à afficher avec ces filtres.</div>
           ) : (
             <div style={{overflowX:'auto'}}>
               <table style={{width:'100%',borderCollapse:'collapse',minWidth:1300}}>
                 {tableTop}
-                <tbody>{aTemps.map(l => renderLigne(l, false))}</tbody>
+                <tbody>{[...aSurveil, ...aTemps].map(l => renderLigne(l, false))}</tbody>
               </table>
             </div>
           )}
