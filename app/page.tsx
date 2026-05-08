@@ -14,6 +14,18 @@ const ROLES_ONGLETS: Record<string, string[]> = {
   employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours'],
 }
 
+// Onglets TOUJOURS visibles pour tout le monde — même si l'utilisateur a un
+// `onglets_custom` sauvegardé avant l'apparition de l'onglet. Évite d'avoir
+// à re-éditer chaque utilisateur quand on ajoute un onglet utile à tous.
+const ONGLETS_FORCES_TOUS = ['commandes_attente']
+
+function ongletsVisibles(profil: any): string[] {
+  const base = profil?.onglets_custom && Array.isArray(profil.onglets_custom) && profil.onglets_custom.length > 0
+    ? profil.onglets_custom
+    : (ROLES_ONGLETS[profil?.role || 'commis'] || ROLES_ONGLETS['commis'])
+  return [...new Set([...base, ...ONGLETS_FORCES_TOUS])]
+}
+
 interface Item {
   pk: string; desc: string; moyMois: number
   ventesMoyParMois: number[]
@@ -351,7 +363,7 @@ export default function Dashboard() {
 
       {/* TABS */}
       <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,overflowX:'auto',display:'flex',WebkitOverflowScrolling:'touch',scrollbarWidth:'none',gap:isMobile?2:0}}>
-        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'commandes_attente',l:isMobile?'⏳':'⏳ Commandes en attente'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},{id:'scoa',l:isMobile?'🏍 SCOA':'🏍 SCOA'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>(profil?.onglets_custom && Array.isArray(profil.onglets_custom) && profil.onglets_custom.length>0 ? profil.onglets_custom : (ROLES_ONGLETS[profil?.role||'commis']||ROLES_ONGLETS['commis'])).includes(t.id)).map(t=>(
+        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'commandes_attente',l:isMobile?'⏳':'⏳ Commandes en attente'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},{id:'scoa',l:isMobile?'🏍 SCOA':'🏍 SCOA'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>ongletsVisibles(profil).includes(t.id)).map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:isMobile?'12px 14px':'12px 16px',border:'none',background:tab===t.id?(dark?'#1a233a':'#dbeafe'):'transparent',cursor:'pointer',fontSize:isMobile?14:13,fontWeight:tab===t.id?800:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',borderRadius:isMobile?'8px 8px 0 0':0,transition:'all .15s',whiteSpace:'nowrap',flexShrink:0}}>
             {t.l}
           </button>
@@ -4037,9 +4049,11 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
   }
 
   function getOngletsEffectifs(u: any): string[] {
-    if (u.onglets_custom && Array.isArray(u.onglets_custom) && u.onglets_custom.length > 0)
-      return u.onglets_custom
-    return ROLES_LEGACY[u.role] || ROLES_LEGACY['commis']
+    const base = (u.onglets_custom && Array.isArray(u.onglets_custom) && u.onglets_custom.length > 0)
+      ? u.onglets_custom
+      : (ROLES_LEGACY[u.role] || ROLES_LEGACY['commis'])
+    // Onglets forcés pour tout le monde (cf. ONGLETS_FORCES_TOUS dans Dashboard)
+    return [...new Set([...base, 'commandes_attente'])]
   }
 
   function ouvrirEdit(u: any) {
