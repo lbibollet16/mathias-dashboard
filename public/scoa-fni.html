@@ -1,0 +1,1397 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SCOA — Performance FNI · Mathias Marine Sports</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,700;9..144,900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0d1117;
+  --ink-2: #1f2937;
+  --paper: #fafaf7;
+  --paper-2: #f5f3ec;
+  --rule: #d6d2c4;
+  --primary: #0a3d62;
+  --accent: #c89b3c;
+  --green: #2d6a4f;
+  --green-bg: #d8f3dc;
+  --amber: #b07d2a;
+  --amber-bg: #fdecc8;
+  --red: #9a2a2a;
+  --red-bg: #fcd6cf;
+  --marion: #1565c0;
+  --theo: #2e7d32;
+  --jolyann: #7b1fa2;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter Tight', sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  line-height: 1.5;
+  font-feature-settings: "ss01", "cv11";
+}
+
+.serif { font-family: 'Fraunces', serif; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+
+header.hero {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 3rem 2rem 2rem;
+  border-bottom: 3px solid var(--accent);
+  position: relative;
+  overflow: hidden;
+}
+header.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 80% 20%, rgba(200,155,60,0.15), transparent 50%),
+    radial-gradient(circle at 20% 90%, rgba(10,61,98,0.4), transparent 50%);
+  pointer-events: none;
+}
+.hero-content {
+  max-width: 1400px;
+  margin: 0 auto;
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+.hero-title h1 {
+  font-family: 'Fraunces', serif;
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.hero-title .eyebrow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.hero-title .eyebrow::before {
+  content: '';
+  width: 24px;
+  height: 1px;
+  background: var(--accent);
+  display: inline-block;
+}
+.hero-title .subtitle {
+  margin-top: 0.75rem;
+  color: rgba(250,250,247,0.7);
+  font-size: 1rem;
+}
+.hero-meta {
+  text-align: right;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: rgba(250,250,247,0.6);
+  line-height: 1.7;
+}
+.hero-meta strong { color: var(--paper); font-weight: 500; }
+
+.print-btn {
+  background: var(--accent);
+  color: var(--ink);
+  border: none;
+  padding: 0.7rem 1.3rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  margin-top: 1rem;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.print-btn:hover { background: var(--paper); transform: translateY(-1px); }
+
+.tabs {
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--rule);
+  padding: 0 2rem;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.tabs-inner {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  gap: 0;
+  overflow-x: auto;
+}
+.tab {
+  background: none;
+  border: none;
+  padding: 1.25rem 1.5rem;
+  font-family: 'Inter Tight', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+.tab:hover { color: var(--primary); background: rgba(10,61,98,0.04); }
+.tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--accent);
+}
+.tab .badge {
+  font-size: 0.7rem;
+  background: var(--rule);
+  padding: 2px 8px;
+  border-radius: 99px;
+  margin-left: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+.tab.active .badge { background: var(--accent); color: var(--ink); }
+
+main {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 2.5rem 2rem;
+}
+
+.tab-content { display: none; animation: fadeIn 0.3s ease; }
+.tab-content.active { display: block; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+  margin-bottom: 2.5rem;
+}
+.kpi {
+  background: var(--paper);
+  padding: 1.5rem;
+  position: relative;
+}
+.kpi .label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-2);
+  margin-bottom: 0.5rem;
+  opacity: 0.6;
+}
+.kpi .value {
+  font-family: 'Fraunces', serif;
+  font-size: 2.2rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+.kpi .unit { font-size: 0.9rem; color: var(--ink-2); margin-left: 4px; opacity: 0.6; }
+.kpi .delta {
+  margin-top: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+}
+.kpi.success .value { color: var(--green); }
+.kpi.success { background: linear-gradient(135deg, var(--green-bg) 0%, var(--paper) 60%); }
+.kpi.warning .value { color: var(--amber); }
+.kpi.warning { background: linear-gradient(135deg, var(--amber-bg) 0%, var(--paper) 60%); }
+.kpi.danger .value { color: var(--red); }
+.kpi.danger { background: linear-gradient(135deg, var(--red-bg) 0%, var(--paper) 60%); }
+
+section.block { margin-bottom: 3rem; }
+.block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--rule);
+}
+.block-header h2 {
+  font-family: 'Fraunces', serif;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.block-header .number {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--accent);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+.block-header .hint {
+  font-size: 0.8rem;
+  color: var(--ink-2);
+  opacity: 0.6;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+thead th {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 0.85rem 0.75rem;
+  text-align: right;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-family: 'Inter Tight', sans-serif;
+  border-bottom: 2px solid var(--accent);
+}
+thead th:first-child { text-align: left; }
+tbody td {
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--rule);
+  text-align: right;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  vertical-align: middle;
+}
+tbody td:first-child {
+  text-align: left;
+  font-family: 'Inter Tight', sans-serif;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+tbody tr:hover { background: var(--paper-2); }
+tbody tr.total {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 700;
+}
+tbody tr.total td { font-weight: 700; }
+tbody tr.total:hover { background: var(--ink); }
+tbody tr.occasion td:first-child {
+  border-left: 4px solid var(--amber);
+  padding-left: calc(0.75rem - 4px);
+}
+
+.pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.pill.green { background: var(--green-bg); color: var(--green); }
+.pill.amber { background: var(--amber-bg); color: var(--amber); }
+.pill.red { background: var(--red-bg); color: var(--red); }
+.pill.neutral { background: var(--paper-2); color: var(--ink-2); }
+
+.chart-card {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  padding: 1.5rem;
+}
+.chart-card h3 {
+  font-family: 'Fraunces', serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 1.25rem;
+  color: var(--ink);
+}
+
+.h-bar {
+  display: grid;
+  grid-template-columns: 130px 1fr 90px;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+}
+.h-bar .lbl { font-weight: 600; font-family: 'Inter Tight'; }
+.h-bar .track {
+  background: var(--paper-2);
+  height: 22px;
+  position: relative;
+  border-radius: 2px;
+  overflow: visible;
+}
+.h-bar .fill {
+  height: 100%;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 6px;
+  color: white;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+  transition: width 0.6s ease;
+  position: relative;
+}
+.h-bar .val { font-family: 'JetBrains Mono', monospace; font-weight: 600; text-align: right; font-size: 0.8rem; }
+
+.target-line {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  border-left: 2px dashed var(--ink);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.monthly-chart {
+  height: 280px;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+  padding: 0 0.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+.month-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+}
+.month-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 240px;
+}
+.month-bar {
+  width: 24px;
+  background: var(--primary);
+  border-radius: 2px 2px 0 0;
+  position: relative;
+  transition: all 0.3s ease;
+  min-height: 2px;
+}
+.month-bar:hover { opacity: 0.8; }
+.month-bar.cash { background: var(--amber); }
+.month-bar .tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ink);
+  color: var(--paper);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  margin-bottom: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  z-index: 10;
+}
+.month-bar:hover .tooltip { opacity: 1; }
+.monthly-labels {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  text-align: center;
+  margin-top: 6px;
+  color: var(--ink-2);
+}
+
+.legend {
+  display: flex;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+  font-size: 0.8rem;
+  font-family: 'Inter Tight';
+}
+.legend-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.vendeur-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+.vendeur-card {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-top: 4px solid var(--marion);
+  padding: 1.5rem;
+  position: relative;
+}
+.vendeur-card.theo { border-top-color: var(--theo); }
+.vendeur-card.jolyann { border-top-color: var(--jolyann); }
+.vendeur-card .vendeur-name {
+  font-family: 'Fraunces', serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+.vendeur-card .vendeur-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--ink-2);
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 1.25rem;
+}
+.vendeur-card .stat-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--rule);
+  font-size: 0.85rem;
+}
+.vendeur-card .stat-row:first-of-type { border-top: 0; }
+.vendeur-card .stat-row .v {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+.no-data {
+  text-align: center;
+  padding: 1.5rem;
+  color: var(--ink-2);
+  opacity: 0.4;
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+.winner-badge {
+  position: absolute;
+  top: -10px;
+  right: 10px;
+  background: var(--accent);
+  color: var(--ink);
+  padding: 4px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.callouts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+.callout {
+  padding: 1.25rem;
+  border-left: 4px solid var(--primary);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+}
+.callout.success { border-left-color: var(--green); }
+.callout.warning { border-left-color: var(--amber); }
+.callout.danger { border-left-color: var(--red); }
+.callout-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-2);
+  opacity: 0.6;
+  margin-bottom: 0.5rem;
+}
+.callout-text {
+  font-family: 'Fraunces', serif;
+  font-size: 1.1rem;
+  line-height: 1.3;
+  font-weight: 500;
+}
+.callout-text strong { color: var(--primary); font-weight: 700; }
+
+footer {
+  text-align: center;
+  padding: 2rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--ink-2);
+  opacity: 0.4;
+  border-top: 1px solid var(--rule);
+}
+
+@media print {
+  @page { size: letter landscape; margin: 0.4in; }
+  body { background: white; font-size: 9pt; }
+  header.hero { padding: 1rem; border-bottom: 2px solid var(--accent); }
+  header.hero h1 { font-size: 1.5rem; }
+  .print-btn, .tabs { display: none !important; }
+  .tab-content { display: block !important; page-break-after: always; }
+  .tab-content:last-of-type { page-break-after: auto; }
+  .kpis { grid-template-columns: repeat(6, 1fr); }
+  .kpi .value { font-size: 1.3rem; }
+  .kpi { padding: 0.5rem; }
+  section.block { margin-bottom: 1rem; page-break-inside: avoid; }
+  table { font-size: 8pt; }
+  thead th { padding: 4px; }
+  tbody td { padding: 4px; }
+  .chart-card { page-break-inside: avoid; }
+  .vendeur-cards { grid-template-columns: repeat(3, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-content">
+    <div class="hero-title">
+      <div class="eyebrow">SCOA · Performance FNI</div>
+      <h1>Tableau de bord<br><em class="serif">Financement & Profit</em></h1>
+      <div class="subtitle">Comparatif Marion · Théo · Joly-Ann</div>
+      <button class="print-btn" onclick="window.print()">🖨 Imprimer / Exporter PDF</button>
+    </div>
+    <div class="hero-meta">
+      Mathias Marine Sports<br>
+      <strong>Période :</strong> 1er nov 2025 — 13 mai 2026<br>
+      <strong>Cible interne :</strong> 9% marge brute FNI<br>
+      <strong>Mis à jour :</strong> 13 mai 2026
+    </div>
+  </div>
+</header>
+
+<nav class="tabs">
+  <div class="tabs-inner">
+    <button class="tab active" data-target="scoa">🏆 SCOA Comparatif</button>
+    <button class="tab" data-target="marion">👤 Marion <span class="badge">139</span></button>
+    <button class="tab" data-target="theo">👤 Théo <span class="badge">—</span></button>
+    <button class="tab" data-target="jolyann">👤 Joly-Ann <span class="badge">—</span></button>
+  </div>
+</nav>
+
+<main>
+
+<!-- ===== TAB SCOA ===== -->
+<div class="tab-content active" id="tab-scoa">
+
+  <section class="block">
+    <div class="block-header">
+      <div>
+        <span class="number">01 · Vue globale</span>
+        <h2>Performance comparée des vendeurs</h2>
+      </div>
+      <div class="hint">Données disponibles : Marion uniquement</div>
+    </div>
+
+    <div class="vendeur-cards" id="vendeur-cards"></div>
+  </section>
+
+  <section class="block">
+    <div class="block-header">
+      <div>
+        <span class="number">02 · Insights clés</span>
+        <h2>Points d'attention</h2>
+      </div>
+    </div>
+    <div class="callouts" id="callouts"></div>
+  </section>
+
+  <section class="block">
+    <div class="block-header">
+      <div>
+        <span class="number">03 · Classement par marque</span>
+        <h2>Qui domine sur chaque marque ?</h2>
+      </div>
+      <div class="hint">Cellule remplie = vendeur #1 sur la marque</div>
+    </div>
+
+    <div class="table-wrap">
+      <table id="ranking-table">
+        <thead>
+          <tr>
+            <th>Marque</th>
+            <th>Marion · u</th>
+            <th>Marion · $ FNI</th>
+            <th>Marion · % FNI</th>
+            <th>Théo</th>
+            <th>Joly-Ann</th>
+            <th>🏆 #1</th>
+          </tr>
+        </thead>
+        <tbody id="ranking-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="block-header">
+      <div>
+        <span class="number">04 · % Cash deal mensuel</span>
+        <h2>Cash deal vs financement</h2>
+      </div>
+      <div class="hint">% Cash élevé = manque à gagner FNI</div>
+    </div>
+    <div class="chart-card">
+      <div class="legend">
+        <span><span class="legend-dot" style="background: var(--primary)"></span>Avec FNI (financés)</span>
+        <span><span class="legend-dot" style="background: var(--amber)"></span>Cash deals</span>
+      </div>
+      <div id="monthly-chart-scoa" class="monthly-chart"></div>
+      <div id="monthly-labels-scoa" class="monthly-labels"></div>
+    </div>
+  </section>
+
+</div>
+
+<!-- ===== TAB MARION ===== -->
+<div class="tab-content" id="tab-marion">
+
+  <section class="block">
+    <div class="block-header">
+      <div>
+        <span class="number">Marion · Vue d'ensemble</span>
+        <h2>Indicateurs clés de la période</h2>
+      </div>
+    </div>
+    <div class="kpis" id="kpis-marion"></div>
+  </section>
+
+  <section class="block">
+    <div class="block-header">
+      <div>
+        <span class="number">Marion · Par marque</span>
+        <h2>Performance détaillée par marque</h2>
+      </div>
+      <div class="hint">🟢 ≥9% · 🟡 7-9% · 🔴 &lt;7% vs cible</div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Marque</th>
+            <th>Unités</th>
+            <th>Prix Vente</th>
+            <th>Ventes FNI</th>
+            <th>Profit FNI</th>
+            <th>% Marge FNI</th>
+            <th>Cash Deals</th>
+            <th>% Cash</th>
+            <th>$ FNI / unité</th>
+          </tr>
+        </thead>
+        <tbody id="marion-marque-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="block-header">
+      <div>
+        <span class="number">Marion · % Marge FNI par marque</span>
+        <h2>Marques au-dessus / sous la cible 9%</h2>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div id="marque-bars"></div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="block-header">
+      <div>
+        <span class="number">Marion · Vue mensuelle</span>
+        <h2>Évolution dans le temps</h2>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Mois</th>
+            <th>Unités</th>
+            <th>Prix Vente</th>
+            <th>Ventes FNI</th>
+            <th>Profit FNI</th>
+            <th>% Marge FNI</th>
+            <th>Cash Deals</th>
+            <th>% Cash</th>
+          </tr>
+        </thead>
+        <tbody id="marion-mois-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+<!-- ===== TAB THEO ===== -->
+<div class="tab-content" id="tab-theo">
+  <section class="block">
+    <div class="block-header">
+      <div>
+        <span class="number">Théo · En attente</span>
+        <h2>Aucune donnée chargée pour Théo</h2>
+      </div>
+    </div>
+    <div style="background: var(--paper); border: 2px dashed var(--rule); padding: 4rem 2rem; text-align: center;">
+      <div style="font-family: 'Fraunces', serif; font-size: 1.3rem; margin-bottom: 1rem;">📥 Pour activer le dashboard de Théo</div>
+      <div style="max-width: 500px; margin: 0 auto; color: var(--ink-2); line-height: 1.7;">
+        Exporter le rapport « Analyse des ventes » pour Théo depuis votre système, puis demander à Claude Code d'importer ces données dans l'onglet <code style="background: var(--paper-2); padding: 2px 6px;">IMPORT_Theo</code> du fichier Excel.<br><br>
+        Une fois fait, ce dashboard sera mis à jour automatiquement.
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- ===== TAB JOLYANN ===== -->
+<div class="tab-content" id="tab-jolyann">
+  <section class="block">
+    <div class="block-header">
+      <div>
+        <span class="number">Joly-Ann · En attente</span>
+        <h2>Aucune donnée chargée pour Joly-Ann</h2>
+      </div>
+    </div>
+    <div style="background: var(--paper); border: 2px dashed var(--rule); padding: 4rem 2rem; text-align: center;">
+      <div style="font-family: 'Fraunces', serif; font-size: 1.3rem; margin-bottom: 1rem;">📥 Pour activer le dashboard de Joly-Ann</div>
+      <div style="max-width: 500px; margin: 0 auto; color: var(--ink-2); line-height: 1.7;">
+        Exporter le rapport « Analyse des ventes » pour Joly-Ann depuis votre système, puis demander à Claude Code d'importer ces données dans l'onglet <code style="background: var(--paper-2); padding: 2px 6px;">IMPORT_JolyAnn</code> du fichier Excel.<br><br>
+        Une fois fait, ce dashboard sera mis à jour automatiquement.
+      </div>
+    </div>
+  </section>
+</div>
+
+</main>
+
+<footer>
+  Mathias Marine Sports · SCOA · Performance FNI · Généré le 13 mai 2026 · Cible 9% marge brute
+</footer>
+
+<script>
+// ============================================
+// DATA EMBARQUÉE (Marion uniquement)
+// ============================================
+const DATA = {
+  "periode": "1er novembre 2025 \u2192 13 mai 2026",
+  "cible_fni": 0.09,
+  "seuil_ambre": 0.07,
+  "global": {
+    "units": 139,
+    "prix_vente_total": 2115583.15,
+    "ventes_fni": 249928.75999999998,
+    "profit_fni": 148287.14,
+    "cash_deals": 55,
+    "pct_marge_fni": 0.5933176317923556,
+    "pct_cash": 0.39568345323741005,
+    "fni_par_unite": 1066.8139568345325
+  },
+  "par_marque": [
+    {
+      "marque": "OCCASION",
+      "units": 45,
+      "prix_vente": 464057.73,
+      "ventes_fni": 70916.47,
+      "profit_fni": 36061.05,
+      "pct_marge_fni": 0.5085003525979226,
+      "cash_deals": 22,
+      "pct_cash": 0.4888888888888889,
+      "fni_par_unite": 801.3566666666667
+    },
+    {
+      "marque": "POLARIS",
+      "units": 27,
+      "prix_vente": 444856.37,
+      "ventes_fni": 62542.409999999996,
+      "profit_fni": 40350.31,
+      "pct_marge_fni": 0.6451671753614867,
+      "cash_deals": 7,
+      "pct_cash": 0.25925925925925924,
+      "fni_par_unite": 1494.4559259259258
+    },
+    {
+      "marque": "CF MOTO",
+      "units": 16,
+      "prix_vente": 210060.3,
+      "ventes_fni": 46455.090000000004,
+      "profit_fni": 28528.079999999998,
+      "pct_marge_fni": 0.6141001987080424,
+      "cash_deals": 5,
+      "pct_cash": 0.3125,
+      "fni_par_unite": 1783.0049999999999
+    },
+    {
+      "marque": "HONDA",
+      "units": 15,
+      "prix_vente": 164354.9,
+      "ventes_fni": 18442.12,
+      "profit_fni": 10424.710000000001,
+      "pct_marge_fni": 0.5652663576638696,
+      "cash_deals": 5,
+      "pct_cash": 0.3333333333333333,
+      "fni_par_unite": 694.9806666666667
+    },
+    {
+      "marque": "KAWASAKI",
+      "units": 12,
+      "prix_vente": 101680.36,
+      "ventes_fni": 3390.29,
+      "profit_fni": 2707.66,
+      "pct_marge_fni": 0.7986514427969288,
+      "cash_deals": 8,
+      "pct_cash": 0.6666666666666666,
+      "fni_par_unite": 225.63833333333332
+    },
+    {
+      "marque": "INDIAN",
+      "units": 7,
+      "prix_vente": 221421.66,
+      "ventes_fni": 16633.39,
+      "profit_fni": 12113.75,
+      "pct_marge_fni": 0.7282790820151515,
+      "cash_deals": 3,
+      "pct_cash": 0.42857142857142855,
+      "fni_par_unite": 1730.5357142857142
+    },
+    {
+      "marque": "KTM",
+      "units": 6,
+      "prix_vente": 103960.0,
+      "ventes_fni": 17646.92,
+      "profit_fni": 11581.51,
+      "pct_marge_fni": 0.656290729487072,
+      "cash_deals": 0,
+      "pct_cash": 0.0,
+      "fni_par_unite": 1930.2516666666668
+    },
+    {
+      "marque": "HUSQVARNA",
+      "units": 4,
+      "prix_vente": 36895.17,
+      "ventes_fni": 5812.08,
+      "profit_fni": 3795.92,
+      "pct_marge_fni": 0.653108697746762,
+      "cash_deals": 1,
+      "pct_cash": 0.25,
+      "fni_par_unite": 948.98
+    },
+    {
+      "marque": "MANITOU",
+      "units": 2,
+      "prix_vente": 185257.66,
+      "ventes_fni": 0.0,
+      "profit_fni": 0.0,
+      "pct_marge_fni": 0,
+      "cash_deals": 2,
+      "pct_cash": 1.0,
+      "fni_par_unite": 0.0
+    },
+    {
+      "marque": "GASGAS",
+      "units": 2,
+      "prix_vente": 17444.0,
+      "ventes_fni": 4190.99,
+      "profit_fni": 1404.15,
+      "pct_marge_fni": 0.33504016950648896,
+      "cash_deals": 0,
+      "pct_cash": 0.0,
+      "fni_par_unite": 702.075
+    },
+    {
+      "marque": "PARKER",
+      "units": 1,
+      "prix_vente": 159000.0,
+      "ventes_fni": 3899.0,
+      "profit_fni": 1320.0,
+      "pct_marge_fni": 0.3385483457296743,
+      "cash_deals": 0,
+      "pct_cash": 0.0,
+      "fni_par_unite": 1320.0
+    },
+    {
+      "marque": "SCOOTTERRE",
+      "units": 1,
+      "prix_vente": 2600.0,
+      "ventes_fni": 0.0,
+      "profit_fni": 0.0,
+      "pct_marge_fni": 0,
+      "cash_deals": 1,
+      "pct_cash": 1.0,
+      "fni_par_unite": 0.0
+    },
+    {
+      "marque": "GATOR",
+      "units": 1,
+      "prix_vente": 3995.0,
+      "ventes_fni": 0.0,
+      "profit_fni": 0.0,
+      "pct_marge_fni": 0,
+      "cash_deals": 1,
+      "pct_cash": 1.0,
+      "fni_par_unite": 0.0
+    }
+  ],
+  "par_mois": [
+    {
+      "mois": "2025-11",
+      "units": 13,
+      "prix_vente": 346930.66000000003,
+      "ventes_fni": 37293.04,
+      "profit_fni": 23191.45,
+      "pct_marge_fni": 0.6218707297661976,
+      "cash_deals": 6,
+      "pct_cash": 0.46153846153846156
+    },
+    {
+      "mois": "2025-12",
+      "units": 33,
+      "prix_vente": 596126.76,
+      "ventes_fni": 66070.18,
+      "profit_fni": 38761.36,
+      "pct_marge_fni": 0.5866695080897313,
+      "cash_deals": 9,
+      "pct_cash": 0.2727272727272727
+    },
+    {
+      "mois": "2026-01",
+      "units": 31,
+      "prix_vente": 381303.22,
+      "ventes_fni": 56023.34,
+      "profit_fni": 32843.72,
+      "pct_marge_fni": 0.5862506591002965,
+      "cash_deals": 13,
+      "pct_cash": 0.41935483870967744
+    },
+    {
+      "mois": "2026-02",
+      "units": 11,
+      "prix_vente": 144740.71,
+      "ventes_fni": 13735.57,
+      "profit_fni": 7944.07,
+      "pct_marge_fni": 0.5783575053674511,
+      "cash_deals": 5,
+      "pct_cash": 0.45454545454545453
+    },
+    {
+      "mois": "2026-03",
+      "units": 23,
+      "prix_vente": 250168.93,
+      "ventes_fni": 41591.7,
+      "profit_fni": 25300.22,
+      "pct_marge_fni": 0.6082997328793966,
+      "cash_deals": 7,
+      "pct_cash": 0.30434782608695654
+    },
+    {
+      "mois": "2026-04",
+      "units": 21,
+      "prix_vente": 342099.19999999995,
+      "ventes_fni": 30596.94,
+      "profit_fni": 18415.17,
+      "pct_marge_fni": 0.6018631274892194,
+      "cash_deals": 10,
+      "pct_cash": 0.47619047619047616
+    },
+    {
+      "mois": "2026-05",
+      "units": 7,
+      "prix_vente": 54213.67,
+      "ventes_fni": 4617.99,
+      "profit_fni": 1831.15,
+      "pct_marge_fni": 0.3965253281189436,
+      "cash_deals": 5,
+      "pct_cash": 0.7142857142857143
+    }
+  ]
+};
+
+// ============================================
+// HELPERS
+// ============================================
+const fmt = {
+  money: (n) => {
+    if (n === null || n === undefined || isNaN(n) || n === 0) return '—';
+    return new Intl.NumberFormat('fr-CA', {style:'currency', currency:'CAD', maximumFractionDigits: 0}).format(n);
+  },
+  money2: (n) => {
+    if (n === null || n === undefined || isNaN(n) || n === 0) return '—';
+    return new Intl.NumberFormat('fr-CA', {style:'currency', currency:'CAD', maximumFractionDigits: 2}).format(n);
+  },
+  num: (n) => {
+    if (n === null || n === undefined || n === 0) return '—';
+    return new Intl.NumberFormat('fr-CA').format(n);
+  },
+  pct: (n) => {
+    if (n === null || n === undefined || isNaN(n) || n === 0) return '—';
+    return (n * 100).toFixed(1) + '%';
+  },
+  pctClass: (n, cible, ambre) => {
+    if (n === 0 || n === null) return 'neutral';
+    if (n >= cible) return 'green';
+    if (n >= ambre) return 'amber';
+    return 'red';
+  },
+};
+
+const MONTH_NAMES = {
+  '2025-11': 'Nov 25', '2025-12': 'Déc 25', '2026-01': 'Jan 26',
+  '2026-02': 'Fév 26', '2026-03': 'Mar 26', '2026-04': 'Avr 26', '2026-05': 'Mai 26',
+};
+
+// ============================================
+// TABS
+// ============================================
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.target).classList.add('active');
+  });
+});
+
+// ============================================
+// RENDU SCOA
+// ============================================
+function renderVendeurCards() {
+  const container = document.getElementById('vendeur-cards');
+  const g = DATA.global;
+  const pctClass = fmt.pctClass(g.pct_marge_fni, DATA.cible_fni, DATA.seuil_ambre);
+
+  container.innerHTML = `
+    <div class="vendeur-card">
+      <span class="winner-badge">#1 actuel</span>
+      <div class="vendeur-name">Marion</div>
+      <div class="vendeur-meta">Guisiano · #644</div>
+      <div class="stat-row"><span>Unités vendues</span><span class="v">${fmt.num(g.units)}</span></div>
+      <div class="stat-row"><span>Prix de vente</span><span class="v">${fmt.money(g.prix_vente_total)}</span></div>
+      <div class="stat-row"><span>Ventes FNI</span><span class="v">${fmt.money(g.ventes_fni)}</span></div>
+      <div class="stat-row"><span>Profit FNI</span><span class="v">${fmt.money(g.profit_fni)}</span></div>
+      <div class="stat-row"><span>% Marge FNI</span><span class="v"><span class="pill ${pctClass}">${fmt.pct(g.pct_marge_fni)}</span></span></div>
+      <div class="stat-row"><span>Profit FNI / unité</span><span class="v">${fmt.money2(g.fni_par_unite)}</span></div>
+      <div class="stat-row"><span>Cash deals</span><span class="v">${fmt.num(g.cash_deals)} <span style="opacity:.5">(${fmt.pct(g.pct_cash)})</span></span></div>
+    </div>
+    <div class="vendeur-card theo">
+      <div class="vendeur-name">Théo</div>
+      <div class="vendeur-meta">Données à importer</div>
+      <div class="no-data">Aucune donnée chargée<br><small>Importer le rapport dans l'onglet Excel « IMPORT_Theo »</small></div>
+    </div>
+    <div class="vendeur-card jolyann">
+      <div class="vendeur-name">Joly-Ann</div>
+      <div class="vendeur-meta">Données à importer</div>
+      <div class="no-data">Aucune donnée chargée<br><small>Importer le rapport dans l'onglet Excel « IMPORT_JolyAnn »</small></div>
+    </div>
+  `;
+}
+
+function renderCallouts() {
+  const g = DATA.global;
+  const c = document.getElementById('callouts');
+  const marques = DATA.par_marque.filter(m => m.units > 0);
+
+  // Marque la plus rentable en $ FNI
+  const topFNI = [...marques].sort((a,b) => b.profit_fni - a.profit_fni)[0];
+  // Marque avec le pire % cash deal (>=3 ventes)
+  const worstCash = [...marques].filter(m => m.units >= 3).sort((a,b) => b.pct_cash - a.pct_cash)[0];
+  // Marque qui rate le plus la cible (>=3 ventes, marge FNI < 9%)
+  const underTarget = [...marques].filter(m => m.units >= 3 && m.pct_marge_fni > 0 && m.pct_marge_fni < DATA.cible_fni).sort((a,b) => a.pct_marge_fni - b.pct_marge_fni)[0];
+
+  const callouts = [
+    {
+      kind: 'success',
+      label: 'Cible globale atteinte',
+      text: `Marion affiche <strong>${fmt.pct(g.pct_marge_fni)}</strong> de marge brute FNI, largement au-dessus de la cible 9%.`
+    },
+    {
+      kind: 'success',
+      label: 'Marque la plus rentable',
+      text: `<strong>${topFNI.marque}</strong> génère <strong>${fmt.money(topFNI.profit_fni)}</strong> de profit FNI sur ${fmt.num(topFNI.units)} unités.`
+    },
+  ];
+  if (worstCash && worstCash.pct_cash > 0.4) {
+    callouts.push({
+      kind: 'danger',
+      label: 'Manque à gagner FNI',
+      text: `<strong>${worstCash.marque}</strong> : <strong>${fmt.pct(worstCash.pct_cash)}</strong> de cash deals (${worstCash.cash_deals}/${worstCash.units}). Opportunité manquée à corriger.`
+    });
+  }
+  if (underTarget) {
+    callouts.push({
+      kind: 'warning',
+      label: 'Sous-performance ciblée',
+      text: `<strong>${underTarget.marque}</strong> : marge FNI à <strong>${fmt.pct(underTarget.pct_marge_fni)}</strong>, sous la cible 9%.`
+    });
+  }
+  // Pénétration FNI
+  const profitNoCash = g.units - g.cash_deals;
+  callouts.push({
+    kind: g.pct_cash > 0.35 ? 'warning' : 'success',
+    label: 'Pénétration FNI',
+    text: `<strong>${fmt.pct(1 - g.pct_cash)}</strong> des ventes ont du financement (${profitNoCash}/${g.units}).`
+  });
+
+  c.innerHTML = callouts.map(co => `
+    <div class="callout ${co.kind}">
+      <div class="callout-label">${co.label}</div>
+      <div class="callout-text">${co.text}</div>
+    </div>
+  `).join('');
+}
+
+function renderRankingTable() {
+  const tbody = document.getElementById('ranking-tbody');
+  const marques = DATA.par_marque.filter(m => m.units > 0);
+  tbody.innerHTML = marques.map(m => {
+    const cls = m.marque === 'OCCASION' ? 'occasion' : '';
+    const pctClass = fmt.pctClass(m.pct_marge_fni, DATA.cible_fni, DATA.seuil_ambre);
+    return `
+      <tr class="${cls}">
+        <td>${m.marque}</td>
+        <td>${fmt.num(m.units)}</td>
+        <td>${fmt.money(m.profit_fni)}</td>
+        <td><span class="pill ${pctClass}">${fmt.pct(m.pct_marge_fni)}</span></td>
+        <td style="opacity:.3">—</td>
+        <td style="opacity:.3">—</td>
+        <td>🥇 Marion</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderMonthlyChart() {
+  const chart = document.getElementById('monthly-chart-scoa');
+  const labels = document.getElementById('monthly-labels-scoa');
+  const mois = DATA.par_mois;
+  const maxUnits = Math.max(...mois.map(m => m.units));
+
+  chart.innerHTML = mois.map(m => {
+    const financed = m.units - m.cash_deals;
+    const cashH = Math.max((m.cash_deals / maxUnits) * 230, m.cash_deals > 0 ? 4 : 0);
+    const finH = Math.max((financed / maxUnits) * 230, financed > 0 ? 4 : 0);
+    return `
+      <div class="month-col">
+        <div class="month-bars">
+          <div class="month-bar" style="height:${finH}px">
+            <div class="tooltip">${MONTH_NAMES[m.mois]}<br>Financés : ${financed}</div>
+          </div>
+          <div class="month-bar cash" style="height:${cashH}px">
+            <div class="tooltip">${MONTH_NAMES[m.mois]}<br>Cash : ${m.cash_deals} (${fmt.pct(m.pct_cash)})</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  labels.innerHTML = mois.map(m => `<div>${MONTH_NAMES[m.mois]}<br><span style="opacity:.5">${m.units}u</span></div>`).join('');
+}
+
+// ============================================
+// RENDU MARION
+// ============================================
+function renderMarionKPIs() {
+  const g = DATA.global;
+  const cont = document.getElementById('kpis-marion');
+  const pctClass = g.pct_marge_fni >= DATA.cible_fni ? 'success' : (g.pct_marge_fni >= DATA.seuil_ambre ? 'warning' : 'danger');
+  const cashClass = g.pct_cash <= 0.3 ? 'success' : (g.pct_cash <= 0.5 ? 'warning' : 'danger');
+
+  cont.innerHTML = `
+    <div class="kpi">
+      <div class="label">Unités vendues</div>
+      <div class="value">${fmt.num(g.units)}</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Prix de vente</div>
+      <div class="value">${(g.prix_vente_total/1_000_000).toFixed(2)}<span class="unit">M$</span></div>
+    </div>
+    <div class="kpi">
+      <div class="label">Ventes FNI</div>
+      <div class="value">${(g.ventes_fni/1000).toFixed(0)}<span class="unit">k$</span></div>
+    </div>
+    <div class="kpi">
+      <div class="label">Profit FNI</div>
+      <div class="value">${(g.profit_fni/1000).toFixed(0)}<span class="unit">k$</span></div>
+    </div>
+    <div class="kpi ${pctClass}">
+      <div class="label">% Marge FNI / Cible 9%</div>
+      <div class="value">${fmt.pct(g.pct_marge_fni)}</div>
+      <div class="delta">${g.pct_marge_fni >= DATA.cible_fni ? '✓ Au-dessus de la cible' : '✗ Sous la cible'}</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Profit FNI / unité</div>
+      <div class="value">${Math.round(g.fni_par_unite)}<span class="unit">$</span></div>
+    </div>
+    <div class="kpi ${cashClass}">
+      <div class="label">% Cash Deal</div>
+      <div class="value">${fmt.pct(g.pct_cash)}</div>
+      <div class="delta">${fmt.num(g.cash_deals)} véhicules sans FNI</div>
+    </div>
+  `;
+}
+
+function renderMarionMarques() {
+  const tbody = document.getElementById('marion-marque-tbody');
+  const marques = DATA.par_marque.filter(m => m.units > 0);
+  const total = {
+    units: marques.reduce((s,m)=>s+m.units,0),
+    prix_vente: marques.reduce((s,m)=>s+m.prix_vente,0),
+    ventes_fni: marques.reduce((s,m)=>s+m.ventes_fni,0),
+    profit_fni: marques.reduce((s,m)=>s+m.profit_fni,0),
+    cash: marques.reduce((s,m)=>s+m.cash_deals,0),
+  };
+  total.pct = total.profit_fni / total.ventes_fni;
+  total.pct_cash = total.cash / total.units;
+  total.fni_par_unite = total.profit_fni / total.units;
+
+  tbody.innerHTML = marques.map(m => {
+    const cls = m.marque === 'OCCASION' ? 'occasion' : '';
+    const pctClass = fmt.pctClass(m.pct_marge_fni, DATA.cible_fni, DATA.seuil_ambre);
+    const cashClass = m.pct_cash > 0.5 ? 'red' : (m.pct_cash > 0.3 ? 'amber' : 'green');
+    return `
+      <tr class="${cls}">
+        <td>${m.marque}</td>
+        <td>${fmt.num(m.units)}</td>
+        <td>${fmt.money(m.prix_vente)}</td>
+        <td>${fmt.money(m.ventes_fni)}</td>
+        <td>${fmt.money(m.profit_fni)}</td>
+        <td><span class="pill ${pctClass}">${fmt.pct(m.pct_marge_fni)}</span></td>
+        <td>${fmt.num(m.cash_deals)}</td>
+        <td><span class="pill ${cashClass}">${fmt.pct(m.pct_cash)}</span></td>
+        <td>${fmt.money2(m.fni_par_unite)}</td>
+      </tr>
+    `;
+  }).join('') + `
+    <tr class="total">
+      <td>TOTAL</td>
+      <td>${fmt.num(total.units)}</td>
+      <td>${fmt.money(total.prix_vente)}</td>
+      <td>${fmt.money(total.ventes_fni)}</td>
+      <td>${fmt.money(total.profit_fni)}</td>
+      <td>${fmt.pct(total.pct)}</td>
+      <td>${fmt.num(total.cash)}</td>
+      <td>${fmt.pct(total.pct_cash)}</td>
+      <td>${fmt.money2(total.fni_par_unite)}</td>
+    </tr>
+  `;
+}
+
+function renderMarionMois() {
+  const tbody = document.getElementById('marion-mois-tbody');
+  const total = {
+    units: DATA.par_mois.reduce((s,m)=>s+m.units,0),
+    prix_vente: DATA.par_mois.reduce((s,m)=>s+m.prix_vente,0),
+    ventes_fni: DATA.par_mois.reduce((s,m)=>s+m.ventes_fni,0),
+    profit_fni: DATA.par_mois.reduce((s,m)=>s+m.profit_fni,0),
+    cash: DATA.par_mois.reduce((s,m)=>s+m.cash_deals,0),
+  };
+  total.pct = total.profit_fni / total.ventes_fni;
+  total.pct_cash = total.cash / total.units;
+
+  tbody.innerHTML = DATA.par_mois.map(m => {
+    const pctClass = fmt.pctClass(m.pct_marge_fni, DATA.cible_fni, DATA.seuil_ambre);
+    const cashClass = m.pct_cash > 0.5 ? 'red' : (m.pct_cash > 0.3 ? 'amber' : 'green');
+    return `
+      <tr>
+        <td>${MONTH_NAMES[m.mois]}</td>
+        <td>${fmt.num(m.units)}</td>
+        <td>${fmt.money(m.prix_vente)}</td>
+        <td>${fmt.money(m.ventes_fni)}</td>
+        <td>${fmt.money(m.profit_fni)}</td>
+        <td><span class="pill ${pctClass}">${fmt.pct(m.pct_marge_fni)}</span></td>
+        <td>${fmt.num(m.cash_deals)}</td>
+        <td><span class="pill ${cashClass}">${fmt.pct(m.pct_cash)}</span></td>
+      </tr>
+    `;
+  }).join('') + `
+    <tr class="total">
+      <td>TOTAL</td>
+      <td>${fmt.num(total.units)}</td>
+      <td>${fmt.money(total.prix_vente)}</td>
+      <td>${fmt.money(total.ventes_fni)}</td>
+      <td>${fmt.money(total.profit_fni)}</td>
+      <td>${fmt.pct(total.pct)}</td>
+      <td>${fmt.num(total.cash)}</td>
+      <td>${fmt.pct(total.pct_cash)}</td>
+    </tr>
+  `;
+}
+
+function renderMarqueBars() {
+  const container = document.getElementById('marque-bars');
+  const marques = DATA.par_marque.filter(m => m.units > 0 && m.ventes_fni > 0)
+    .sort((a,b) => b.pct_marge_fni - a.pct_marge_fni);
+  const maxPct = Math.max(...marques.map(m => m.pct_marge_fni));
+  const targetPos = (DATA.cible_fni / maxPct) * 100;
+
+  container.innerHTML = marques.map(m => {
+    const w = (m.pct_marge_fni / maxPct) * 100;
+    const color = m.pct_marge_fni >= DATA.cible_fni ? 'var(--green)' :
+                  (m.pct_marge_fni >= DATA.seuil_ambre ? 'var(--amber)' : 'var(--red)');
+    return `
+      <div class="h-bar">
+        <div class="lbl">${m.marque}</div>
+        <div class="track">
+          <div class="target-line" style="left:${targetPos}%"></div>
+          <div class="fill" style="width:${w}%; background:${color}">${fmt.pct(m.pct_marge_fni)}</div>
+        </div>
+        <div class="val">${fmt.money(m.profit_fni)}</div>
+      </div>
+    `;
+  }).join('') + `
+    <div style="margin-top:1rem; font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: var(--ink-2); opacity: 0.6;">
+      Ligne pointillée verticale = cible 9%
+    </div>
+  `;
+}
+
+// ============================================
+// INIT
+// ============================================
+renderVendeurCards();
+renderCallouts();
+renderRankingTable();
+renderMonthlyChart();
+renderMarionKPIs();
+renderMarionMarques();
+renderMarionMois();
+renderMarqueBars();
+</script>
+
+</body>
+</html>

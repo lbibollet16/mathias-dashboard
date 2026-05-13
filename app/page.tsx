@@ -12006,7 +12006,7 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     {id:'bateau_usage',label:'🛥 Vente Bateau Usagé',   color:sub},
   ] as const
 
-  const [vue, setVue] = useState<'import'|'dashboard'|'ventes'>('dashboard')
+  const [vue, setVue] = useState<'fni'|'import'|'dashboard'|'ventes'>('fni')
   const [dashboard, setDashboard] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState<string | null>(null)
@@ -12101,7 +12101,8 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       {/* Tabs internes */}
       <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:14,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
         {[
-          {id:'dashboard', label:'📊 Dashboard', color:C.blue},
+          {id:'fni', label:'🏆 Performance FNI', color:'#c89b3c'},
+          {id:'dashboard', label:'📊 Analyse complète', color:C.blue},
           {id:'ventes', label:`📋 Ventes (${ventes.length})`, color:sub},
           {id:'import', label:'📥 Import', color:C.green},
         ].map(v => (
@@ -12116,6 +12117,17 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           ))}
         </div>
       </div>
+
+      {/* ─── Vue PERFORMANCE FNI ─── (iframe sur le rapport HTML statique) */}
+      {vue === 'fni' && (
+        <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,overflow:'hidden'}}>
+          <iframe
+            src="/scoa-fni.html"
+            title="SCOA Performance FNI"
+            style={{width:'100%',height:'calc(100vh - 220px)',minHeight:700,border:'none',display:'block',background:'#fafaf7'}}
+          />
+        </div>
+      )}
 
       {/* ─── Vue IMPORT ─── */}
       {vue === 'import' && (
