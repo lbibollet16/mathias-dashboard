@@ -41,7 +41,7 @@ const MOIS_FR: Record<string, number> = {
   'octobre': 10, 'novembre': 11, 'décembre': 12, 'decembre': 12,
 }
 
-const MARQUES_DOUBLES = new Set(['CF MOTO'])
+const MARQUES_DOUBLES = new Set(['CF MOTO', 'CAN AM', 'SEA DOO', 'SKI DOO'])
 // Stock # SCOA — formats observés :
 //   "22-0980"     neuf
 //   "23-1140D"    neuf vendu en occasion (suffixe lettre)
@@ -166,10 +166,20 @@ function parseSaleLine(line: string, vendeur: { id: string, nom: string } | null
   // On cherche le DERNIER token qui matche STOCK_RE (et non le premier) car
   // certains noms de clients contiennent des numéros qui ressemblent à des
   // stocks (« Société Auto 24-1234 Inc. ») — le vrai #Stock est toujours
-  // juste avant la marque, donc le dernier en partant de la gauche.
+  // juste avant la marque.
+  // IMPORTANT : on saute le tout dernier token car la marque DOIT suivre le
+  // stock. Sans ça, en cas de duplication de stock en fin de ligne (#Contrat
+  // dupliqué quand le PDF a un layout étrange), on attrape la mauvaise.
   let stockIdx = -1
-  for (let i = tokens.length - 1; i >= 0; i--) {
+  for (let i = tokens.length - 2; i >= 0; i--) {
     if (STOCK_RE.test(tokens[i])) { stockIdx = i; break }
+  }
+  // Fallback : si rien trouvé avec « token after stock » requis, on accepte
+  // le tout dernier token (cas marginal où la marque manque dans le PDF).
+  if (stockIdx < 0) {
+    for (let i = tokens.length - 1; i >= 0; i--) {
+      if (STOCK_RE.test(tokens[i])) { stockIdx = i; break }
+    }
   }
   if (stockIdx < 0) return null
 
