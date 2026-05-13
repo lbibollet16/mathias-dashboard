@@ -12098,6 +12098,72 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
     return <span style={{color:col,fontSize:10,fontWeight:700,marginLeft:4}}>{arr} {fmt$(Math.abs(diff))}</span>
   }
 
+  // ─── Manque à gagner par vendeur × marque ─────────────────────────────
+  // Pour chaque marque, on identifie le meilleur vendeur (FNI/u le plus élevé).
+  // Pour chaque autre vendeur sur cette marque :
+  //   manque = ses_unités × (meilleur_FNI_par_u - son_FNI_par_u)
+  // = "Si tu avais le FNI/u du meilleur sur cette marque, tu aurais gagné X de plus."
+  const manquesParVendeur = (() => {
+    const map = new Map<string, { marque:string, units:number, monFniU:number, bestFniU:number, bestVendeur:string, manque:number, monProfitFni:number, manqueMarge:number }[]>()
+    for (const m of topFniParMarque) {
+      if (!m.top_vendeurs || m.top_vendeurs.length === 0) continue
+      // Tri par FNI/u décroissant pour trouver le meilleur sur la marque
+      const sortedFniU = [...m.top_vendeurs].sort((a:any, b:any) => {
+        const aF = a.nb ? a.total_profit_fni / a.nb : 0
+        const bF = b.nb ? b.total_profit_fni / b.nb : 0
+        return bF - aF
+      })
+      const best = sortedFniU[0]
+      const bestFniPerU = best.nb ? best.total_profit_fni / best.nb : 0
+      // Meilleur % marge sur la marque (pour le manque "par FNI")
+      const bestMarge = Math.max(0, ...m.top_vendeurs.map((x:any) => x.total_ventes_fni > 0 ? x.total_profit_fni / x.total_ventes_fni : 0))
+
+      for (const v of m.top_vendeurs) {
+        const vFniPerU = v.nb ? v.total_profit_fni / v.nb : 0
+        const manque = Math.max(0, v.nb * (bestFniPerU - vFniPerU))
+        const vMarge = v.total_ventes_fni > 0 ? v.total_profit_fni / v.total_ventes_fni : 0
+        const manqueMarge = Math.max(0, v.total_ventes_fni * (bestMarge - vMarge))
+        if (!map.has(v.vendeur_nom)) map.set(v.vendeur_nom, [])
+        map.get(v.vendeur_nom)!.push({
+          marque: m.marque,
+          units: v.nb,
+          monFniU: vFniPerU,
+          bestFniU: bestFniPerU,
+          bestVendeur: best.vendeur_nom,
+          manque,
+          monProfitFni: v.total_profit_fni,
+          manqueMarge,
+        })
+      }
+    }
+    return map
+  })()
+
+  const manqueTotalParVendeur = (nomV: string) => {
+    const lst = manquesParVendeur.get(nomV) || []
+    return lst.reduce((s, x) => s + x.manque, 0)
+  }
+  const manqueTotalEquipe = topVendeurs.reduce((s, v) => s + manqueTotalParVendeur(v.vendeur_nom), 0)
+
+  // ─── Médailles : top 3 par catégorie ──────────────────────────────────
+  const medailles = (() => {
+    const cats: { titre:string, icon:string, format:(v:any)=>string, value:(v:any)=>number, desc:string, positifEstBon:boolean }[] = [
+      { titre:'Profit FNI total',   icon:'💰', format: v => fmt$(v.total_profit_fni), value: v => v.total_profit_fni, desc:'$ FNI rapportés', positifEstBon:true },
+      { titre:'% Marge FNI',        icon:'📊', format: v => fmtPct(v.total_ventes_fni>0 ? v.total_profit_fni/v.total_ventes_fni : 0), value: v => v.total_ventes_fni>0 ? v.total_profit_fni/v.total_ventes_fni : 0, desc:'marge FNI moy.', positifEstBon:true },
+      { titre:'Attach FNI',         icon:'🔗', format: v => fmtPct(v.attach_fni), value: v => v.attach_fni, desc:'% deals avec FNI', positifEstBon:true },
+      { titre:'FNI / unité',        icon:'💵', format: v => fmt$(v.nb ? v.total_profit_fni/v.nb : 0), value: v => v.nb ? v.total_profit_fni/v.nb : 0, desc:'$ FNI par vente', positifEstBon:true },
+      { titre:'Moins de cash',      icon:'🚫', format: v => fmtPct(v.nb ? (v.nb - v.nb_avec_fni)/v.nb : 0), value: v => v.nb ? -(v.nb - v.nb_avec_fni)/v.nb : 0, desc:'plus c\'est haut, mieux c\'est', positifEstBon:true },
+    ]
+    return cats.map(c => {
+      const ranking = [...topVendeurs].sort((a,b) => c.value(b) - c.value(a))
+      return {
+        ...c,
+        gagnant: ranking[0] || null,
+        podium: ranking.slice(0, 3),
+      }
+    })
+  })()
+
   // Mensuel par vendeur — calculé depuis ventes brutes filtrées par vendeur_nom
   const moisParVendeur = (nomV: string) => {
     const m = new Map<string, { units:number, prix:number, ventes_fni:number, profit_fni:number, cash:number, fni:number }>()
@@ -12185,6 +12251,56 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
             <div style={{fontSize:16,fontWeight:900}}>{fmt$(fniParUnite)}</div>
           </div>
         </div>
+
+        {/* 🏅 Tableau des médailles — top 3 par catégorie */}
+        {topVendeurs.length > 0 && (
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
+            <div style={{fontSize:12,fontWeight:800,marginBottom:10}}>🏅 Tableau des médailles</div>
+            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(auto-fit, minmax(190px, 1fr))',gap:8}}>
+              {medailles.map(m => (
+                <div key={m.titre} style={{padding:'10px 12px',background:dark?'#0f0f0f':'#fafbfc',border:`1px solid ${bdr}`,borderTop:`3px solid ${C.yellow}`,borderRadius:8}}>
+                  <div style={{fontSize:10,fontWeight:700,color:sub,textTransform:'uppercase',letterSpacing:'.05em'}}>{m.icon} {m.titre}</div>
+                  <div style={{fontSize:10,color:sub,marginBottom:8}}>{m.desc}</div>
+                  {m.podium.length === 0 ? <div style={{color:sub,fontSize:11,fontStyle:'italic'}}>—</div> : m.podium.map((v:any, i:number) => (
+                    <div key={v.vendeur_nom} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0',borderTop:i>0?`1px solid ${bdr}`:'none'}}>
+                      <div style={{fontSize:12,fontWeight:i===0?800:600}}>
+                        <span style={{marginRight:6}}>{i===0?'🥇':i===1?'🥈':'🥉'}</span>
+                        {v.vendeur_nom}
+                      </div>
+                      <div style={{fontSize:11,fontWeight:700,color:i===0?C.green:undefined}}>{m.format(v)}</div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 💰 Manque à gagner total équipe */}
+        {manqueTotalEquipe > 0 && (
+          <div style={{background:'#fff8e6',border:`2px solid ${C.yellow}`,borderRadius:10,padding:'14px 16px',marginBottom:12}}>
+            <div style={{display:'flex',alignItems:'center',gap:14,flexWrap:'wrap'}}>
+              <div style={{fontSize:32}}>💰</div>
+              <div style={{flex:1,minWidth:220}}>
+                <div style={{fontSize:13,fontWeight:900,color:'#b06a00'}}>Manque à gagner total équipe : {fmt$(manqueTotalEquipe)}</div>
+                <div style={{fontSize:11,color:sub,marginTop:2}}>
+                  Si chaque vendeur atteignait le FNI/u du meilleur sur chacune de ses marques, l'équipe aurait fait <strong>{fmt$(manqueTotalEquipe)} de plus</strong> sur la période.
+                </div>
+              </div>
+            </div>
+            <div style={{marginTop:10,display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(auto-fit, minmax(180px, 1fr))',gap:8}}>
+              {[...topVendeurs].map(v => ({ v, m: manqueTotalParVendeur(v.vendeur_nom) }))
+                .sort((a, b) => b.m - a.m)
+                .map(({v, m}) => (
+                  <div key={v.vendeur_nom} style={{background:'#fff',border:`1px solid ${bdr}`,borderLeft:`3px solid ${m>0?C.red:C.green}`,borderRadius:6,padding:'8px 10px'}}>
+                    <div style={{fontSize:11,fontWeight:700}}>{v.vendeur_nom}</div>
+                    <div style={{fontSize:14,fontWeight:900,color:m>0?C.red:C.green}}>{m>0 ? fmt$(m) : '✓ Top'}</div>
+                    <div style={{fontSize:10,color:sub}}>{m>0 ? 'à rattraper' : 'meilleur sur toutes ses marques'}</div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
 
         {/* Vendor cards */}
         <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
@@ -12305,6 +12421,25 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
         const vMargeFni = v.total_ventes_fni > 0 ? v.total_profit_fni / v.total_ventes_fni : 0
         const vPctCash = v.nb ? (v.nb - v.nb_avec_fni) / v.nb : 0
         return <>
+          {/* CSS @media print : ne montrer que le rapport vendeur quand on imprime */}
+          <style>{`
+            @media print {
+              @page { size: letter portrait; margin: 0.4in; }
+              body * { visibility: hidden; }
+              .scoa-fni-print, .scoa-fni-print * { visibility: visible; }
+              .scoa-fni-print { position: absolute; left: 0; top: 0; width: 100%; }
+              .scoa-fni-no-print { display: none !important; }
+            }
+          `}</style>
+          {/* Bandeau impression */}
+          <div className="scoa-fni-no-print" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,padding:'8px 12px',background:'#e8f0fe',border:`1px solid ${C.blue}33`,borderRadius:8}}>
+            <div style={{fontSize:12,color:C.blue}}>📄 Fiche vendeur de <strong>{v.vendeur_nom}</strong> — prête à imprimer / partager</div>
+            <button onClick={()=>window.print()}
+              style={{background:C.blue,color:'#fff',border:'none',borderRadius:6,padding:'7px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+              🖨 Imprimer la fiche
+            </button>
+          </div>
+          <div className="scoa-fni-print">
           <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(8,1fr)',gap:8,marginBottom:12}}>
             <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Unités</div>
@@ -12366,6 +12501,85 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
               </div>
             </div>
           </div>
+
+          {/* 🎯 Manque à gagner par marque (coaching) */}
+          {(() => {
+            const mqList = (manquesParVendeur.get(v.vendeur_nom) || [])
+              .filter(x => x.manque > 0)
+              .sort((a, b) => b.manque - a.manque)
+            const totalMq = mqList.reduce((s, x) => s + x.manque, 0)
+            const totalMqMarge = mqList.reduce((s, x) => s + x.manqueMarge, 0)
+            const ptsForts = (manquesParVendeur.get(v.vendeur_nom) || [])
+              .filter(x => x.bestVendeur === v.vendeur_nom)
+              .sort((a, b) => b.monProfitFni - a.monProfitFni)
+            return (
+              <div style={{background:card,border:`2px solid ${totalMq>0?C.yellow:C.green}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:8,marginBottom:10}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:900,color:totalMq>0?'#b06a00':C.green}}>🎯 Manque à gagner par marque</div>
+                    <div style={{fontSize:11,color:sub,marginTop:2}}>« Si tu avais le FNI/u du meilleur sur chacune de tes marques »</div>
+                  </div>
+                  <div style={{textAlign:'right'}}>
+                    <div style={{fontSize:10,color:sub,textTransform:'uppercase'}}>Total à rattraper</div>
+                    <div style={{fontSize:20,fontWeight:900,color:totalMq>0?C.red:C.green}}>{totalMq>0 ? fmt$(totalMq) : '✓ Top performer'}</div>
+                    {totalMqMarge>0 && <div style={{fontSize:10,color:sub}}>via % marge : {fmt$(totalMqMarge)}</div>}
+                  </div>
+                </div>
+
+                {ptsForts.length > 0 && (
+                  <div style={{marginBottom:10,padding:'8px 10px',background:'#e6f4ea',border:`1px solid ${C.green}33`,borderRadius:6}}>
+                    <div style={{fontSize:11,fontWeight:800,color:C.green,marginBottom:4}}>🟢 Tes marques fortes — tu domines l'équipe</div>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                      {ptsForts.slice(0, 5).map(p => (
+                        <span key={p.marque} style={{background:'#fff',padding:'3px 8px',borderRadius:4,fontSize:11,fontWeight:700,color:C.green,border:`1px solid ${C.green}44`}}>
+                          {p.marque} · {fmt$(p.monFniU)}/u
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {mqList.length === 0 ? (
+                  <div style={{padding:14,textAlign:'center',color:C.green,fontSize:12,fontWeight:600,fontStyle:'italic'}}>
+                    Aucun manque à gagner — tu es au top sur toutes tes marques 🎉
+                  </div>
+                ) : (
+                  <div style={{overflowX:'auto'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,minWidth:700}}>
+                      <thead>
+                        <tr style={{background:thBg}}>
+                          <th style={{padding:'8px',textAlign:'left',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`}}>Marque</th>
+                          <th style={{padding:'8px',textAlign:'right',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`}}>Mes unités</th>
+                          <th style={{padding:'8px',textAlign:'right',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`}}>Mon FNI/u</th>
+                          <th style={{padding:'8px',textAlign:'right',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`}}>Meilleur FNI/u</th>
+                          <th style={{padding:'8px',textAlign:'left',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`}}>Meilleur</th>
+                          <th style={{padding:'8px',textAlign:'right',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`}}>Écart $/u</th>
+                          <th style={{padding:'8px',textAlign:'right',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`}}>Manque $</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {mqList.map(x => (
+                          <tr key={x.marque}>
+                            <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{x.marque}</td>
+                            <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmtInt(x.units)}</td>
+                            <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(x.monFniU)}</td>
+                            <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:C.green}}>{fmt$(x.bestFniU)}</td>
+                            <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>{x.bestVendeur}</td>
+                            <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:C.red}}>−{fmt$(x.bestFniU - x.monFniU)}</td>
+                            <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:800,color:C.red}}>{fmt$(x.manque)}</td>
+                          </tr>
+                        ))}
+                        <tr style={{background:dark?'#1a1a1a':'#f0f0f0',fontWeight:800}}>
+                          <td colSpan={6} style={{padding:'8px',textAlign:'right'}}>TOTAL :</td>
+                          <td style={{padding:'8px',textAlign:'right',color:C.red,fontSize:14}}>{fmt$(totalMq)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {/* Détail mensuel */}
           {(() => {
@@ -12435,6 +12649,7 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
               </table>
             </div>
           </div>
+          </div> {/* /scoa-fni-print */}
         </>
       })()}
     </div>
