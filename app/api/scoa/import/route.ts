@@ -59,7 +59,37 @@ export async function POST(req: NextRequest) {
       periode_fin: parsed.periode_fin,
     }))
 
+    // ─── Pour les rapports par vendeur : on EFFACE toutes les ventes
+    //     précédentes du / des vendeurs présents dans ce PDF avant insertion.
+    //     Le PDF est une vue complète du vendeur, donc le ré-import doit
+    //     remplacer les anciennes données plutôt que de les fusionner.
+    let deleted = 0
+    if (type === 'rapport_fni_vendeur') {
+      const vendeurIds = [...new Set(rows.map(r => r.vendeur_id).filter(Boolean))] as string[]
+      const vendeurNoms = [...new Set(rows.map(r => r.vendeur_nom).filter(Boolean))] as string[]
+      if (vendeurIds.length > 0) {
+        const { error: errDel, count } = await supabaseAdmin
+          .from('scoa_ventes')
+          .delete({ count: 'exact' })
+          .eq('type', type)
+          .in('vendeur_id', vendeurIds)
+        if (errDel) throw errDel
+        deleted = count || 0
+      } else if (vendeurNoms.length > 0) {
+        // Fallback : si vendeur_id pas extrait, on utilise le nom
+        const { error: errDel, count } = await supabaseAdmin
+          .from('scoa_ventes')
+          .delete({ count: 'exact' })
+          .eq('type', type)
+          .in('vendeur_nom', vendeurNoms)
+        if (errDel) throw errDel
+        deleted = count || 0
+      }
+    }
+
     // Upsert par clé unique (type, stock_num, num_contrat, date_vente)
+    // — pour le rapport par vendeur, la delete préalable garantit qu'on
+    // ne fusionne pas avec d'anciennes données du vendeur.
     let inserted = 0
     for (let i = 0; i < rows.length; i += 500) {
       const batch = rows.slice(i, i + 500)
@@ -74,6 +104,7 @@ export async function POST(req: NextRequest) {
       success: true,
       type,
       inserted,
+      deleted,
       periode_debut: parsed.periode_debut,
       periode_fin: parsed.periode_fin,
       warnings: parsed.warnings,

@@ -12751,7 +12751,8 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       const r = await fetch('/api/scoa/import', { method: 'POST', body: fd })
       const j = await r.json()
       if (j.success) {
-        setImportLog(l => [...l, `✅ ${file.name} : ${j.inserted} ventes (${j.periode_debut} → ${j.periode_fin})`])
+        const replaceTxt = j.deleted > 0 ? ` · ${j.deleted} ancienne(s) écrasée(s)` : ''
+        setImportLog(l => [...l, `✅ ${file.name} : ${j.inserted} ventes${replaceTxt} (${j.periode_debut} → ${j.periode_fin})`])
         if (j.warnings?.length) {
           setImportLog(l => [...l, `⚠️ ${j.warnings.length} lignes non parsées (détail ci-dessous) :`])
           for (const w of j.warnings) {
