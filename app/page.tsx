@@ -12023,7 +12023,7 @@ const FNI_EXPL = {
 
 function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, dark, card, bdr, sub, thBg, C, S, onAllerImport}: any) {
   const [sousVue, setSousVue] = useState<string>('comparatif')
-  const [analyseIa, setAnalyseIa] = useState<{texte: string, manque: number, duree: number}|null>(null)
+  const [analyseIa, setAnalyseIa] = useState<{texte: string, manque: number, duree: number, generee_le?: string|null, sauvegardee?: boolean}|null>(null)
   const [analyseLoading, setAnalyseLoading] = useState(false)
 
   async function lancerAnalyseIa(vendeur_nom: string) {
@@ -12037,7 +12037,7 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
       })
       const d = await r.json()
       if (r.ok && d.analyse) {
-        setAnalyseIa({ texte: d.analyse, manque: d.manque_total || 0, duree: d.duree_ms || 0 })
+        setAnalyseIa({ texte: d.analyse, manque: d.manque_total || 0, duree: d.duree_ms || 0, generee_le: d.generee_le, sauvegardee: true })
       } else {
         setAnalyseIa({ texte: `❌ ${d.erreur || 'Analyse impossible'}`, manque: 0, duree: 0 })
       }
@@ -12047,8 +12047,23 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
     setAnalyseLoading(false)
   }
 
-  // Reset l'analyse IA quand on change de vendeur
-  useEffect(() => { setAnalyseIa(null) }, [sousVue])
+  // Au changement de vendeur : charger l'analyse sauvegardée (si elle existe)
+  useEffect(() => {
+    setAnalyseIa(null)
+    if (sousVue === 'comparatif') return
+    let actif = true
+    ;(async () => {
+      try {
+        const r = await fetch(`/api/scoa/fni-analyse?vendeur_nom=${encodeURIComponent(sousVue)}`)
+        if (!r.ok) return
+        const d = await r.json()
+        if (actif && d.analyse) {
+          setAnalyseIa({ texte: d.analyse, manque: d.manque_total || 0, duree: d.duree_ms || 0, generee_le: d.generee_le, sauvegardee: true })
+        }
+      } catch {}
+    })()
+    return () => { actif = false }
+  }, [sousVue])
 
   // Helper tooltip — petit "i" cerclé. Sans-serif gras pour être lisible
   // en petit (sinon l'italique serif ressemble à un "?").
@@ -12583,9 +12598,9 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
           <div className="scoa-fni-no-print" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,padding:'8px 12px',background:'#e8f0fe',border:`1px solid ${C.blue}33`,borderRadius:8,gap:8,flexWrap:'wrap'}}>
             <div style={{fontSize:12,color:C.blue,flex:1,minWidth:180}}>📄 Fiche vendeur de <strong>{v.vendeur_nom}</strong></div>
             <button onClick={()=>lancerAnalyseIa(v.vendeur_nom)} disabled={analyseLoading}
-              title="Coaching IA personnalisé : points forts, points à travailler, actions concrètes, potentiel de gain."
+              title={analyseIa ? "Régénère une nouvelle analyse (écrase la précédente)" : "Note managériale IA : positionnement, forces, lacunes, pistes pour aider le vendeur."}
               style={{background:analyseLoading?sub:'#7b1fa2',color:'#fff',border:'none',borderRadius:6,padding:'7px 14px',fontWeight:700,cursor:analyseLoading?'wait':'pointer',fontSize:12,whiteSpace:'nowrap'}}>
-              {analyseLoading ? '⏳ Analyse en cours…' : '🧠 Analyse IA'}
+              {analyseLoading ? '⏳ Analyse en cours…' : analyseIa ? '🔄 Régénérer l\'analyse' : '🧠 Analyse IA'}
             </button>
             <button onClick={()=>window.print()}
               style={{background:C.blue,color:'#fff',border:'none',borderRadius:6,padding:'7px 14px',fontWeight:700,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
@@ -12599,8 +12614,14 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:8}}>
                 <div style={{fontSize:13,fontWeight:900,color:'#7b1fa2'}}>🧠 Note managériale — {v.vendeur_nom}</div>
                 <div style={{display:'flex',gap:8,alignItems:'center'}}>
-                  {analyseIa.duree > 0 && <span style={{fontSize:10,color:sub}}>généré en {(analyseIa.duree/1000).toFixed(1)}s · Claude Sonnet 4.5</span>}
+                  {analyseIa.generee_le && (
+                    <span style={{fontSize:10,color:sub}}>
+                      📅 {new Date(analyseIa.generee_le).toLocaleString('fr-CA', { dateStyle: 'short', timeStyle: 'short' })}
+                      {analyseIa.duree > 0 && <> · ⏱ {(analyseIa.duree/1000).toFixed(1)}s · Claude Sonnet 4.5</>}
+                    </span>
+                  )}
                   <button onClick={()=>setAnalyseIa(null)} className="scoa-fni-no-print"
+                    title="Masquer (l'analyse reste sauvegardée, elle réapparaitra à la prochaine ouverture)"
                     style={{background:'transparent',border:'none',color:sub,cursor:'pointer',fontSize:14}}>✕</button>
                 </div>
               </div>

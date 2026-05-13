@@ -6,6 +6,34 @@ export const runtime = 'nodejs'
 export const maxDuration = 60
 export const dynamic = 'force-dynamic'
 
+// GET ?vendeur_nom=... — récupère l'analyse sauvegardée si existante
+export async function GET(req: NextRequest) {
+  try {
+    const vendeur_nom = new URL(req.url).searchParams.get('vendeur_nom')
+    if (!vendeur_nom) return NextResponse.json({ erreur: 'vendeur_nom requis' }, { status: 400 })
+
+    const { data, error } = await supabaseAdmin
+      .from('scoa_fni_analyses')
+      .select('*')
+      .eq('vendeur_nom', vendeur_nom)
+      .maybeSingle()
+
+    if (error) throw error
+    if (!data) return NextResponse.json({ analyse: null })
+
+    return NextResponse.json({
+      analyse: data.analyse,
+      manque_total: Number(data.manque_total || 0),
+      duree_ms: data.duree_ms || 0,
+      generee_le: data.generee_le,
+      date_debut: data.date_debut,
+      date_fin: data.date_fin,
+    })
+  } catch (e: any) {
+    return NextResponse.json({ erreur: e?.message || String(e) }, { status: 500 })
+  }
+}
+
 // POST /api/scoa/fni-analyse
 // body: { vendeur_nom: string, filtDebut?: string, filtFin?: string }
 //
@@ -206,10 +234,25 @@ Pas d'introduction ni de conclusion. Démarre direct par 📍.`
     })
     const dureeMs = Date.now() - t0
 
+    // Persister l'analyse (1 seule entry par vendeur, on remplace la précédente)
+    const { error: errSave } = await supabaseAdmin
+      .from('scoa_fni_analyses')
+      .upsert({
+        vendeur_nom,
+        analyse: text,
+        manque_total: manqueTotal,
+        date_debut: filtDebut || null,
+        date_fin: filtFin || null,
+        duree_ms: dureeMs,
+        generee_le: new Date().toISOString(),
+      }, { onConflict: 'vendeur_nom' })
+    if (errSave) console.error('[fni-analyse] sauvegarde échouée :', errSave)
+
     return NextResponse.json({
       analyse: text,
       manque_total: manqueTotal,
       duree_ms: dureeMs,
+      generee_le: new Date().toISOString(),
       stats: {
         ventes_vendeur: kpiVendeur.nb,
         ventes_groupe: kpiGroupe.nb,
