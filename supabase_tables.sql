@@ -308,7 +308,7 @@ ALTER TABLE amazon_audits ADD COLUMN IF NOT EXISTS settlement_id TEXT;
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS scoa_ventes (
   id BIGSERIAL PRIMARY KEY,
-  type TEXT NOT NULL CHECK (type IN ('ps_neuf','ps_usage','bateau_neuf','bateau_usage')),
+  type TEXT NOT NULL CHECK (type IN ('ps_neuf','ps_usage','bateau_neuf','bateau_usage','rapport_fni_vendeur')),
   date_vente DATE NOT NULL,
   client TEXT,
   stock_num TEXT NOT NULL,
