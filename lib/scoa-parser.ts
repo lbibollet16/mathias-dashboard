@@ -42,7 +42,13 @@ const MOIS_FR: Record<string, number> = {
 }
 
 const MARQUES_DOUBLES = new Set(['CF MOTO'])
-const STOCK_RE = /^P?\d{2}-\d{4}[A-Z]?$/
+// Stock # SCOA — formats observés :
+//   "22-0980"     neuf
+//   "23-1140D"    neuf vendu en occasion (suffixe lettre)
+//   "P22-0980"    PS
+//   "C23-0006A"   occasion (préfixe 1-3 lettres + suffixe lettre)
+//   "AC25-0331"   occasion (préfixe alphanumérique)
+const STOCK_RE = /^[A-Z]{0,3}\d{2}-\d{4}[A-Z]?$/
 const NUM_RE = /^-?\d+(?:[.,]\d+)?$/
 
 function parseNum(t: string): number {
@@ -69,23 +75,28 @@ function parseSaleLine(line: string, vendeur: { id: string, nom: string } | null
   const rest = dm[2].trim()
 
   const tokens = rest.split(/\s+/)
-  if (tokens.length < 10) return null
+  if (tokens.length < 6) return null
 
-  // Pop NbJours (entier)
-  const nbJoursTok = tokens.pop()!
-  if (!/^\d+$/.test(nbJoursTok)) return null
-  const nbJours = parseInt(nbJoursTok, 10)
-
-  // Pop %Profit, ProfitNet, Totales (3 numériques)
   const peekNum = (off: number) => tokens.length >= off && isNum(tokens[tokens.length - off])
-  if (!peekNum(1) || !peekNum(2) || !peekNum(3)) return null
-  const pctProfit = parseNum(tokens.pop()!)
-  const profitNetTotal = parseNum(tokens.pop()!)
-  const ventesTotales = parseNum(tokens.pop()!)
 
-  // Détection FNI : si on a encore 6 numériques consécutifs (3 FNI + 3 Véh)
-  // alors que sans FNI on n'en a que 3. On regarde si le 4e à partir de la
-  // fin est numérique → indique FNI présent.
+  // NbJours (entier) — optionnel : certaines lignes (deals annulés, transferts)
+  // n'ont pas de NbJours en fin de ligne.
+  let nbJours: number | null = null
+  if (tokens.length > 0 && /^\d+$/.test(tokens[tokens.length - 1])) {
+    nbJours = parseInt(tokens.pop()!, 10)
+  }
+
+  // %Profit, ProfitNet, Totales (3 numériques) — optionnel, certains
+  // PDF affichent une ligne incomplète. Si les 3 sont là, on les prend ;
+  // sinon on met à 0 et on continue avec ce qu'on a.
+  let pctProfit = 0, profitNetTotal = 0, ventesTotales = 0
+  if (peekNum(1) && peekNum(2) && peekNum(3)) {
+    pctProfit = parseNum(tokens.pop()!)
+    profitNetTotal = parseNum(tokens.pop()!)
+    ventesTotales = parseNum(tokens.pop()!)
+  }
+
+  // FNI : 3 numériques de plus (avec les 3 véhicule restants au-dessus).
   let ventesFni = 0, profitFni = 0, pctBrutFni = 0
   if (peekNum(1) && peekNum(2) && peekNum(3) && peekNum(4) && peekNum(5) && peekNum(6)) {
     pctBrutFni = parseNum(tokens.pop()!)
@@ -93,17 +104,29 @@ function parseSaleLine(line: string, vendeur: { id: string, nom: string } | null
     ventesFni = parseNum(tokens.pop()!)
   }
 
-  // Pop %Brut véhicule, Profit véhicule, Prix
-  if (!peekNum(1) || !peekNum(2) || !peekNum(3)) return null
-  const pctBrut = parseNum(tokens.pop()!)
-  const profitVeh = parseNum(tokens.pop()!)
-  const prixVente = parseNum(tokens.pop()!)
+  // %Brut véhicule, Profit véhicule, Prix — au minimum on veut un prix.
+  let pctBrut = 0, profitVeh = 0, prixVente = 0
+  if (peekNum(1) && peekNum(2) && peekNum(3)) {
+    pctBrut = parseNum(tokens.pop()!)
+    profitVeh = parseNum(tokens.pop()!)
+    prixVente = parseNum(tokens.pop()!)
+  } else if (peekNum(1) && peekNum(2)) {
+    // Cas ligne tronquée : juste prix + profit_veh
+    profitVeh = parseNum(tokens.pop()!)
+    prixVente = parseNum(tokens.pop()!)
+  } else if (peekNum(1)) {
+    prixVente = parseNum(tokens.pop()!)
+  } else {
+    return null  // pas même un prix → vraiment inutilisable
+  }
 
   // Pop #Contrat (toujours présent)
   if (tokens.length === 0) return null
   const numContrat = tokens.pop()!
 
-  // Pop année (token pur "2024" ou collé au modèle "Premium2026")
+  // Pop année — d'abord essayer le dernier token, sinon chercher un token
+  // 4 chiffres entre 1990-2100 dans les 6 derniers tokens (cas où le PDF
+  // a un layout étrange : deals annulés avec colonnes mélangées).
   let annee: number | null = null
   const lastTok = tokens[tokens.length - 1] || ''
   const pureYear = /^(\d{4})$/.exec(lastTok)
@@ -118,6 +141,21 @@ function parseSaleLine(line: string, vendeur: { id: string, nom: string } | null
       if (y >= 1990 && y <= 2100) {
         annee = y
         tokens[tokens.length - 1] = stuck[1]
+      }
+    }
+  }
+  // Fallback : chercher une année plus profondément (cas malformés)
+  if (annee === null) {
+    for (let i = tokens.length - 1; i >= Math.max(0, tokens.length - 8); i--) {
+      const m = /^(\d{4})$/.exec(tokens[i])
+      if (m) {
+        const y = parseInt(m[1], 10)
+        if (y >= 1990 && y <= 2100) {
+          annee = y
+          // Retirer ce token (le splice modifie l'array en place)
+          tokens.splice(i, 1)
+          break
+        }
       }
     }
   }
@@ -143,11 +181,18 @@ function parseSaleLine(line: string, vendeur: { id: string, nom: string } | null
   }
   const modele = afterStock.slice(modeleStart).join(' ').trim()
 
+  // Convention SCOA : tout #Stock contenant au moins une lettre = véhicule
+  // d'occasion. Ex: "C24-0001B", "AC25-0331", "23-1140D" → OCCASION
+  // (regroupés sous une marque virtuelle « OCCASION » pour les agrégats FNI).
+  // Le neuf garde sa marque réelle (POLARIS, HONDA, …).
+  const isOccasion = /[A-Z]/.test(stockNum)
+  const marqueFinal = isOccasion ? 'OCCASION' : marque.trim()
+
   return {
     date_vente: date,
     client,
     stock_num: stockNum,
-    marque: marque.trim(),
+    marque: marqueFinal,
     modele,
     annee,
     num_contrat: numContrat,
