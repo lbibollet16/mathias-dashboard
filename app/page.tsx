@@ -12597,7 +12597,7 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
           {analyseIa && (
             <div style={{background:card,border:`2px solid #7b1fa2`,borderRadius:10,padding:'14px 18px',marginBottom:14}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:8}}>
-                <div style={{fontSize:13,fontWeight:900,color:'#7b1fa2'}}>🧠 Coaching IA — {v.vendeur_nom}</div>
+                <div style={{fontSize:13,fontWeight:900,color:'#7b1fa2'}}>🧠 Note managériale — {v.vendeur_nom}</div>
                 <div style={{display:'flex',gap:8,alignItems:'center'}}>
                   {analyseIa.duree > 0 && <span style={{fontSize:10,color:sub}}>généré en {(analyseIa.duree/1000).toFixed(1)}s · Claude Sonnet 4.5</span>}
                   <button onClick={()=>setAnalyseIa(null)} className="scoa-fni-no-print"

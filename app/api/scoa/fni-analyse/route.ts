@@ -111,7 +111,6 @@ export async function POST(req: NextRequest) {
     // Format pour le prompt
     const fmt$  = (n: number) => '$' + Math.round(n).toLocaleString('fr-CA')
     const fmtPc = (n: number) => (n * 100).toFixed(1).replace('.', ',') + ' %'
-    const prenom = vendeur_nom.includes(',') ? vendeur_nom.split(',')[1].trim() : vendeur_nom
 
     const MOIS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre']
     const lblMois = (k: string) => {
@@ -120,34 +119,53 @@ export async function POST(req: NextRequest) {
       return `${MOIS_FR[parseInt(m[2], 10) - 1]} ${m[1]}`
     }
 
-    const prompt = `Tu analyses les chiffres FNI (Financement & Insurance) du vendeur ${vendeur_nom} dans un concessionnaire Mathias Marine Sports (motoneiges, motos, bateaux). Produis un coaching ACTIONNABLE et PRÉCIS.
+    // Classement par volume — pour situer le vendeur dans l'équipe
+    const parVendeurVol = new Map<string, any[]>()
+    for (const v of allVentes || []) {
+      const k = v.vendeur_nom || '(?)'
+      if (!parVendeurVol.has(k)) parVendeurVol.set(k, [])
+      parVendeurVol.get(k)!.push(v)
+    }
+    const classementVol = [...parVendeurVol.entries()]
+      .map(([nom, vs]) => ({ nom, ...agrege(vs) }))
+      .sort((a, b) => b.nb - a.nb)
+    const rangVol   = classementVol.findIndex(x => x.nom === vendeur_nom) + 1
+    const rangMarge = [...classementVol].sort((a, b) => b.marge_fni - a.marge_fni).findIndex(x => x.nom === vendeur_nom) + 1
+    const rangFniU  = [...classementVol].sort((a, b) => b.fni_par_u - a.fni_par_u).findIndex(x => x.nom === vendeur_nom) + 1
+
+    const prompt = `Tu es un manager senior F&I qui prépare une note d'analyse interne sur la performance d'un de tes vendeurs : ${vendeur_nom}.
+Cette note te sert à TOI (le manager) pour identifier les lacunes et l'aider à progresser. Tu parles donc DE ${vendeur_nom}, pas À ${vendeur_nom}.
 
 PÉRIODE : ${filtDebut || 'début'} → ${filtFin || "aujourd'hui"}
 CIBLE INTERNE : 9 % marge brute FNI (= Profit FNI ÷ Prix de Vente)
 
-═══ KPIs DU VENDEUR ═══
+═══ POSITIONNEMENT DANS L'ÉQUIPE (${classementVol.length} vendeurs au total) ═══
+- Volume : ${rangVol}e (${kpiVendeur.nb} ventes)
+- % Marge FNI : ${rangMarge}e (${fmtPc(kpiVendeur.marge_fni)})
+- FNI / unité : ${rangFniU}e (${fmt$(kpiVendeur.fni_par_u)})
+
+═══ COMPARATIF VOLUMES ENTRE TOUS LES VENDEURS ═══
+${classementVol.map((c, i) =>
+  `${i+1}. ${c.nom} : ${c.nb} ventes · profit FNI ${fmt$(c.profit_fni)} · marge ${fmtPc(c.marge_fni)} · attach ${fmtPc(c.attach)} · FNI/u ${fmt$(c.fni_par_u)}`
+).join('\n')}
+
+═══ KPIs DE ${vendeur_nom} ═══
 - Unités vendues : ${kpiVendeur.nb}
 - Prix de vente total : ${fmt$(kpiVendeur.prix)}
 - Profit FNI total : ${fmt$(kpiVendeur.profit_fni)}
-- % Marge FNI : ${fmtPc(kpiVendeur.marge_fni)}
-- Attach FNI (% deals avec FNI) : ${fmtPc(kpiVendeur.attach)}
-- FNI / unité (moyenne) : ${fmt$(kpiVendeur.fni_par_u)}
-- % Cash deals : ${fmtPc(kpiVendeur.pct_cash)}
+- % Marge FNI : ${fmtPc(kpiVendeur.marge_fni)} (cible 9 %, moyenne équipe ${fmtPc(kpiGroupe.marge_fni)})
+- Attach FNI : ${fmtPc(kpiVendeur.attach)} (équipe ${fmtPc(kpiGroupe.attach)})
+- FNI / unité : ${fmt$(kpiVendeur.fni_par_u)} (équipe ${fmt$(kpiGroupe.fni_par_u)})
+- % Cash deals : ${fmtPc(kpiVendeur.pct_cash)} (équipe ${fmtPc(kpiGroupe.pct_cash)})
 
-═══ MOYENNE DU GROUPE (toute l'équipe, ${kpiGroupe.nb} ventes) ═══
-- % Marge FNI : ${fmtPc(kpiGroupe.marge_fni)}
-- Attach FNI : ${fmtPc(kpiGroupe.attach)}
-- FNI / unité : ${fmt$(kpiGroupe.fni_par_u)}
-- % Cash deals : ${fmtPc(kpiGroupe.pct_cash)}
-
-═══ PERFORMANCE PAR MARQUE (vendeur) ═══
+═══ PAR MARQUE ═══
 ${vendorParMarque.map(m =>
   `- ${m.marque} : ${m.nb} u · profit FNI ${fmt$(m.profit_fni)} · marge ${fmtPc(m.marge_fni)} · attach ${fmtPc(m.attach)} · FNI/u ${fmt$(m.fni_par_u)}`
 ).join('\n')}
 
-═══ MANQUE À GAGNER PAR MARQUE (vs le meilleur de l'équipe) ═══
+═══ MANQUE À GAGNER PAR MARQUE (vs meilleur de l'équipe) ═══
 ${manques.filter(m => m.manque > 0).sort((a, b) => b.manque - a.manque).slice(0, 6).map(m =>
-  `- ${m.marque} : ton FNI/u = ${fmt$(m.mon_fni_u)} | ${m.best_vendeur.split(',')[1]?.trim() || m.best_vendeur} = ${fmt$(m.best_fni_u)} | écart ${fmt$(m.ecart)}/u sur ${m.nb} ventes → manque à gagner ${fmt$(m.manque)}`
+  `- ${m.marque} : son FNI/u = ${fmt$(m.mon_fni_u)} | ${m.best_vendeur.split(',')[1]?.trim() || m.best_vendeur} fait ${fmt$(m.best_fni_u)}/u sur ${bestParMarque.get(m.marque)?.nb || 0} ventes → manque à gagner ${fmt$(m.manque)} sur ses ${m.nb} ventes`
 ).join('\n')}
 
 MANQUE À GAGNER TOTAL : ${fmt$(manqueTotal)}
@@ -158,31 +176,33 @@ ${mensuels.map(m =>
 ).join('\n')}
 
 TÂCHE :
-Produis un coaching SYNTHÉTIQUE et ACTIONNABLE (≤ 350 mots) en français québécois professionnel.
-Tutoie ${prenom}. Chiffres précis, jamais d'approximations vagues type « beaucoup » ou « peu ».
+Rédige une NOTE D'ANALYSE INTERNE en français québécois professionnel, en MAX 200 mots.
+Phrases courtes et percutantes (style note de manager, pas paragraphe).
+Parle de ${vendeur_nom} à la 3e personne (« il/elle fait », pas « tu fais »).
+Chiffres précis partout, jamais de mots flous comme « peu », « beaucoup », « bien ».
 
-Structure ta réponse EXACTEMENT en 4 sections :
+Structure ta réponse EXACTEMENT en 4 sections courtes :
 
-🟢 **TES POINTS FORTS**
-2-3 bullets sur les marques / mois où ${prenom} excelle vs le groupe (avec chiffres).
+📍 **POSITIONNEMENT**
+1-2 phrases : où il/elle se situe (volume, marge, FNI/u) — chiffres + rang.
 
-🔴 **TES POINTS À TRAVAILLER**
-2-3 bullets sur où ${prenom} perd des dollars (avec écart vs meilleur ou vs groupe, en $).
+🟢 **FORCES** (2 bullets max)
+Marques / mois où il/elle dépasse le groupe, avec chiffre d'écart.
 
-🎯 **ACTIONS CONCRÈTES CETTE SEMAINE**
-3 actions précises et opérationnelles (pas du blabla type « améliorer », mais des verbes comme « pousser », « scripter », « reformer », « cibler tel client »).
+🔴 **LACUNES** (3 bullets max)
+Où il/elle perd des dollars vs équipe ou vs meilleur, avec montant chiffré du manque.
 
-💰 **POTENTIEL DE GAIN**
-Estimation $ si les 3 actions sont appliquées (base-toi sur le manque à gagner total ${fmt$(manqueTotal)} et identifie ce qui est réaliste à rattraper).
+🎯 **PISTES POUR L'AIDER** (3 bullets max)
+Actions du MANAGER pour l'accompagner (formation, shadowing, script, jumelage avec un meilleur, etc.). Pas d'actions vagues — verbes concrets.
 
-Ton : ferme mais bienveillant, comme un coach pro. Pas de phrase d'introduction ni de conclusion.`
+Pas d'introduction ni de conclusion. Démarre direct par 📍.`
 
     const t0 = Date.now()
     const { text } = await generateText({
       model: 'anthropic/claude-sonnet-4.5',
-      system: 'Tu es un coach expert F&I (Financement & Insurance) dans un concessionnaire de véhicules récréatifs au Québec. Tu donnes un coaching factuel basé sur des chiffres précis, en français québécois professionnel.',
+      system: 'Tu es un manager F&I (Financement & Insurance) senior d\'un concessionnaire de véhicules récréatifs au Québec (Mathias Marine Sports). Tu rédiges des notes d\'analyse interne courtes pour évaluer tes vendeurs et identifier les leviers de progression. Tu écris en français québécois professionnel, phrases courtes et percutantes, chiffres précis. Tu parles DES vendeurs (3e personne), jamais à eux directement.',
       prompt,
-      temperature: 0.4,
+      temperature: 0.3,
     })
     const dureeMs = Date.now() - t0
 
