@@ -12717,7 +12717,12 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       const j = await r.json()
       if (j.success) {
         setImportLog(l => [...l, `✅ ${file.name} : ${j.inserted} ventes (${j.periode_debut} → ${j.periode_fin})`])
-        if (j.warnings?.length) setImportLog(l => [...l, `⚠️ ${j.warnings.length} lignes non parsées`])
+        if (j.warnings?.length) {
+          setImportLog(l => [...l, `⚠️ ${j.warnings.length} lignes non parsées (détail ci-dessous) :`])
+          for (const w of j.warnings) {
+            setImportLog(l => [...l, `   • ${w}`])
+          }
+        }
         await charger()
       } else {
         setImportLog(l => [...l, `❌ ${file.name} : ${j.erreur}`])
