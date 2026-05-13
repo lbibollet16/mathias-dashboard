@@ -12150,25 +12150,35 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
 
   const topVendeurs = [...parVendeur].sort((a,b)=>b.total_profit_fni - a.total_profit_fni).slice(0, 6)
 
+  // Reconstruit la performance par marque pour un vendeur précis directement
+  // depuis les ventes brutes (et non depuis topFniParMarque qui limite à top 3).
+  // Ça garantit que le tableau « Performance par marque » contient TOUTES les
+  // marques du vendeur et que son total matche le total mensuel.
   const marquesPourVendeur = (nomV: string) => {
-    return topFniParMarque
-      .map(m => {
-        const v = (m.top_vendeurs || []).find((x:any) => x.vendeur_nom === nomV)
-        if (!v) return null
-        return {
-          marque: m.marque,
-          units: v.nb,
-          prix_vente: v.total_prix,
-          ventes_fni: v.total_ventes_fni,
-          profit_fni: v.total_profit_fni,
-          pct_marge_fni: v.total_prix > 0 ? v.total_profit_fni / v.total_prix : 0,
-          cash_deals: v.nb - v.nb_avec_fni,
-          pct_cash: v.nb ? (v.nb - v.nb_avec_fni)/v.nb : 0,
-          fni_par_unite: v.nb ? v.total_profit_fni / v.nb : 0,
-          attach_fni: v.attach_fni,
-        }
-      })
-      .filter(Boolean) as any[]
+    const m = new Map<string, any>()
+    for (const v of (ventes || [])) {
+      if (v.vendeur_nom !== nomV) continue
+      const k = v.marque || 'Inconnue'
+      if (!m.has(k)) m.set(k, { units:0, prix:0, ventes_fni:0, profit_fni:0, nb_avec_fni:0 })
+      const e = m.get(k)
+      e.units++
+      e.prix       += Number(v.prix_vente || 0)
+      e.ventes_fni += Number(v.ventes_fni || 0)
+      e.profit_fni += Number(v.profit_fni || 0)
+      if (Math.abs(Number(v.profit_fni || 0)) > 0.01) e.nb_avec_fni++
+    }
+    return [...m.entries()].map(([marque, e]) => ({
+      marque,
+      units: e.units,
+      prix_vente: e.prix,
+      ventes_fni: e.ventes_fni,
+      profit_fni: e.profit_fni,
+      pct_marge_fni: e.prix > 0 ? e.profit_fni / e.prix : 0,
+      cash_deals: e.units - e.nb_avec_fni,
+      pct_cash: e.units ? (e.units - e.nb_avec_fni) / e.units : 0,
+      fni_par_unite: e.units ? e.profit_fni / e.units : 0,
+      attach_fni: e.units ? e.nb_avec_fni / e.units : 0,
+    })).sort((a, b) => b.units - a.units)
   }
 
   const margeColor = (pct: number) => pct >= CIBLE_FNI ? C.green : pct >= SEUIL_AMBRE ? C.yellow : C.red
@@ -12800,6 +12810,31 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
                           <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(m.fni_par_unite)}</td>
                         </tr>
                       ))}
+                      {/* TOTAL — somme sur tous les mois (= valeurs globales du vendeur) */}
+                      {(() => {
+                        const totUnits  = moisV.reduce((s:any,m:any)=>s+m.units, 0)
+                        const totPrix   = moisV.reduce((s:any,m:any)=>s+m.prix, 0)
+                        const totVFni   = moisV.reduce((s:any,m:any)=>s+m.ventes_fni, 0)
+                        const totPFni   = moisV.reduce((s:any,m:any)=>s+m.profit_fni, 0)
+                        const totFni    = moisV.reduce((s:any,m:any)=>s+m.fni, 0)
+                        const totCash   = moisV.reduce((s:any,m:any)=>s+m.cash, 0)
+                        const totMarge  = totPrix > 0 ? totPFni/totPrix : 0
+                        const totAttach = totUnits ? totFni/totUnits : 0
+                        const totPctC   = totUnits ? totCash/totUnits : 0
+                        const totFniU   = totUnits ? totPFni/totUnits : 0
+                        return (
+                          <tr style={{background:dark?'#1a1a1a':'#f0f0f0',fontWeight:800,borderTop:`2px solid ${bdr}`}}>
+                            <td style={{padding:'9px 8px'}}>TOTAL</td>
+                            <td style={{padding:'9px 8px',textAlign:'right'}}>{fmtInt(totUnits)}</td>
+                            <td style={{padding:'9px 8px',textAlign:'right'}}>{fmt$(totVFni)}</td>
+                            <td style={{padding:'9px 8px',textAlign:'right',color:totPFni>=0?C.green:C.red}}>{fmt$(totPFni)}</td>
+                            <td style={{padding:'9px 8px',textAlign:'right'}}>{margeBadge(totMarge)}</td>
+                            <td style={{padding:'9px 8px',textAlign:'right'}}>{fmtPct(totAttach)}</td>
+                            <td style={{padding:'9px 8px',textAlign:'right'}}>{fmtPct(totPctC)}</td>
+                            <td style={{padding:'9px 8px',textAlign:'right'}}>{fmt$(totFniU)}</td>
+                          </tr>
+                        )
+                      })()}
                     </tbody>
                   </table>
                 </div>
@@ -12822,19 +12857,46 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
                 <tbody>
                   {vMarges.length === 0 ? (
                     <tr><td colSpan={9} style={{padding:20,textAlign:'center',color:sub,fontStyle:'italic'}}>Aucune marque pour ce vendeur.</td></tr>
-                  ) : vMarges.map(m => (
-                    <tr key={m.marque}>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{m.marque}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmtInt(m.units)}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(m.prix_vente)}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(m.ventes_fni)}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.profit_fni>=0?C.green:C.red}}>{fmt$(m.profit_fni)}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{margeBadge(m.pct_marge_fni)}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmtInt(m.cash_deals)}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmtPct(m.pct_cash)}</td>
-                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(m.fni_par_unite)}</td>
-                    </tr>
-                  ))}
+                  ) : <>
+                    {vMarges.map(m => (
+                      <tr key={m.marque}>
+                        <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{m.marque}</td>
+                        <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmtInt(m.units)}</td>
+                        <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(m.prix_vente)}</td>
+                        <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(m.ventes_fni)}</td>
+                        <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.profit_fni>=0?C.green:C.red}}>{fmt$(m.profit_fni)}</td>
+                        <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{margeBadge(m.pct_marge_fni)}</td>
+                        <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmtInt(m.cash_deals)}</td>
+                        <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmtPct(m.pct_cash)}</td>
+                        <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(m.fni_par_unite)}</td>
+                      </tr>
+                    ))}
+                    {/* TOTAL — somme sur toutes les marques (= valeurs globales du vendeur).
+                        Doit matcher le TOTAL du tableau « Détail mensuel ». */}
+                    {(() => {
+                      const totUnits = vMarges.reduce((s,m)=>s+m.units, 0)
+                      const totPrix  = vMarges.reduce((s,m)=>s+m.prix_vente, 0)
+                      const totVFni  = vMarges.reduce((s,m)=>s+m.ventes_fni, 0)
+                      const totPFni  = vMarges.reduce((s,m)=>s+m.profit_fni, 0)
+                      const totCash  = vMarges.reduce((s,m)=>s+m.cash_deals, 0)
+                      const totMarge = totPrix > 0 ? totPFni/totPrix : 0
+                      const totPctC  = totUnits ? totCash/totUnits : 0
+                      const totFniU  = totUnits ? totPFni/totUnits : 0
+                      return (
+                        <tr style={{background:dark?'#1a1a1a':'#f0f0f0',fontWeight:800,borderTop:`2px solid ${bdr}`}}>
+                          <td style={{padding:'9px 8px'}}>TOTAL</td>
+                          <td style={{padding:'9px 8px',textAlign:'right'}}>{fmtInt(totUnits)}</td>
+                          <td style={{padding:'9px 8px',textAlign:'right'}}>{fmt$(totPrix)}</td>
+                          <td style={{padding:'9px 8px',textAlign:'right'}}>{fmt$(totVFni)}</td>
+                          <td style={{padding:'9px 8px',textAlign:'right',color:totPFni>=0?C.green:C.red}}>{fmt$(totPFni)}</td>
+                          <td style={{padding:'9px 8px',textAlign:'right'}}>{margeBadge(totMarge)}</td>
+                          <td style={{padding:'9px 8px',textAlign:'right'}}>{fmtInt(totCash)}</td>
+                          <td style={{padding:'9px 8px',textAlign:'right'}}>{fmtPct(totPctC)}</td>
+                          <td style={{padding:'9px 8px',textAlign:'right'}}>{fmt$(totFniU)}</td>
+                        </tr>
+                      )
+                    })()}
+                  </>}
                 </tbody>
               </table>
             </div>
