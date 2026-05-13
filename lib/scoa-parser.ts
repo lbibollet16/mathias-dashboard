@@ -48,7 +48,9 @@ const MARQUES_DOUBLES = new Set(['CF MOTO'])
 //   "P22-0980"    PS
 //   "C23-0006A"   occasion (préfixe 1-3 lettres + suffixe lettre)
 //   "AC25-0331"   occasion (préfixe alphanumérique)
-const STOCK_RE = /^[A-Z]{0,3}\d{2}-\d{4}[A-Z]?$/
+//   "25-0457AB"   double suffixe (AB)
+//   "ACP26-0002"  préfixe 3 lettres
+const STOCK_RE = /^[A-Z]{0,3}\d{2}-\d{4}[A-Z]{0,2}$/
 const NUM_RE = /^-?\d+(?:[.,]\d+)?$/
 
 function parseNum(t: string): number {
@@ -79,10 +81,9 @@ function parseSaleLine(line: string, vendeur: { id: string, nom: string } | null
 
   const peekNum = (off: number) => tokens.length >= off && isNum(tokens[tokens.length - off])
 
-  // NbJours (entier) — optionnel : certaines lignes (deals annulés, transferts)
-  // n'ont pas de NbJours en fin de ligne.
+  // NbJours (entier — peut être négatif si vente avant délivrance) — optionnel.
   let nbJours: number | null = null
-  if (tokens.length > 0 && /^\d+$/.test(tokens[tokens.length - 1])) {
+  if (tokens.length > 0 && /^-?\d+$/.test(tokens[tokens.length - 1])) {
     nbJours = parseInt(tokens.pop()!, 10)
   }
 
