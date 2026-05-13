@@ -12261,7 +12261,7 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
       { titre:'% Marge FNI',        icon:'📊', format: v => fmtPct(v.total_prix>0 ? v.total_profit_fni/v.total_prix : 0), value: v => v.total_prix>0 ? v.total_profit_fni/v.total_prix : 0, desc:'profit FNI / prix vente', positifEstBon:true },
       { titre:'Attach FNI',         icon:'🔗', format: v => fmtPct(v.attach_fni), value: v => v.attach_fni, desc:'% deals avec FNI', positifEstBon:true },
       { titre:'FNI / unité',        icon:'💵', format: v => fmt$(v.nb ? v.total_profit_fni/v.nb : 0), value: v => v.nb ? v.total_profit_fni/v.nb : 0, desc:'$ FNI par vente', positifEstBon:true },
-      { titre:'Moins de cash',      icon:'🚫', format: v => fmtPct(v.nb ? (v.nb - v.nb_avec_fni)/v.nb : 0), value: v => v.nb ? -(v.nb - v.nb_avec_fni)/v.nb : 0, desc:'plus c\'est haut, mieux c\'est', positifEstBon:true },
+      { titre:'Moins de cash',      icon:'🚫', format: v => fmtPct(v.nb ? (v.nb - v.nb_avec_fni)/v.nb : 0), value: v => v.nb ? -(v.nb - v.nb_avec_fni)/v.nb : 0, desc:'plus c\'est bas, mieux c\'est', positifEstBon:true },
     ]
     return cats.map(c => {
       const ranking = [...topVendeurs].sort((a,b) => c.value(b) - c.value(a))
