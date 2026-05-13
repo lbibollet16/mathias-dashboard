@@ -163,7 +163,14 @@ function parseSaleLine(line: string, vendeur: { id: string, nom: string } | null
   if (annee === null) return null
 
   // Restant : [Client..., #Stock, Marque, Modele...]
-  const stockIdx = tokens.findIndex(t => STOCK_RE.test(t))
+  // On cherche le DERNIER token qui matche STOCK_RE (et non le premier) car
+  // certains noms de clients contiennent des numéros qui ressemblent à des
+  // stocks (« Société Auto 24-1234 Inc. ») — le vrai #Stock est toujours
+  // juste avant la marque, donc le dernier en partant de la gauche.
+  let stockIdx = -1
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    if (STOCK_RE.test(tokens[i])) { stockIdx = i; break }
+  }
   if (stockIdx < 0) return null
 
   const client = tokens.slice(0, stockIdx).join(' ').replace(/[\s,]+$/, '').trim() || null
