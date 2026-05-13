@@ -12023,6 +12023,32 @@ const FNI_EXPL = {
 
 function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, dark, card, bdr, sub, thBg, C, S, onAllerImport}: any) {
   const [sousVue, setSousVue] = useState<string>('comparatif')
+  const [analyseIa, setAnalyseIa] = useState<{texte: string, manque: number, duree: number}|null>(null)
+  const [analyseLoading, setAnalyseLoading] = useState(false)
+
+  async function lancerAnalyseIa(vendeur_nom: string) {
+    setAnalyseLoading(true)
+    setAnalyseIa(null)
+    try {
+      const r = await fetch('/api/scoa/fni-analyse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendeur_nom, filtDebut, filtFin }),
+      })
+      const d = await r.json()
+      if (r.ok && d.analyse) {
+        setAnalyseIa({ texte: d.analyse, manque: d.manque_total || 0, duree: d.duree_ms || 0 })
+      } else {
+        setAnalyseIa({ texte: `❌ ${d.erreur || 'Analyse impossible'}`, manque: 0, duree: 0 })
+      }
+    } catch (e:any) {
+      setAnalyseIa({ texte: `❌ Erreur : ${e.message}`, manque: 0, duree: 0 })
+    }
+    setAnalyseLoading(false)
+  }
+
+  // Reset l'analyse IA quand on change de vendeur
+  useEffect(() => { setAnalyseIa(null) }, [sousVue])
 
   // Helper tooltip — petit "i" cerclé. Sans-serif gras pour être lisible
   // en petit (sinon l'italique serif ressemble à un "?").
@@ -12553,14 +12579,35 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
               .scoa-fni-no-print { display: none !important; }
             }
           `}</style>
-          {/* Bandeau impression */}
-          <div className="scoa-fni-no-print" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,padding:'8px 12px',background:'#e8f0fe',border:`1px solid ${C.blue}33`,borderRadius:8}}>
-            <div style={{fontSize:12,color:C.blue}}>📄 Fiche vendeur de <strong>{v.vendeur_nom}</strong> — prête à imprimer / partager</div>
+          {/* Bandeau actions */}
+          <div className="scoa-fni-no-print" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,padding:'8px 12px',background:'#e8f0fe',border:`1px solid ${C.blue}33`,borderRadius:8,gap:8,flexWrap:'wrap'}}>
+            <div style={{fontSize:12,color:C.blue,flex:1,minWidth:180}}>📄 Fiche vendeur de <strong>{v.vendeur_nom}</strong></div>
+            <button onClick={()=>lancerAnalyseIa(v.vendeur_nom)} disabled={analyseLoading}
+              title="Coaching IA personnalisé : points forts, points à travailler, actions concrètes, potentiel de gain."
+              style={{background:analyseLoading?sub:'#7b1fa2',color:'#fff',border:'none',borderRadius:6,padding:'7px 14px',fontWeight:700,cursor:analyseLoading?'wait':'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+              {analyseLoading ? '⏳ Analyse en cours…' : '🧠 Analyse IA'}
+            </button>
             <button onClick={()=>window.print()}
-              style={{background:C.blue,color:'#fff',border:'none',borderRadius:6,padding:'7px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+              style={{background:C.blue,color:'#fff',border:'none',borderRadius:6,padding:'7px 14px',fontWeight:700,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
               🖨 Imprimer la fiche
             </button>
           </div>
+
+          {/* Résultat de l'analyse IA */}
+          {analyseIa && (
+            <div style={{background:card,border:`2px solid #7b1fa2`,borderRadius:10,padding:'14px 18px',marginBottom:14}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:8}}>
+                <div style={{fontSize:13,fontWeight:900,color:'#7b1fa2'}}>🧠 Coaching IA — {v.vendeur_nom}</div>
+                <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                  {analyseIa.duree > 0 && <span style={{fontSize:10,color:sub}}>généré en {(analyseIa.duree/1000).toFixed(1)}s · Claude Sonnet 4.5</span>}
+                  <button onClick={()=>setAnalyseIa(null)} className="scoa-fni-no-print"
+                    style={{background:'transparent',border:'none',color:sub,cursor:'pointer',fontSize:14}}>✕</button>
+                </div>
+              </div>
+              <div style={{fontSize:13,lineHeight:1.6,whiteSpace:'pre-wrap',color:dark?'#eee':'#222'}}>{analyseIa.texte}</div>
+            </div>
+          )}
+
           <div className="scoa-fni-print">
           <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(8,1fr)',gap:8,marginBottom:12}}>
             <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
