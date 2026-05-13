@@ -12074,7 +12074,9 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
   const pctMargeFni = g.total_prix > 0 ? g.total_profit_fni / g.total_prix : 0
   const fniParUnite = g.nb ? g.total_profit_fni / g.nb : 0
 
-  // Agrégation mensuelle
+  // Agrégation mensuelle.
+  // Un deal est compté « financé » si profit_fni != 0 (FNI sold, profitable
+  // ou non) et « cash » si profit_fni = 0 (aucun produit FNI vendu).
   const parMois = (() => {
     const m = new Map<string, { units:number, cash:number, fni:number }>()
     for (const v of (ventes || [])) {
@@ -12083,12 +12085,23 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
       if (!m.has(key)) m.set(key, { units:0, cash:0, fni:0 })
       const e = m.get(key)!
       e.units++
-      if (Number(v.ventes_fni||0) > 0) e.fni++; else e.cash++
+      if (Math.abs(Number(v.profit_fni || 0)) > 0.01) e.fni++; else e.cash++
     }
     return [...m.entries()]
       .map(([mois, e]) => ({ mois, ...e, pct_cash: e.units ? e.cash/e.units : 0 }))
       .sort((a, b) => a.mois.localeCompare(b.mois))
   })()
+
+  // Convertit "2025-11" → "Novembre 2025" (mois en français)
+  const MOIS_FR_LONG = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre']
+  const MOIS_FR_COURT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc']
+  const moisLabel = (key: string, court = false) => {
+    const m = /^(\d{4})-(\d{2})$/.exec(key)
+    if (!m) return key
+    const noMois = parseInt(m[2], 10) - 1
+    if (noMois < 0 || noMois > 11) return key
+    return court ? MOIS_FR_COURT[noMois] : `${MOIS_FR_LONG[noMois]} ${m[1]}`
+  }
 
   const CIBLE_FNI = 0.09
   const SEUIL_AMBRE = 0.07
@@ -12221,7 +12234,8 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
       e.prix += Number(v.prix_vente||0)
       e.ventes_fni += Number(v.ventes_fni||0)
       e.profit_fni += Number(v.profit_fni||0)
-      if (Number(v.ventes_fni||0) > 0) e.fni++; else e.cash++
+      // « Financé » = profit_fni != 0 (FNI vendu, profitable ou non)
+      if (Math.abs(Number(v.profit_fni||0)) > 0.01) e.fni++; else e.cash++
     }
     return [...m.entries()]
       .map(([mois, e]) => ({
@@ -12426,36 +12440,99 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
           </div>
         </div>
 
-        {/* Mensuel cash vs FNI */}
-        {parMois.length > 0 && (
-          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-              <div style={{fontSize:12,fontWeight:800}}>📅 Cash deal vs financement par mois<Info t={FNI_EXPL.mensuel_cash}/></div>
-              <div style={{fontSize:11,color:sub}}>
-                <span style={{display:'inline-block',width:10,height:10,background:C.blue,borderRadius:2,marginRight:4,verticalAlign:'middle'}}></span>FNI
-                <span style={{display:'inline-block',width:10,height:10,background:C.yellow,borderRadius:2,marginLeft:10,marginRight:4,verticalAlign:'middle'}}></span>Cash
+        {/* Mensuel cash vs FNI — graphique en barres + petit tableau résumé */}
+        {parMois.length > 0 && (() => {
+          const totalFni = parMois.reduce((s, m) => s + m.fni, 0)
+          const totalCash = parMois.reduce((s, m) => s + m.cash, 0)
+          const totalUnits = totalFni + totalCash
+          const maxUnits = Math.max(...parMois.map(x => x.units), 1)
+          return (
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'14px 16px',marginBottom:12}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:8}}>
+              <div style={{fontSize:13,fontWeight:800}}>📅 Cash deal vs Financement par mois<Info t={FNI_EXPL.mensuel_cash}/></div>
+              <div style={{display:'flex',gap:14,fontSize:11,alignItems:'center'}}>
+                <span><span style={{display:'inline-block',width:12,height:12,background:C.blue,borderRadius:3,marginRight:5,verticalAlign:'middle'}}></span><strong>{totalFni}</strong> financés ({totalUnits ? fmtPct(totalFni/totalUnits) : '—'})</span>
+                <span><span style={{display:'inline-block',width:12,height:12,background:C.yellow,borderRadius:3,marginRight:5,verticalAlign:'middle'}}></span><strong>{totalCash}</strong> cash ({totalUnits ? fmtPct(totalCash/totalUnits) : '—'})</span>
               </div>
             </div>
-            <div style={{display:'grid',gridTemplateColumns:`repeat(${Math.max(parMois.length,1)}, 1fr)`,gap:6,alignItems:'flex-end',height:180}}>
+
+            {/* Graphique en barres avec noms de mois */}
+            <div style={{display:'grid',gridTemplateColumns:`repeat(${Math.max(parMois.length,1)}, 1fr)`,gap:10,alignItems:'flex-end',height:200,padding:'0 4px',borderBottom:`1px solid ${bdr}`}}>
               {parMois.map(m => {
-                const maxUnits = Math.max(...parMois.map(x => x.units), 1)
-                const hFni = (m.fni / maxUnits) * 160
-                const hCash = (m.cash / maxUnits) * 160
+                const hFni = (m.fni / maxUnits) * 180
+                const hCash = (m.cash / maxUnits) * 180
                 return (
-                  <div key={m.mois} style={{display:'flex',flexDirection:'column',justifyContent:'flex-end',alignItems:'center',gap:2}}>
-                    <div style={{display:'flex',alignItems:'flex-end',gap:3,height:160}}>
-                      <div title={`${m.fni} FNI`} style={{width:14,background:C.blue,height:hFni,borderRadius:'3px 3px 0 0'}}/>
-                      <div title={`${m.cash} cash`} style={{width:14,background:C.yellow,height:hCash,borderRadius:'3px 3px 0 0'}}/>
+                  <div key={m.mois} style={{display:'flex',flexDirection:'column',justifyContent:'flex-end',alignItems:'center',gap:2,position:'relative'}}>
+                    {/* Total au-dessus */}
+                    <div style={{fontSize:11,fontWeight:700,color:sub,marginBottom:2}}>{m.units}</div>
+                    <div style={{display:'flex',alignItems:'flex-end',gap:5,height:180,width:'100%',justifyContent:'center'}}>
+                      <div style={{display:'flex',flexDirection:'column',alignItems:'center'}}>
+                        <div title={`${m.fni} financés`} style={{width:22,background:C.blue,height:Math.max(hFni,m.fni>0?6:0),borderRadius:'4px 4px 0 0',position:'relative'}}>
+                          {m.fni > 0 && <div style={{position:'absolute',top:-15,left:'50%',transform:'translateX(-50%)',fontSize:10,fontWeight:700,color:C.blue}}>{m.fni}</div>}
+                        </div>
+                      </div>
+                      <div style={{display:'flex',flexDirection:'column',alignItems:'center'}}>
+                        <div title={`${m.cash} cash`} style={{width:22,background:C.yellow,height:Math.max(hCash,m.cash>0?6:0),borderRadius:'4px 4px 0 0',position:'relative'}}>
+                          {m.cash > 0 && <div style={{position:'absolute',top:-15,left:'50%',transform:'translateX(-50%)',fontSize:10,fontWeight:700,color:C.yellow}}>{m.cash}</div>}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )
               })}
             </div>
-            <div style={{display:'grid',gridTemplateColumns:`repeat(${Math.max(parMois.length,1)}, 1fr)`,gap:6,fontSize:10,color:sub,textAlign:'center',marginTop:6}}>
-              {parMois.map(m => <div key={m.mois}>{m.mois.slice(5)}<br/><span style={{fontWeight:700}}>{fmtPct(m.pct_cash)}</span></div>)}
+            <div style={{display:'grid',gridTemplateColumns:`repeat(${Math.max(parMois.length,1)}, 1fr)`,gap:10,fontSize:11,textAlign:'center',marginTop:8,padding:'0 4px'}}>
+              {parMois.map(m => (
+                <div key={m.mois} style={{display:'flex',flexDirection:'column',gap:2}}>
+                  <div style={{fontWeight:700}}>{moisLabel(m.mois, true)} <span style={{color:sub,fontWeight:400,fontSize:10}}>{m.mois.slice(2,4)}</span></div>
+                  <div style={{fontSize:10}}>
+                    <span style={{color:m.pct_cash>0.4?C.red:m.pct_cash>0.25?C.yellow:C.green,fontWeight:700}}>{fmtPct(m.pct_cash)} cash</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Tableau résumé sous le graphique */}
+            <div style={{marginTop:14,overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:11,minWidth:500}}>
+                <thead>
+                  <tr style={{background:thBg}}>
+                    <th style={{padding:'7px 8px',textAlign:'left',fontSize:10,fontWeight:700,borderBottom:`1px solid ${bdr}`,textTransform:'uppercase'}}>Mois</th>
+                    <th style={{padding:'7px 8px',textAlign:'right',fontSize:10,fontWeight:700,borderBottom:`1px solid ${bdr}`,textTransform:'uppercase'}}>Total</th>
+                    <th style={{padding:'7px 8px',textAlign:'right',fontSize:10,fontWeight:700,borderBottom:`1px solid ${bdr}`,textTransform:'uppercase',color:C.blue}}>Financés</th>
+                    <th style={{padding:'7px 8px',textAlign:'right',fontSize:10,fontWeight:700,borderBottom:`1px solid ${bdr}`,textTransform:'uppercase',color:C.yellow}}>Cash</th>
+                    <th style={{padding:'7px 8px',textAlign:'right',fontSize:10,fontWeight:700,borderBottom:`1px solid ${bdr}`,textTransform:'uppercase'}}>% Financés</th>
+                    <th style={{padding:'7px 8px',textAlign:'right',fontSize:10,fontWeight:700,borderBottom:`1px solid ${bdr}`,textTransform:'uppercase'}}>% Cash</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {parMois.map(m => {
+                    const pctFin = m.units ? m.fni/m.units : 0
+                    return (
+                      <tr key={m.mois}>
+                        <td style={{padding:'7px 8px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{moisLabel(m.mois)}</td>
+                        <td style={{padding:'7px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{m.units}</td>
+                        <td style={{padding:'7px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:C.blue,fontWeight:700}}>{m.fni}</td>
+                        <td style={{padding:'7px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:C.yellow,fontWeight:700}}>{m.cash}</td>
+                        <td style={{padding:'7px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}><span style={{background:C.blue+'22',color:C.blue,padding:'2px 7px',borderRadius:4,fontSize:10,fontWeight:700}}>{fmtPct(pctFin)}</span></td>
+                        <td style={{padding:'7px 8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}><span style={{background:C.yellow+'22',color:C.yellow,padding:'2px 7px',borderRadius:4,fontSize:10,fontWeight:700}}>{fmtPct(m.pct_cash)}</span></td>
+                      </tr>
+                    )
+                  })}
+                  <tr style={{background:dark?'#1a1a1a':'#f0f0f0',fontWeight:800}}>
+                    <td style={{padding:'8px',fontSize:11}}>TOTAL</td>
+                    <td style={{padding:'8px',textAlign:'right'}}>{totalUnits}</td>
+                    <td style={{padding:'8px',textAlign:'right',color:C.blue}}>{totalFni}</td>
+                    <td style={{padding:'8px',textAlign:'right',color:C.yellow}}>{totalCash}</td>
+                    <td style={{padding:'8px',textAlign:'right'}}>{totalUnits ? fmtPct(totalFni/totalUnits) : '—'}</td>
+                    <td style={{padding:'8px',textAlign:'right'}}>{totalUnits ? fmtPct(totalCash/totalUnits) : '—'}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
-        )}
+          )
+        })()}
       </>}
 
       {/* ─── PAR VENDEUR ────────────────────────────────────────────── */}
@@ -12645,7 +12722,7 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
                     <tbody>
                       {moisV.map(m => (
                         <tr key={m.mois}>
-                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{m.mois}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{moisLabel(m.mois)}</td>
                           <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmtInt(m.units)}</td>
                           <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(m.ventes_fni)}</td>
                           <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.profit_fni>=0?C.green:C.red}}>{fmt$(m.profit_fni)}</td>
