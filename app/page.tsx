@@ -11995,15 +11995,26 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   )
 }
 
-// ── SCOA — Vue « Performance FNI » (design magazine, données réelles) ───────
-function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile}: any) {
+// ── SCOA — Vue « Performance FNI » (style standard dashboard) ───────────────
+function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, dark, card, bdr, sub, thBg, C, S, onAllerImport}: any) {
   const [sousVue, setSousVue] = useState<string>('comparatif')
 
-  if (loading) return <div style={{textAlign:'center',padding:60,fontFamily:'serif',color:'#1f2937'}}>⏳ Chargement…</div>
+  const fmt$ = (n: number) => '$' + (Math.round(n||0)).toLocaleString('fr-CA')
+  const fmtPct = (n: number) => ((n||0) * 100).toFixed(1).replace('.', ',') + '%'
+  const fmtInt = (n: number) => Math.round(n||0).toLocaleString('fr-CA')
+
+  if (loading) {
+    return <div style={{textAlign:'center',padding:40,color:sub,fontSize:13}}>⏳ Chargement…</div>
+  }
   if (!dashboard || dashboard.nb_total === 0) {
     return (
-      <div style={{background:'#fafaf7',border:'1px dashed #d6d2c4',borderRadius:10,textAlign:'center',padding:60,color:'#1f2937',opacity:.7}}>
-        Aucune vente. Importe un rapport SCOA depuis l'onglet « 📥 Import » pour activer le dashboard FNI.
+      <div style={{background:card,border:`1px dashed ${bdr}`,borderRadius:10,textAlign:'center',padding:40,color:sub}}>
+        <div style={{fontSize:14,fontWeight:700,marginBottom:8}}>Aucune vente importée</div>
+        <div style={{fontSize:12,marginBottom:14}}>Importe un rapport SCOA (PDF) pour activer le dashboard FNI.</div>
+        <button onClick={onAllerImport}
+          style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'9px 16px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+          📥 Aller à l'import
+        </button>
       </div>
     )
   }
@@ -12013,28 +12024,20 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile}:
   const parVendeur: any[] = dashboard.par_vendeur || []
   const topFniParMarque: any[] = dashboard.top_fni_par_marque || []
 
-  const fmt$ = (n: number) => '$' + (Math.round(n||0)).toLocaleString('fr-CA')
-  const fmtPct = (n: number) => ((n||0) * 100).toFixed(1).replace('.', ',') + '%'
-  const fmtInt = (n: number) => Math.round(n||0).toLocaleString('fr-CA')
-
   const cashDeals = (g.nb || 0) - (g.nb_avec_fni || 0)
   const pctCash = g.nb ? (cashDeals / g.nb) : 0
-  // Marge FNI = profit / ventes FNI (sur les deals financés)
   const pctMargeFni = g.total_ventes_fni > 0 ? g.total_profit_fni / g.total_ventes_fni : 0
   const fniParUnite = g.nb ? g.total_profit_fni / g.nb : 0
 
-  // Agrégation mensuelle (à partir des ventes brutes)
+  // Agrégation mensuelle
   const parMois = (() => {
-    const m = new Map<string, { units:number, prix:number, ventes_fni:number, profit_fni:number, cash:number, fni:number }>()
+    const m = new Map<string, { units:number, cash:number, fni:number }>()
     for (const v of (ventes || [])) {
       if (!v.date_vente) continue
-      const key = String(v.date_vente).slice(0, 7) // YYYY-MM
-      if (!m.has(key)) m.set(key, { units:0, prix:0, ventes_fni:0, profit_fni:0, cash:0, fni:0 })
+      const key = String(v.date_vente).slice(0, 7)
+      if (!m.has(key)) m.set(key, { units:0, cash:0, fni:0 })
       const e = m.get(key)!
       e.units++
-      e.prix += Number(v.prix_vente||0)
-      e.ventes_fni += Number(v.ventes_fni||0)
-      e.profit_fni += Number(v.profit_fni||0)
       if (Number(v.ventes_fni||0) > 0) e.fni++; else e.cash++
     }
     return [...m.entries()]
@@ -12042,17 +12045,12 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile}:
       .sort((a, b) => a.mois.localeCompare(b.mois))
   })()
 
-  const CIBLE_FNI = 0.09  // cible interne 9% marge brute FNI
+  const CIBLE_FNI = 0.09
   const SEUIL_AMBRE = 0.07
-  const periode = (filtDebut || filtFin)
-    ? `${filtDebut||'…'} → ${filtFin||'…'}`
-    : (dashboard.nb_total ? 'Toutes les ventes importées' : '')
+  const periode = (filtDebut || filtFin) ? `${filtDebut||'…'} → ${filtFin||'…'}` : 'Toute la période'
 
-  // Vendeurs : on prend les top 3 par profit FNI total (ou ceux présents)
   const topVendeurs = [...parVendeur].sort((a,b)=>b.total_profit_fni - a.total_profit_fni).slice(0, 6)
 
-  // Pour la vue par vendeur : agrégation par-marque pour un vendeur donné
-  // (reconstruite depuis top_fni_par_marque)
   const marquesPourVendeur = (nomV: string) => {
     return topFniParMarque
       .map(m => {
@@ -12074,314 +12072,257 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile}:
       .filter(Boolean) as any[]
   }
 
-  const pillForMarge = (pct: number) => {
-    if (pct >= CIBLE_FNI) return { txt:'✓ Cible', bg:'#d8f3dc', fg:'#2d6a4f' }
-    if (pct >= SEUIL_AMBRE) return { txt:'≈ Limite', bg:'#fdecc8', fg:'#b07d2a' }
-    return { txt:'⚠ Sous cible', bg:'#fcd6cf', fg:'#9a2a2a' }
+  const margeColor = (pct: number) => pct >= CIBLE_FNI ? C.green : pct >= SEUIL_AMBRE ? C.yellow : C.red
+  const margeBadge = (pct: number) => {
+    const col = margeColor(pct)
+    return <span style={{background:col+'22',color:col,padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:700,whiteSpace:'nowrap'}}>{fmtPct(pct)}</span>
   }
 
-  // ── Styles communs (palette + fonts du HTML SCOA_Dashboard_FNI.html)
-  const ink = '#0d1117', ink2 = '#1f2937', paper = '#fafaf7', paper2 = '#f5f3ec'
-  const rule = '#d6d2c4', primary = '#0a3d62', accent = '#c89b3c'
-  const green = '#2d6a4f', amber = '#b07d2a', red = '#9a2a2a'
-  const fserif: React.CSSProperties = { fontFamily:'Fraunces, Georgia, serif' }
-  const fmono: React.CSSProperties = { fontFamily:'JetBrains Mono, ui-monospace, monospace' }
-  const fsans: React.CSSProperties = { fontFamily:'Inter Tight, -apple-system, system-ui, sans-serif' }
-
-  const ENTETE_TXT = `Mathias Marine Sports · Cible interne : 9% marge brute FNI`
-
   return (
-    <div style={{background:paper, color:ink, ...fsans, border:`1px solid ${rule}`, borderRadius:10, overflow:'hidden'}}>
-      {/* Polices */}
-      <link rel="preconnect" href="https://fonts.googleapis.com"/>
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous"/>
-      <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700;9..144,900&family=JetBrains+Mono:wght@400;500;700&family=Inter+Tight:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-
-      {/* Hero */}
-      <div style={{background:ink, color:paper, padding:isMobile?'1.5rem':'2.2rem 2rem 1.6rem', borderBottom:`3px solid ${accent}`, position:'relative', overflow:'hidden'}}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-end',gap:'2rem',flexWrap:'wrap',position:'relative'}}>
-          <div>
-            <div style={{...fmono, fontSize:'.7rem', textTransform:'uppercase', letterSpacing:'.2em', color:accent, marginBottom:'.5rem'}}>— SCOA · Performance FNI</div>
-            <h1 style={{...fserif, fontSize:isMobile?'1.8rem':'2.6rem', fontWeight:900, letterSpacing:'-0.02em', lineHeight:1, margin:0}}>
-              Tableau de bord<br/><em style={{...fserif, fontStyle:'italic'}}>Financement & Profit</em>
-            </h1>
-            <div style={{marginTop:'.6rem', color:'rgba(250,250,247,.7)', fontSize:'.9rem'}}>
-              Comparatif vendeurs · données importées depuis tes PDF SCOA
-            </div>
-          </div>
-          <div style={{textAlign:'right', ...fmono, fontSize:'.72rem', color:'rgba(250,250,247,.6)', lineHeight:1.7}}>
-            {ENTETE_TXT}<br/>
-            <strong style={{color:paper, fontWeight:500}}>Période :</strong> {periode || 'Toute la période'}<br/>
-            <strong style={{color:paper, fontWeight:500}}>Cible :</strong> 9% marge brute FNI<br/>
-            <strong style={{color:paper, fontWeight:500}}>Ventes :</strong> {fmtInt(g.nb)} unités · {fmt$(g.total_prix + g.total_ventes_fni)}
+    <div>
+      {/* En-tête + bouton import */}
+      <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:12,display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+        <div style={{flex:1,minWidth:220}}>
+          <div style={{fontSize:14,fontWeight:900,color:C.blue}}>🏆 Performance FNI — Comparatif vendeurs</div>
+          <div style={{fontSize:11,color:sub,marginTop:2}}>
+            Cible 9 % marge brute FNI · Période : {periode} · Données : {fmtInt(g.nb)} unités importées (PDF SCOA)
           </div>
         </div>
+        <button onClick={onAllerImport}
+          style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+          📥 Importer un rapport FNI
+        </button>
       </div>
 
-      {/* Tabs Comparatif / par vendeur */}
-      <div style={{background:paper2, borderBottom:`1px solid ${rule}`, padding:'0 1rem', position:'sticky', top:0, zIndex:5, display:'flex', overflowX:'auto'}}>
-        <button onClick={()=>setSousVue('comparatif')} style={{background:'none', border:'none', padding:'1rem 1.2rem', ...fsans, fontSize:'.9rem', fontWeight:600, color:sousVue==='comparatif'?primary:ink2, cursor:'pointer', borderBottom:`3px solid ${sousVue==='comparatif'?accent:'transparent'}`, whiteSpace:'nowrap'}}>
-          🏆 Comparatif
+      {/* Sous-tabs : Comparatif + un par vendeur */}
+      <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>
+        <button onClick={()=>setSousVue('comparatif')}
+          style={{padding:'7px 12px',borderRadius:16,border:`2px solid ${sousVue==='comparatif'?C.yellow:bdr}`,background:sousVue==='comparatif'?(dark?'#2b2411':'#fffcf5'):'transparent',color:sousVue==='comparatif'?C.yellow:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+          🏆 Comparatif global
         </button>
         {topVendeurs.map(v => (
-          <button key={v.vendeur_nom} onClick={()=>setSousVue(v.vendeur_nom)} style={{background:'none', border:'none', padding:'1rem 1.2rem', ...fsans, fontSize:'.9rem', fontWeight:600, color:sousVue===v.vendeur_nom?primary:ink2, cursor:'pointer', borderBottom:`3px solid ${sousVue===v.vendeur_nom?accent:'transparent'}`, whiteSpace:'nowrap'}}>
-            👤 {v.vendeur_nom}
-            <span style={{...fmono, fontSize:'.65rem', background:sousVue===v.vendeur_nom?accent:rule, color:sousVue===v.vendeur_nom?ink:ink2, padding:'2px 7px', borderRadius:99, marginLeft:'.5rem'}}>{v.nb}</span>
+          <button key={v.vendeur_nom} onClick={()=>setSousVue(v.vendeur_nom)}
+            style={{padding:'7px 12px',borderRadius:16,border:`2px solid ${sousVue===v.vendeur_nom?C.blue:bdr}`,background:sousVue===v.vendeur_nom?(dark?'#1a233a':'#e8f0fe'):'transparent',color:sousVue===v.vendeur_nom?C.blue:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+            👤 {v.vendeur_nom} <span style={{opacity:.6,fontSize:10}}>({v.nb})</span>
           </button>
         ))}
       </div>
 
-      <div style={{padding:isMobile?'1.2rem':'2rem 1.8rem'}}>
+      {/* ─── COMPARATIF ─────────────────────────────────────────────── */}
+      {sousVue === 'comparatif' && <>
 
-        {/* ─── COMPARATIF ─────────────────────────────────────────────── */}
-        {sousVue === 'comparatif' && <>
+        {/* KPIs globaux FNI */}
+        <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(6,1fr)',gap:8,marginBottom:12}}>
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Unités totales</div>
+            <div style={{fontSize:20,fontWeight:900}}>{fmtInt(g.nb)}</div>
+          </div>
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Ventes FNI</div>
+            <div style={{fontSize:16,fontWeight:900,color:C.blue}}>{fmt$(g.total_ventes_fni)}</div>
+          </div>
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.green}`}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Profit FNI</div>
+            <div style={{fontSize:16,fontWeight:900,color:C.green}}>{fmt$(g.total_profit_fni)}</div>
+          </div>
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${margeColor(pctMargeFni)}`}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>% Marge FNI</div>
+            <div style={{fontSize:16,fontWeight:900,color:margeColor(pctMargeFni)}}>{fmtPct(pctMargeFni)}</div>
+            <div style={{fontSize:10,color:sub}}>cible 9%</div>
+          </div>
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.yellow}`}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Cash deals</div>
+            <div style={{fontSize:16,fontWeight:900,color:C.yellow}}>{cashDeals}</div>
+            <div style={{fontSize:10,color:sub}}>{fmtPct(pctCash)} des ventes</div>
+          </div>
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>FNI / unité</div>
+            <div style={{fontSize:16,fontWeight:900}}>{fmt$(fniParUnite)}</div>
+          </div>
+        </div>
 
-          {/* Vendor cards */}
-          <section style={{marginBottom:'2.4rem'}}>
-            <div style={{borderBottom:`1px solid ${rule}`, paddingBottom:'.7rem', marginBottom:'1.1rem'}}>
-              <div style={{...fmono, fontSize:'.7rem', color:accent, letterSpacing:'.2em', textTransform:'uppercase'}}>01 · Vue globale</div>
-              <h2 style={{...fserif, fontSize:'1.6rem', fontWeight:700, letterSpacing:'-0.02em', margin:0}}>Performance comparée des vendeurs</h2>
-            </div>
-            <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:'1.2rem'}}>
-              {topVendeurs.length === 0 ? (
-                <div style={{padding:'1.5rem', color:ink2, opacity:.5, fontStyle:'italic'}}>Aucun vendeur identifié.</div>
-              ) : topVendeurs.map((v, i) => {
-                const isWin = i === 0
-                const vendorPctCash = v.nb ? (v.nb - v.nb_avec_fni) / v.nb : 0
-                const vendorMargeFni = v.total_ventes_fni > 0 ? v.total_profit_fni / v.total_ventes_fni : 0
-                const colorTop = [accent, primary, '#2e7d32', '#7b1fa2', '#1565c0', '#b07d2a'][i] || primary
+        {/* Vendor cards */}
+        <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:800,marginBottom:10}}>👥 Performance par vendeur</div>
+          {topVendeurs.length === 0 ? (
+            <div style={{color:sub,fontSize:12,fontStyle:'italic',padding:10}}>Aucun vendeur identifié.</div>
+          ) : (
+            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(auto-fit, minmax(220px, 1fr))',gap:10}}>
+              {topVendeurs.map((v, i) => {
+                const vMargeFni = v.total_ventes_fni > 0 ? v.total_profit_fni / v.total_ventes_fni : 0
+                const vPctCash = v.nb ? (v.nb - v.nb_avec_fni) / v.nb : 0
                 return (
-                  <div key={v.vendeur_nom} style={{background:paper, border:`1px solid ${rule}`, borderTop:`4px solid ${colorTop}`, padding:'1.3rem', position:'relative'}}>
-                    {isWin && <div style={{position:'absolute', top:-10, right:10, background:accent, color:ink, padding:'3px 9px', ...fmono, fontSize:'.65rem', fontWeight:700, borderRadius:4, textTransform:'uppercase', letterSpacing:'.05em'}}>🏆 Top FNI</div>}
-                    <div style={{...fserif, fontSize:'1.3rem', fontWeight:700}}>{v.vendeur_nom}</div>
-                    <div style={{...fmono, fontSize:'.65rem', color:ink2, opacity:.6, textTransform:'uppercase', letterSpacing:'.1em', marginBottom:'1rem'}}>{v.nb} unités vendues</div>
-                    <div style={{display:'flex', justifyContent:'space-between', padding:'.45rem 0', borderTop:`1px solid ${rule}`, fontSize:'.83rem'}}>
-                      <span>Profit FNI</span><span style={{...fmono, fontWeight:700}}>{fmt$(v.total_profit_fni)}</span>
+                  <div key={v.vendeur_nom} style={{background:dark?'#0f0f0f':'#fafbfc',border:`1px solid ${bdr}`,borderLeft:`3px solid ${i===0?C.yellow:C.blue}`,borderRadius:8,padding:'10px 12px',position:'relative'}}>
+                    {i===0 && <div style={{position:'absolute',top:-8,right:8,background:C.yellow,color:'#fff',padding:'2px 8px',fontSize:9,fontWeight:700,borderRadius:4}}>🏆 #1 FNI</div>}
+                    <div style={{fontSize:13,fontWeight:800,marginBottom:2}}>{v.vendeur_nom}</div>
+                    <div style={{fontSize:10,color:sub,marginBottom:8}}>{v.nb} unités vendues</div>
+                    <div style={{fontSize:11,display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid ${bdr}`}}>
+                      <span style={{color:sub}}>Profit FNI</span><strong style={{color:C.green}}>{fmt$(v.total_profit_fni)}</strong>
                     </div>
-                    <div style={{display:'flex', justifyContent:'space-between', padding:'.45rem 0', borderTop:`1px solid ${rule}`, fontSize:'.83rem'}}>
-                      <span>Marge FNI</span><span style={{...fmono, fontWeight:700, color:vendorMargeFni>=CIBLE_FNI?green:vendorMargeFni>=SEUIL_AMBRE?amber:red}}>{fmtPct(vendorMargeFni)}</span>
+                    <div style={{fontSize:11,display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid ${bdr}`}}>
+                      <span style={{color:sub}}>% Marge</span><strong style={{color:margeColor(vMargeFni)}}>{fmtPct(vMargeFni)}</strong>
                     </div>
-                    <div style={{display:'flex', justifyContent:'space-between', padding:'.45rem 0', borderTop:`1px solid ${rule}`, fontSize:'.83rem'}}>
-                      <span>Attach FNI</span><span style={{...fmono, fontWeight:700}}>{fmtPct(v.attach_fni)}</span>
+                    <div style={{fontSize:11,display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid ${bdr}`}}>
+                      <span style={{color:sub}}>Attach FNI</span><strong>{fmtPct(v.attach_fni)}</strong>
                     </div>
-                    <div style={{display:'flex', justifyContent:'space-between', padding:'.45rem 0', borderTop:`1px solid ${rule}`, fontSize:'.83rem'}}>
-                      <span>FNI par unité</span><span style={{...fmono, fontWeight:700}}>{fmt$(v.nb ? v.total_profit_fni/v.nb : 0)}</span>
+                    <div style={{fontSize:11,display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid ${bdr}`}}>
+                      <span style={{color:sub}}>FNI / u</span><strong>{fmt$(v.nb ? v.total_profit_fni/v.nb : 0)}</strong>
                     </div>
-                    <div style={{display:'flex', justifyContent:'space-between', padding:'.45rem 0', borderTop:`1px solid ${rule}`, fontSize:'.83rem'}}>
-                      <span>% Cash</span><span style={{...fmono, fontWeight:700, color:vendorPctCash>0.4?amber:ink2}}>{fmtPct(vendorPctCash)}</span>
+                    <div style={{fontSize:11,display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid ${bdr}`}}>
+                      <span style={{color:sub}}>% Cash</span><strong style={{color:vPctCash>0.4?C.yellow:undefined}}>{fmtPct(vPctCash)}</strong>
                     </div>
                   </div>
                 )
               })}
             </div>
-          </section>
+          )}
+        </div>
 
-          {/* Callouts / insights */}
-          <section style={{marginBottom:'2.4rem'}}>
-            <div style={{borderBottom:`1px solid ${rule}`, paddingBottom:'.7rem', marginBottom:'1.1rem'}}>
-              <div style={{...fmono, fontSize:'.7rem', color:accent, letterSpacing:'.2em', textTransform:'uppercase'}}>02 · Insights clés</div>
-              <h2 style={{...fserif, fontSize:'1.6rem', fontWeight:700, letterSpacing:'-0.02em', margin:0}}>Points d'attention</h2>
-            </div>
-            <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:'1rem'}}>
-              {(() => {
-                const callouts: any[] = []
-                if (pctMargeFni >= CIBLE_FNI) {
-                  callouts.push({kind:'success', label:'Marge FNI globale', text:<>La marge brute FNI est à <strong>{fmtPct(pctMargeFni)}</strong>, <strong>au-dessus</strong> de la cible 9%.</>})
-                } else if (pctMargeFni >= SEUIL_AMBRE) {
-                  callouts.push({kind:'warning', label:'Marge FNI globale', text:<>Marge à <strong>{fmtPct(pctMargeFni)}</strong>, sous la cible 9% mais au-dessus du seuil 7%.</>})
-                } else if (pctMargeFni > 0) {
-                  callouts.push({kind:'danger', label:'Marge FNI globale', text:<>Marge à <strong>{fmtPct(pctMargeFni)}</strong>, <strong>en-dessous</strong> du seuil 7%. À redresser.</>})
-                }
-                if (pctCash >= 0.5) {
-                  callouts.push({kind:'warning', label:'Part des cash deals', text:<><strong>{fmtPct(pctCash)}</strong> des ventes sont cash. Manque à gagner FNI important.</>})
-                } else if (pctCash >= 0.3) {
-                  callouts.push({kind:'warning', label:'Part des cash deals', text:<><strong>{fmtPct(pctCash)}</strong> des ventes en cash. Opportunités FNI à creuser.</>})
-                }
-                const topMarque = parMarque[0]
-                if (topMarque) {
-                  callouts.push({kind:'success', label:'Marque #1 en profit FNI', text:<><strong>{topMarque.marque}</strong> : {fmt$(topMarque.total_profit_fni)} sur {fmtInt(topMarque.nb)} unités.</>})
-                }
-                const sousCible = parMarque.filter(m => m.total_ventes_fni > 0 && (m.total_profit_fni / m.total_ventes_fni) < SEUIL_AMBRE)
-                if (sousCible.length > 0) {
-                  callouts.push({kind:'danger', label:`${sousCible.length} marque(s) sous cible`, text:<>{sousCible.slice(0,3).map((m,i) => <span key={m.marque}>{i>0?', ':''}<strong>{m.marque}</strong></span>)} à surveiller.</>})
-                }
-                return callouts.map((c, i) => (
-                  <div key={i} style={{padding:'1.1rem 1.2rem', borderLeft:`4px solid ${c.kind==='success'?green:c.kind==='warning'?amber:c.kind==='danger'?red:primary}`, background:paper, border:`1px solid ${rule}`}}>
-                    <div style={{...fmono, fontSize:'.65rem', textTransform:'uppercase', letterSpacing:'.1em', color:ink2, opacity:.6, marginBottom:'.4rem'}}>{c.label}</div>
-                    <div style={{...fserif, fontSize:'1rem', lineHeight:1.35, fontWeight:500}}>{c.text}</div>
-                  </div>
-                ))
-              })()}
-            </div>
-          </section>
+        {/* Classement par marque */}
+        <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:800,marginBottom:8}}>🏷 Classement par marque (qui domine le FNI)</div>
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,minWidth:600}}>
+              <thead>
+                <tr style={{background:thBg}}>
+                  <th style={{padding:'8px',textAlign:'left',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`}}>Marque</th>
+                  <th style={{padding:'8px',textAlign:'right',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`}}>Unités</th>
+                  <th style={{padding:'8px',textAlign:'right',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`}}>$ FNI total</th>
+                  <th style={{padding:'8px',textAlign:'right',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`}}>% Marge</th>
+                  <th style={{padding:'8px',textAlign:'left',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`}}>🏆 Vendeur #1</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topFniParMarque.map(m => {
+                  const pm = parMarque.find(p => p.marque === m.marque)
+                  const margeM = pm && pm.total_ventes_fni > 0 ? pm.total_profit_fni / pm.total_ventes_fni : 0
+                  const top = m.top_vendeurs[0]
+                  return (
+                    <tr key={m.marque}>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{m.marque}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmtInt(m.nb_total)}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:C.green}}>{fmt$(m.brand_profit_fni_total)}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{margeBadge(margeM)}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>
+                        {top ? <><strong>{top.vendeur_nom}</strong> <span style={{color:sub}}>({fmt$(top.total_profit_fni)})</span></> : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-          {/* Classement par marque (qui domine) */}
-          <section style={{marginBottom:'2.4rem'}}>
-            <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-end', borderBottom:`1px solid ${rule}`, paddingBottom:'.7rem', marginBottom:'1.1rem'}}>
-              <div>
-                <div style={{...fmono, fontSize:'.7rem', color:accent, letterSpacing:'.2em', textTransform:'uppercase'}}>03 · Classement par marque</div>
-                <h2 style={{...fserif, fontSize:'1.6rem', fontWeight:700, letterSpacing:'-0.02em', margin:0}}>Qui domine sur chaque marque ?</h2>
+        {/* Mensuel cash vs FNI */}
+        {parMois.length > 0 && (
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+              <div style={{fontSize:12,fontWeight:800}}>📅 Cash deal vs financement par mois</div>
+              <div style={{fontSize:11,color:sub}}>
+                <span style={{display:'inline-block',width:10,height:10,background:C.blue,borderRadius:2,marginRight:4,verticalAlign:'middle'}}></span>FNI
+                <span style={{display:'inline-block',width:10,height:10,background:C.yellow,borderRadius:2,marginLeft:10,marginRight:4,verticalAlign:'middle'}}></span>Cash
               </div>
-              <div style={{...fmono, fontSize:'.75rem', color:ink2, opacity:.6}}>🏆 = vendeur #1 sur la marque</div>
             </div>
-            <div style={{overflowX:'auto', border:`1px solid ${rule}`, background:paper}}>
-              <table style={{width:'100%', borderCollapse:'collapse', fontSize:'.85rem'}}>
+            <div style={{display:'grid',gridTemplateColumns:`repeat(${Math.max(parMois.length,1)}, 1fr)`,gap:6,alignItems:'flex-end',height:180}}>
+              {parMois.map(m => {
+                const maxUnits = Math.max(...parMois.map(x => x.units), 1)
+                const hFni = (m.fni / maxUnits) * 160
+                const hCash = (m.cash / maxUnits) * 160
+                return (
+                  <div key={m.mois} style={{display:'flex',flexDirection:'column',justifyContent:'flex-end',alignItems:'center',gap:2}}>
+                    <div style={{display:'flex',alignItems:'flex-end',gap:3,height:160}}>
+                      <div title={`${m.fni} FNI`} style={{width:14,background:C.blue,height:hFni,borderRadius:'3px 3px 0 0'}}/>
+                      <div title={`${m.cash} cash`} style={{width:14,background:C.yellow,height:hCash,borderRadius:'3px 3px 0 0'}}/>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:`repeat(${Math.max(parMois.length,1)}, 1fr)`,gap:6,fontSize:10,color:sub,textAlign:'center',marginTop:6}}>
+              {parMois.map(m => <div key={m.mois}>{m.mois.slice(5)}<br/><span style={{fontWeight:700}}>{fmtPct(m.pct_cash)}</span></div>)}
+            </div>
+          </div>
+        )}
+      </>}
+
+      {/* ─── PAR VENDEUR ────────────────────────────────────────────── */}
+      {sousVue !== 'comparatif' && (() => {
+        const v = topVendeurs.find(x => x.vendeur_nom === sousVue) || parVendeur.find(x => x.vendeur_nom === sousVue)
+        if (!v) return <div style={{padding:20,color:sub,fontStyle:'italic'}}>Vendeur introuvable.</div>
+        const vMarges = marquesPourVendeur(v.vendeur_nom)
+        const vMargeFni = v.total_ventes_fni > 0 ? v.total_profit_fni / v.total_ventes_fni : 0
+        const vPctCash = v.nb ? (v.nb - v.nb_avec_fni) / v.nb : 0
+        return <>
+          <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(8,1fr)',gap:8,marginBottom:12}}>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Unités</div>
+              <div style={{fontSize:18,fontWeight:900}}>{fmtInt(v.nb)}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Prix vente</div>
+              <div style={{fontSize:15,fontWeight:900,color:C.blue}}>{fmt$(v.total_prix)}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Ventes FNI</div>
+              <div style={{fontSize:15,fontWeight:900,color:C.blue}}>{fmt$(v.total_ventes_fni)}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${v.total_profit_fni>=0?C.green:C.red}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Profit FNI</div>
+              <div style={{fontSize:15,fontWeight:900,color:v.total_profit_fni>=0?C.green:C.red}}>{fmt$(v.total_profit_fni)}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${margeColor(vMargeFni)}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>% Marge FNI</div>
+              <div style={{fontSize:15,fontWeight:900,color:margeColor(vMargeFni)}}>{fmtPct(vMargeFni)}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.yellow}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>% Cash</div>
+              <div style={{fontSize:15,fontWeight:900,color:C.yellow}}>{fmtPct(vPctCash)}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Attach FNI</div>
+              <div style={{fontSize:15,fontWeight:900}}>{fmtPct(v.attach_fni)}</div>
+            </div>
+            <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.green}`}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>FNI / u</div>
+              <div style={{fontSize:15,fontWeight:900,color:C.green}}>{fmt$(v.nb ? v.total_profit_fni/v.nb : 0)}</div>
+            </div>
+          </div>
+
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px'}}>
+            <div style={{fontSize:12,fontWeight:800,marginBottom:8}}>📊 Performance par marque — {v.vendeur_nom}</div>
+            <div style={{fontSize:10,color:sub,marginBottom:10}}>🟢 ≥9% · 🟡 7-9% · 🔴 &lt;7% vs cible</div>
+            <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,minWidth:800}}>
                 <thead>
-                  <tr>
-                    <th style={{background:ink, color:paper, padding:'.8rem .7rem', textAlign:'left', fontWeight:600, fontSize:'.72rem', textTransform:'uppercase', letterSpacing:'.08em', borderBottom:`2px solid ${accent}`, ...fsans}}>Marque</th>
-                    <th style={{background:ink, color:paper, padding:'.8rem .7rem', textAlign:'right', fontWeight:600, fontSize:'.72rem', textTransform:'uppercase', letterSpacing:'.08em', borderBottom:`2px solid ${accent}`, ...fsans}}>u</th>
-                    <th style={{background:ink, color:paper, padding:'.8rem .7rem', textAlign:'right', fontWeight:600, fontSize:'.72rem', textTransform:'uppercase', letterSpacing:'.08em', borderBottom:`2px solid ${accent}`, ...fsans}}>$ FNI total</th>
-                    <th style={{background:ink, color:paper, padding:'.8rem .7rem', textAlign:'right', fontWeight:600, fontSize:'.72rem', textTransform:'uppercase', letterSpacing:'.08em', borderBottom:`2px solid ${accent}`, ...fsans}}>% Marge</th>
-                    <th style={{background:ink, color:paper, padding:'.8rem .7rem', textAlign:'right', fontWeight:600, fontSize:'.72rem', textTransform:'uppercase', letterSpacing:'.08em', borderBottom:`2px solid ${accent}`, ...fsans}}>🏆 #1</th>
+                  <tr style={{background:thBg}}>
+                    {['Marque','Unités','Prix vente','Ventes FNI','Profit FNI','% Marge','Cash','% Cash','FNI / u'].map((h,i) => (
+                      <th key={h} style={{padding:'8px',textAlign:i===0?'left':'right',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`}}>{h}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {topFniParMarque.map((m) => {
-                    const margeM = m.brand_profit_fni_total > 0 && parMarque.find(p => p.marque===m.marque)
-                      ? (parMarque.find(p => p.marque===m.marque)!.total_profit_fni / (parMarque.find(p => p.marque===m.marque)!.total_ventes_fni || 1))
-                      : 0
-                    const top = m.top_vendeurs[0]
-                    return (
-                      <tr key={m.marque} style={{borderBottom:`1px solid ${rule}`}}>
-                        <td style={{padding:'.7rem', fontWeight:600, fontSize:'.88rem', ...fsans}}>{m.marque}</td>
-                        <td style={{padding:'.7rem', textAlign:'right', ...fmono, fontSize:'.8rem'}}>{fmtInt(m.nb_total)}</td>
-                        <td style={{padding:'.7rem', textAlign:'right', ...fmono, fontSize:'.8rem', fontWeight:600}}>{fmt$(m.brand_profit_fni_total)}</td>
-                        <td style={{padding:'.7rem', textAlign:'right', ...fmono, fontSize:'.8rem'}}>
-                          <span style={{padding:'2px 8px', borderRadius:4, ...pillForMarge(margeM), background:pillForMarge(margeM).bg, color:pillForMarge(margeM).fg, fontWeight:600}}>{fmtPct(margeM)}</span>
-                        </td>
-                        <td style={{padding:'.7rem', textAlign:'right', ...fmono, fontSize:'.8rem', fontWeight:700, color:accent}}>{top ? `${top.vendeur_nom} (${fmt$(top.total_profit_fni)})` : '—'}</td>
-                      </tr>
-                    )
-                  })}
+                  {vMarges.length === 0 ? (
+                    <tr><td colSpan={9} style={{padding:20,textAlign:'center',color:sub,fontStyle:'italic'}}>Aucune marque pour ce vendeur.</td></tr>
+                  ) : vMarges.map(m => (
+                    <tr key={m.marque}>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{m.marque}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmtInt(m.units)}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(m.prix_vente)}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(m.ventes_fni)}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.profit_fni>=0?C.green:C.red}}>{fmt$(m.profit_fni)}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{margeBadge(m.pct_marge_fni)}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmtInt(m.cash_deals)}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmtPct(m.pct_cash)}</td>
+                      <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(m.fni_par_unite)}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
-          </section>
-
-          {/* Mensuel cash vs FNI */}
-          {parMois.length > 0 && (
-            <section style={{marginBottom:'1rem'}}>
-              <div style={{borderBottom:`1px solid ${rule}`, paddingBottom:'.7rem', marginBottom:'1.1rem'}}>
-                <div style={{...fmono, fontSize:'.7rem', color:accent, letterSpacing:'.2em', textTransform:'uppercase'}}>04 · % Cash deal mensuel</div>
-                <h2 style={{...fserif, fontSize:'1.6rem', fontWeight:700, letterSpacing:'-0.02em', margin:0}}>Cash deal vs financement</h2>
-              </div>
-              <div style={{background:paper, border:`1px solid ${rule}`, padding:'1.3rem'}}>
-                <div style={{display:'flex', gap:'1.4rem', marginBottom:'1rem', fontSize:'.82rem'}}>
-                  <span><span style={{display:'inline-block', width:12, height:12, background:primary, borderRadius:2, marginRight:6, verticalAlign:'middle'}}></span>Avec FNI (financés)</span>
-                  <span><span style={{display:'inline-block', width:12, height:12, background:amber, borderRadius:2, marginRight:6, verticalAlign:'middle'}}></span>Cash deals</span>
-                </div>
-                <div style={{display:'grid', gridTemplateColumns:`repeat(${Math.max(parMois.length,1)}, 1fr)`, gap:8, alignItems:'flex-end', height:240, borderBottom:`1px solid ${rule}`}}>
-                  {parMois.map(m => {
-                    const maxUnits = Math.max(...parMois.map(x => x.units), 1)
-                    const hFni = (m.fni / maxUnits) * 230
-                    const hCash = (m.cash / maxUnits) * 230
-                    return (
-                      <div key={m.mois} style={{display:'flex', flexDirection:'column', justifyContent:'flex-end', alignItems:'center', gap:4}}>
-                        <div style={{display:'flex', alignItems:'flex-end', gap:4, height:230}}>
-                          <div title={`${m.fni} financés`} style={{width:18, background:primary, height:hFni, borderRadius:'2px 2px 0 0'}}/>
-                          <div title={`${m.cash} cash`} style={{width:18, background:amber, height:hCash, borderRadius:'2px 2px 0 0'}}/>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-                <div style={{display:'grid', gridTemplateColumns:`repeat(${Math.max(parMois.length,1)}, 1fr)`, gap:8, ...fmono, fontSize:'.68rem', color:ink2, textAlign:'center', marginTop:6}}>
-                  {parMois.map(m => <div key={m.mois}>{m.mois.slice(5)}<br/>{fmtPct(m.pct_cash)}</div>)}
-                </div>
-              </div>
-            </section>
-          )}
-        </>}
-
-        {/* ─── PAR VENDEUR ────────────────────────────────────────────── */}
-        {sousVue !== 'comparatif' && (() => {
-          const v = topVendeurs.find(x => x.vendeur_nom === sousVue) || parVendeur.find(x => x.vendeur_nom === sousVue)
-          if (!v) return <div style={{padding:30, color:ink2, opacity:.5, fontStyle:'italic'}}>Vendeur introuvable.</div>
-          const vMarges = marquesPourVendeur(v.vendeur_nom)
-          const vMargeFni = v.total_ventes_fni > 0 ? v.total_profit_fni / v.total_ventes_fni : 0
-          const vPctCash = v.nb ? (v.nb - v.nb_avec_fni) / v.nb : 0
-          const vKpis = [
-            { k:'Unités', val:fmtInt(v.nb), unit:'' },
-            { k:'Prix de vente', val:fmt$(v.total_prix), unit:'' },
-            { k:'Ventes FNI', val:fmt$(v.total_ventes_fni), unit:'' },
-            { k:'Profit FNI', val:fmt$(v.total_profit_fni), unit:'', cls: v.total_profit_fni > 0 ? 'success' : 'danger' },
-            { k:'% Marge FNI', val:fmtPct(vMargeFni), cls: vMargeFni >= CIBLE_FNI ? 'success' : vMargeFni >= SEUIL_AMBRE ? 'warning' : 'danger' },
-            { k:'% Cash', val:fmtPct(vPctCash), cls: vPctCash > 0.4 ? 'warning' : '' },
-            { k:'Attach FNI', val:fmtPct(v.attach_fni) },
-            { k:'FNI / unité', val:fmt$(v.nb ? v.total_profit_fni/v.nb : 0) },
-          ]
-          return <>
-            <section style={{marginBottom:'2rem'}}>
-              <div style={{borderBottom:`1px solid ${rule}`, paddingBottom:'.7rem', marginBottom:'1.1rem'}}>
-                <div style={{...fmono, fontSize:'.7rem', color:accent, letterSpacing:'.2em', textTransform:'uppercase'}}>{v.vendeur_nom} · Vue d'ensemble</div>
-                <h2 style={{...fserif, fontSize:'1.6rem', fontWeight:700, letterSpacing:'-0.02em', margin:0}}>Indicateurs clés de la période</h2>
-              </div>
-              <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(170px, 1fr))', gap:1, background:rule, border:`1px solid ${rule}`}}>
-                {vKpis.map((k, i) => {
-                  const bg = k.cls === 'success' ? `linear-gradient(135deg, #d8f3dc 0%, ${paper} 60%)`
-                           : k.cls === 'warning' ? `linear-gradient(135deg, #fdecc8 0%, ${paper} 60%)`
-                           : k.cls === 'danger'  ? `linear-gradient(135deg, #fcd6cf 0%, ${paper} 60%)` : paper
-                  const fg = k.cls === 'success' ? green : k.cls === 'warning' ? amber : k.cls === 'danger' ? red : ink
-                  return (
-                    <div key={i} style={{background:bg, padding:'1.2rem 1.2rem'}}>
-                      <div style={{...fmono, fontSize:'.65rem', textTransform:'uppercase', letterSpacing:'.15em', color:ink2, opacity:.6, marginBottom:'.4rem'}}>{k.k}</div>
-                      <div style={{...fserif, fontSize:'1.9rem', fontWeight:700, lineHeight:1, letterSpacing:'-0.03em', color:fg}}>{k.val}</div>
-                    </div>
-                  )
-                })}
-              </div>
-            </section>
-
-            <section style={{marginBottom:'2rem'}}>
-              <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-end', borderBottom:`1px solid ${rule}`, paddingBottom:'.7rem', marginBottom:'1.1rem'}}>
-                <div>
-                  <div style={{...fmono, fontSize:'.7rem', color:accent, letterSpacing:'.2em', textTransform:'uppercase'}}>{v.vendeur_nom} · Par marque</div>
-                  <h2 style={{...fserif, fontSize:'1.6rem', fontWeight:700, letterSpacing:'-0.02em', margin:0}}>Performance détaillée par marque</h2>
-                </div>
-                <div style={{...fmono, fontSize:'.72rem', color:ink2, opacity:.6}}>🟢 ≥9% · 🟡 7-9% · 🔴 &lt;7% vs cible</div>
-              </div>
-              <div style={{overflowX:'auto', border:`1px solid ${rule}`, background:paper}}>
-                <table style={{width:'100%', borderCollapse:'collapse', fontSize:'.85rem'}}>
-                  <thead>
-                    <tr>
-                      {['Marque','Unités','Prix Vente','Ventes FNI','Profit FNI','% Marge FNI','Cash','% Cash','FNI / u'].map((h, i) => (
-                        <th key={h} style={{background:ink, color:paper, padding:'.8rem .7rem', textAlign:i===0?'left':'right', fontWeight:600, fontSize:'.72rem', textTransform:'uppercase', letterSpacing:'.08em', borderBottom:`2px solid ${accent}`, ...fsans}}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {vMarges.length === 0 ? (
-                      <tr><td colSpan={9} style={{padding:'2rem', textAlign:'center', color:ink2, opacity:.5, fontStyle:'italic'}}>Aucune marque pour ce vendeur dans la période sélectionnée.</td></tr>
-                    ) : vMarges.map(m => {
-                      const p = pillForMarge(m.pct_marge_fni)
-                      return (
-                        <tr key={m.marque} style={{borderBottom:`1px solid ${rule}`}}>
-                          <td style={{padding:'.7rem', fontWeight:600, fontSize:'.88rem', ...fsans}}>{m.marque}</td>
-                          <td style={{padding:'.7rem', textAlign:'right', ...fmono, fontSize:'.8rem'}}>{fmtInt(m.units)}</td>
-                          <td style={{padding:'.7rem', textAlign:'right', ...fmono, fontSize:'.8rem'}}>{fmt$(m.prix_vente)}</td>
-                          <td style={{padding:'.7rem', textAlign:'right', ...fmono, fontSize:'.8rem'}}>{fmt$(m.ventes_fni)}</td>
-                          <td style={{padding:'.7rem', textAlign:'right', ...fmono, fontSize:'.8rem', fontWeight:600}}>{fmt$(m.profit_fni)}</td>
-                          <td style={{padding:'.7rem', textAlign:'right', ...fmono, fontSize:'.8rem'}}>
-                            <span style={{padding:'2px 8px', borderRadius:4, background:p.bg, color:p.fg, fontWeight:600}}>{fmtPct(m.pct_marge_fni)}</span>
-                          </td>
-                          <td style={{padding:'.7rem', textAlign:'right', ...fmono, fontSize:'.8rem'}}>{fmtInt(m.cash_deals)}</td>
-                          <td style={{padding:'.7rem', textAlign:'right', ...fmono, fontSize:'.8rem'}}>{fmtPct(m.pct_cash)}</td>
-                          <td style={{padding:'.7rem', textAlign:'right', ...fmono, fontSize:'.8rem'}}>{fmt$(m.fni_par_unite)}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          </>
-        })()}
-
-      </div>
-
-      <div style={{textAlign:'center', padding:'1.4rem', ...fmono, fontSize:'.68rem', color:ink2, opacity:.4, borderTop:`1px solid ${rule}`}}>
-        Mathias Marine Sports · SCOA · Performance FNI · Cible 9% marge brute · Données importées depuis tes PDF
-      </div>
+          </div>
+        </>
+      })()}
     </div>
   )
 }
@@ -12518,6 +12459,14 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           filtDebut={filtDebut}
           filtFin={filtFin}
           isMobile={isMobile}
+          dark={dark}
+          card={card}
+          bdr={bdr}
+          sub={sub}
+          thBg={thBg}
+          C={C}
+          S={S}
+          onAllerImport={() => setVue('import')}
         />
       )}
 
