@@ -12445,11 +12445,10 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
 function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
 
+  // Un seul type d'import : un rapport FNI par vendeur. Les anciens 4 types
+  // (ps_neuf, ps_usage, bateau_neuf, bateau_usage) restent acceptés côté API
+  // pour les données déjà importées, mais ne sont plus exposés dans l'UI.
   const TYPES = [
-    {id:'ps_neuf',     label:'🆕 Vente PS',            color:C.green},
-    {id:'ps_usage',    label:'♻️ Vente PS Occasion',   color:C.yellow},
-    {id:'bateau_neuf', label:'⛵ Vente Bateau Neuf',    color:C.blue},
-    {id:'bateau_usage',label:'🛥 Vente Bateau Usagé',   color:sub},
     {id:'rapport_fni_vendeur', label:'🏆 Rapport FNI par vendeur', color:'#c89b3c'},
   ] as const
 
@@ -12458,23 +12457,15 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState<string | null>(null)
   const [importLog, setImportLog] = useState<string[]>([])
-  const [filtTypes, setFiltTypes] = useState<string[]>(['ps_neuf','ps_usage','bateau_neuf','bateau_usage','rapport_fni_vendeur'])
+  const [filtTypes, setFiltTypes] = useState<string[]>(['rapport_fni_vendeur'])
   const [filtDebut, setFiltDebut] = useState<string>('')
   const [filtFin, setFiltFin] = useState<string>('')
   const [tabMarqueTri, setTabMarqueTri] = useState<'profit'|'volume'|'attach'|'marge'>('profit')
   const [ventes, setVentes] = useState<any[]>([])
   const [counts, setCounts] = useState<Record<string, number>>({})
 
-  const fileRefPsNeuf = useRef<HTMLInputElement | null>(null)
-  const fileRefPsUsage = useRef<HTMLInputElement | null>(null)
-  const fileRefBateauNeuf = useRef<HTMLInputElement | null>(null)
-  const fileRefBateauUsage = useRef<HTMLInputElement | null>(null)
   const fileRefFniVendeur = useRef<HTMLInputElement | null>(null)
   const filesRef: Record<string, React.MutableRefObject<HTMLInputElement | null>> = {
-    ps_neuf: fileRefPsNeuf,
-    ps_usage: fileRefPsUsage,
-    bateau_neuf: fileRefBateauNeuf,
-    bateau_usage: fileRefBateauUsage,
     rapport_fni_vendeur: fileRefFniVendeur,
   }
 
@@ -12551,8 +12542,6 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:14,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
         {[
           {id:'fni', label:'🏆 Performance FNI', color:'#c89b3c'},
-          {id:'dashboard', label:'📊 Analyse complète', color:C.blue},
-          {id:'ventes', label:`📋 Ventes (${ventes.length})`, color:sub},
           {id:'import', label:'📥 Import', color:C.green},
         ].map(v => (
           <button key={v.id} onClick={()=>setVue(v.id as any)}
