@@ -12024,10 +12024,20 @@ const FNI_EXPL = {
 function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, dark, card, bdr, sub, thBg, C, S, onAllerImport}: any) {
   const [sousVue, setSousVue] = useState<string>('comparatif')
 
-  // Helper tooltip ⓘ — utilise l'attribut title HTML natif (accessible, simple)
+  // Helper tooltip — petit "i" cerclé. Sans-serif gras pour être lisible
+  // en petit (sinon l'italique serif ressemble à un "?").
   const Info = ({ t }: { t: string }) => (
     <span title={t} aria-label={t} className="scoa-fni-no-print"
-      style={{display:'inline-flex',alignItems:'center',justifyContent:'center',width:14,height:14,marginLeft:5,borderRadius:'50%',background:sub+'22',color:sub,fontSize:9,fontWeight:700,cursor:'help',verticalAlign:'middle',fontFamily:'serif',fontStyle:'italic'}}>
+      style={{
+        display:'inline-flex',alignItems:'center',justifyContent:'center',
+        width:14,height:14,marginLeft:5,borderRadius:'50%',
+        background:C.blue,color:'#fff',
+        fontSize:10,fontWeight:900,lineHeight:1,
+        cursor:'help',verticalAlign:'middle',
+        fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        fontStyle:'normal',
+        userSelect:'none',
+      }}>
       i
     </span>
   )
