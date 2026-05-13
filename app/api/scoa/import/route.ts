@@ -13,7 +13,7 @@ export const maxDuration = 60
 // Dédup : UNIQUE(type, stock_num, num_contrat, date_vente) côté DB.
 // Re-import = upsert : on remplace les lignes matchantes.
 
-const TYPES_VALIDES = new Set(['ps_neuf', 'ps_usage', 'bateau_neuf', 'bateau_usage'])
+const TYPES_VALIDES = new Set(['ps_neuf', 'ps_usage', 'bateau_neuf', 'bateau_usage', 'rapport_fni_vendeur'])
 
 export async function POST(req: NextRequest) {
   try {

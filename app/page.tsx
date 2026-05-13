@@ -12078,6 +12078,51 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
     return <span style={{background:col+'22',color:col,padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:700,whiteSpace:'nowrap'}}>{fmtPct(pct)}</span>
   }
 
+  // Moyennes du groupe — pour comparer chaque vendeur
+  const grpMargeFni    = pctMargeFni
+  const grpAttachFni   = g.attach_fni || 0
+  const grpFniParUnite = fniParUnite
+  const grpPctCash     = pctCash
+  const deltaBadge = (val: number, ref: number, positifEstBon = true) => {
+    const diff = val - ref
+    const isPositif = positifEstBon ? diff >= 0 : diff <= 0
+    const col = Math.abs(diff) < 0.005 ? sub : (isPositif ? C.green : C.red)
+    const arr = diff > 0 ? '▲' : diff < 0 ? '▼' : '='
+    return <span style={{color:col,fontSize:10,fontWeight:700,marginLeft:4}}>{arr} {fmtPct(Math.abs(diff))}</span>
+  }
+  const delta$Badge = (val: number, ref: number, positifEstBon = true) => {
+    const diff = val - ref
+    const isPositif = positifEstBon ? diff >= 0 : diff <= 0
+    const col = Math.abs(diff) < 1 ? sub : (isPositif ? C.green : C.red)
+    const arr = diff > 0 ? '▲' : diff < 0 ? '▼' : '='
+    return <span style={{color:col,fontSize:10,fontWeight:700,marginLeft:4}}>{arr} {fmt$(Math.abs(diff))}</span>
+  }
+
+  // Mensuel par vendeur — calculé depuis ventes brutes filtrées par vendeur_nom
+  const moisParVendeur = (nomV: string) => {
+    const m = new Map<string, { units:number, prix:number, ventes_fni:number, profit_fni:number, cash:number, fni:number }>()
+    for (const v of (ventes || [])) {
+      if (!v.date_vente || v.vendeur_nom !== nomV) continue
+      const key = String(v.date_vente).slice(0, 7)
+      if (!m.has(key)) m.set(key, { units:0, prix:0, ventes_fni:0, profit_fni:0, cash:0, fni:0 })
+      const e = m.get(key)!
+      e.units++
+      e.prix += Number(v.prix_vente||0)
+      e.ventes_fni += Number(v.ventes_fni||0)
+      e.profit_fni += Number(v.profit_fni||0)
+      if (Number(v.ventes_fni||0) > 0) e.fni++; else e.cash++
+    }
+    return [...m.entries()]
+      .map(([mois, e]) => ({
+        mois, ...e,
+        pct_marge_fni: e.ventes_fni > 0 ? e.profit_fni/e.ventes_fni : 0,
+        pct_cash: e.units ? e.cash/e.units : 0,
+        attach: e.units ? e.fni/e.units : 0,
+        fni_par_unite: e.units ? e.profit_fni/e.units : 0,
+      }))
+      .sort((a, b) => a.mois.localeCompare(b.mois))
+  }
+
   return (
     <div>
       {/* En-tête + bouton import */}
@@ -12151,25 +12196,31 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
               {topVendeurs.map((v, i) => {
                 const vMargeFni = v.total_ventes_fni > 0 ? v.total_profit_fni / v.total_ventes_fni : 0
                 const vPctCash = v.nb ? (v.nb - v.nb_avec_fni) / v.nb : 0
+                const vFniParU = v.nb ? v.total_profit_fni / v.nb : 0
                 return (
                   <div key={v.vendeur_nom} style={{background:dark?'#0f0f0f':'#fafbfc',border:`1px solid ${bdr}`,borderLeft:`3px solid ${i===0?C.yellow:C.blue}`,borderRadius:8,padding:'10px 12px',position:'relative'}}>
                     {i===0 && <div style={{position:'absolute',top:-8,right:8,background:C.yellow,color:'#fff',padding:'2px 8px',fontSize:9,fontWeight:700,borderRadius:4}}>🏆 #1 FNI</div>}
                     <div style={{fontSize:13,fontWeight:800,marginBottom:2}}>{v.vendeur_nom}</div>
-                    <div style={{fontSize:10,color:sub,marginBottom:8}}>{v.nb} unités vendues</div>
+                    <div style={{fontSize:10,color:sub,marginBottom:8}}>{v.nb} unités vendues · <span style={{opacity:.7}}>vs moyenne groupe</span></div>
                     <div style={{fontSize:11,display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid ${bdr}`}}>
-                      <span style={{color:sub}}>Profit FNI</span><strong style={{color:C.green}}>{fmt$(v.total_profit_fni)}</strong>
+                      <span style={{color:sub}}>Profit FNI</span>
+                      <span><strong style={{color:C.green}}>{fmt$(v.total_profit_fni)}</strong></span>
                     </div>
                     <div style={{fontSize:11,display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid ${bdr}`}}>
-                      <span style={{color:sub}}>% Marge</span><strong style={{color:margeColor(vMargeFni)}}>{fmtPct(vMargeFni)}</strong>
+                      <span style={{color:sub}}>% Marge</span>
+                      <span><strong style={{color:margeColor(vMargeFni)}}>{fmtPct(vMargeFni)}</strong>{deltaBadge(vMargeFni, grpMargeFni)}</span>
                     </div>
                     <div style={{fontSize:11,display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid ${bdr}`}}>
-                      <span style={{color:sub}}>Attach FNI</span><strong>{fmtPct(v.attach_fni)}</strong>
+                      <span style={{color:sub}}>Attach FNI</span>
+                      <span><strong>{fmtPct(v.attach_fni)}</strong>{deltaBadge(v.attach_fni, grpAttachFni)}</span>
                     </div>
                     <div style={{fontSize:11,display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid ${bdr}`}}>
-                      <span style={{color:sub}}>FNI / u</span><strong>{fmt$(v.nb ? v.total_profit_fni/v.nb : 0)}</strong>
+                      <span style={{color:sub}}>FNI / u</span>
+                      <span><strong>{fmt$(vFniParU)}</strong>{delta$Badge(vFniParU, grpFniParUnite)}</span>
                     </div>
                     <div style={{fontSize:11,display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid ${bdr}`}}>
-                      <span style={{color:sub}}>% Cash</span><strong style={{color:vPctCash>0.4?C.yellow:undefined}}>{fmtPct(vPctCash)}</strong>
+                      <span style={{color:sub}}>% Cash</span>
+                      <span><strong style={{color:vPctCash>0.4?C.yellow:undefined}}>{fmtPct(vPctCash)}</strong>{deltaBadge(vPctCash, grpPctCash, false)}</span>
                     </div>
                   </div>
                 )
@@ -12289,6 +12340,69 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
             </div>
           </div>
 
+          {/* Comparatif vs moyenne du groupe */}
+          <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
+            <div style={{fontSize:12,fontWeight:800,marginBottom:8}}>📐 Comparatif vs moyenne du groupe</div>
+            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:8}}>
+              <div style={{padding:'8px 10px',border:`1px solid ${bdr}`,borderRadius:6,background:dark?'#0f0f0f':'#fafbfc'}}>
+                <div style={{fontSize:10,fontWeight:700,color:sub,textTransform:'uppercase'}}>% Marge FNI</div>
+                <div style={{fontSize:14,fontWeight:900,color:margeColor(vMargeFni)}}>{fmtPct(vMargeFni)}</div>
+                <div style={{fontSize:10,color:sub,marginTop:2}}>Groupe : <strong>{fmtPct(grpMargeFni)}</strong> {deltaBadge(vMargeFni, grpMargeFni)}</div>
+              </div>
+              <div style={{padding:'8px 10px',border:`1px solid ${bdr}`,borderRadius:6,background:dark?'#0f0f0f':'#fafbfc'}}>
+                <div style={{fontSize:10,fontWeight:700,color:sub,textTransform:'uppercase'}}>Attach FNI</div>
+                <div style={{fontSize:14,fontWeight:900}}>{fmtPct(v.attach_fni)}</div>
+                <div style={{fontSize:10,color:sub,marginTop:2}}>Groupe : <strong>{fmtPct(grpAttachFni)}</strong> {deltaBadge(v.attach_fni, grpAttachFni)}</div>
+              </div>
+              <div style={{padding:'8px 10px',border:`1px solid ${bdr}`,borderRadius:6,background:dark?'#0f0f0f':'#fafbfc'}}>
+                <div style={{fontSize:10,fontWeight:700,color:sub,textTransform:'uppercase'}}>FNI / u</div>
+                <div style={{fontSize:14,fontWeight:900,color:C.green}}>{fmt$(v.nb ? v.total_profit_fni/v.nb : 0)}</div>
+                <div style={{fontSize:10,color:sub,marginTop:2}}>Groupe : <strong>{fmt$(grpFniParUnite)}</strong> {delta$Badge(v.nb ? v.total_profit_fni/v.nb : 0, grpFniParUnite)}</div>
+              </div>
+              <div style={{padding:'8px 10px',border:`1px solid ${bdr}`,borderRadius:6,background:dark?'#0f0f0f':'#fafbfc'}}>
+                <div style={{fontSize:10,fontWeight:700,color:sub,textTransform:'uppercase'}}>% Cash</div>
+                <div style={{fontSize:14,fontWeight:900,color:C.yellow}}>{fmtPct(vPctCash)}</div>
+                <div style={{fontSize:10,color:sub,marginTop:2}}>Groupe : <strong>{fmtPct(grpPctCash)}</strong> {deltaBadge(vPctCash, grpPctCash, false)}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Détail mensuel */}
+          {(() => {
+            const moisV = moisParVendeur(v.vendeur_nom)
+            if (moisV.length === 0) return null
+            return (
+              <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
+                <div style={{fontSize:12,fontWeight:800,marginBottom:8}}>📅 Détail mensuel — {v.vendeur_nom}</div>
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,minWidth:700}}>
+                    <thead>
+                      <tr style={{background:thBg}}>
+                        {['Mois','Unités','Ventes FNI','Profit FNI','% Marge','Attach','% Cash','FNI / u'].map((h,i) => (
+                          <th key={h} style={{padding:'8px',textAlign:i===0?'left':'right',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {moisV.map(m => (
+                        <tr key={m.mois}>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{m.mois}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmtInt(m.units)}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(m.ventes_fni)}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700,color:m.profit_fni>=0?C.green:C.red}}>{fmt$(m.profit_fni)}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{margeBadge(m.pct_marge_fni)}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmtPct(m.attach)}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmtPct(m.pct_cash)}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(m.fni_par_unite)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          })()}
+
           <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px'}}>
             <div style={{fontSize:12,fontWeight:800,marginBottom:8}}>📊 Performance par marque — {v.vendeur_nom}</div>
             <div style={{fontSize:10,color:sub,marginBottom:10}}>🟢 ≥9% · 🟡 7-9% · 🔴 &lt;7% vs cible</div>
@@ -12336,6 +12450,7 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     {id:'ps_usage',    label:'♻️ Vente PS Occasion',   color:C.yellow},
     {id:'bateau_neuf', label:'⛵ Vente Bateau Neuf',    color:C.blue},
     {id:'bateau_usage',label:'🛥 Vente Bateau Usagé',   color:sub},
+    {id:'rapport_fni_vendeur', label:'🏆 Rapport FNI par vendeur', color:'#c89b3c'},
   ] as const
 
   const [vue, setVue] = useState<'fni'|'import'|'dashboard'|'ventes'>('fni')
@@ -12343,7 +12458,7 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState<string | null>(null)
   const [importLog, setImportLog] = useState<string[]>([])
-  const [filtTypes, setFiltTypes] = useState<string[]>(['ps_neuf','ps_usage','bateau_neuf','bateau_usage'])
+  const [filtTypes, setFiltTypes] = useState<string[]>(['ps_neuf','ps_usage','bateau_neuf','bateau_usage','rapport_fni_vendeur'])
   const [filtDebut, setFiltDebut] = useState<string>('')
   const [filtFin, setFiltFin] = useState<string>('')
   const [tabMarqueTri, setTabMarqueTri] = useState<'profit'|'volume'|'attach'|'marge'>('profit')
@@ -12354,11 +12469,13 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const fileRefPsUsage = useRef<HTMLInputElement | null>(null)
   const fileRefBateauNeuf = useRef<HTMLInputElement | null>(null)
   const fileRefBateauUsage = useRef<HTMLInputElement | null>(null)
+  const fileRefFniVendeur = useRef<HTMLInputElement | null>(null)
   const filesRef: Record<string, React.MutableRefObject<HTMLInputElement | null>> = {
     ps_neuf: fileRefPsNeuf,
     ps_usage: fileRefPsUsage,
     bateau_neuf: fileRefBateauNeuf,
     bateau_usage: fileRefBateauUsage,
+    rapport_fni_vendeur: fileRefFniVendeur,
   }
 
   async function charger() {
