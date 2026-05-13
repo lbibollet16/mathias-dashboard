@@ -11996,8 +11996,41 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
 }
 
 // ── SCOA — Vue « Performance FNI » (style standard dashboard) ───────────────
+
+// Explications affichées dans les tooltips ⓘ — centralisées pour maintenance
+const FNI_EXPL = {
+  unites:        "Nombre de véhicules vendus sur la période.",
+  prix_vente:    "Somme des prix de vente véhicule (hors produits FNI).",
+  ventes_fni:    "Montant total des produits FNI (financement, garantie, etc.) vendus avec les véhicules.",
+  profit_fni:    "Profit dégagé sur les produits FNI uniquement (pas le profit véhicule).",
+  marge_fni:     "Profit FNI ÷ Prix de Vente. Mesure la contribution du FNI au chiffre d'affaires véhicule. Cible interne : 9 %.",
+  attach_fni:    "% de deals avec au moins un produit FNI vendu. Mesure ta capacité à vendre du FNI.",
+  fni_par_u:     "Profit FNI ÷ Nombre total d'unités vendues. Combien chaque vente rapporte en FNI en moyenne (incluant les cash deals).",
+  cash_deals:    "Nombre de deals vendus SANS produit FNI. Chaque cash deal = manque à gagner.",
+  pct_cash:      "Cash deals ÷ Unités totales. Plus c'est bas, mieux c'est (= tu as vendu du FNI à plus de monde).",
+  manque:        "Si tu avais le FNI/unité du meilleur vendeur sur chacune de tes marques, combien tu aurais gagné en plus. Formule : tes_unités × (meilleur_FNI/u − ton_FNI/u).",
+  manque_marge:  "Variante du manque à gagner basée sur la marge FNI : tes_ventes_fni × (meilleure_marge − ta_marge).",
+  occasion:      "Véhicules d'occasion : tout #stock avec au moins une lettre (ex. C24-0001B, AC25-0331). Regroupés ensemble, peu importe la marque réelle.",
+  medailles:     "Top 3 vendeurs par catégorie. 🥇 Or = #1, 🥈 Argent = #2, 🥉 Bronze = #3.",
+  classement:    "Pour chaque marque : qui domine en profit FNI (et la marge totale de l'équipe sur cette marque).",
+  mensuel_cash:  "Pour chaque mois : combien de deals financés (bleu) vs en cash (jaune). % cash sous chaque colonne.",
+  comparatif:    "Tes valeurs vs la moyenne de toute l'équipe. ▲ vert = au-dessus, ▼ rouge = en-dessous.",
+  detail_mensuel:"Mois par mois, tes chiffres FNI : unités, ventes FNI, profit FNI, % marge, attach, % cash, FNI/u.",
+  perf_marque:   "Performance détaillée de ce vendeur sur chacune de ses marques.",
+  vendor_card:   "Synthèse de chaque vendeur avec écart vs moyenne du groupe (▲▼).",
+  cible_9:       "Cible interne Mathias Marine : 9 % de marge brute FNI. 🟢 ≥9 % · 🟡 7-9 % · 🔴 <7 %.",
+}
+
 function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, dark, card, bdr, sub, thBg, C, S, onAllerImport}: any) {
   const [sousVue, setSousVue] = useState<string>('comparatif')
+
+  // Helper tooltip ⓘ — utilise l'attribut title HTML natif (accessible, simple)
+  const Info = ({ t }: { t: string }) => (
+    <span title={t} aria-label={t} className="scoa-fni-no-print"
+      style={{display:'inline-flex',alignItems:'center',justifyContent:'center',width:14,height:14,marginLeft:5,borderRadius:'50%',background:sub+'22',color:sub,fontSize:9,fontWeight:700,cursor:'help',verticalAlign:'middle',fontFamily:'serif',fontStyle:'italic'}}>
+      i
+    </span>
+  )
 
   const fmt$ = (n: number) => '$' + (Math.round(n||0)).toLocaleString('fr-CA')
   const fmtPct = (n: number) => ((n||0) * 100).toFixed(1).replace('.', ',') + '%'
@@ -12026,7 +12059,9 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
 
   const cashDeals = (g.nb || 0) - (g.nb_avec_fni || 0)
   const pctCash = g.nb ? (cashDeals / g.nb) : 0
-  const pctMargeFni = g.total_ventes_fni > 0 ? g.total_profit_fni / g.total_ventes_fni : 0
+  // % Marge FNI = Profit FNI ÷ Prix de Vente (pas ÷ Ventes FNI).
+  // Mesure la contribution du FNI au chiffre d'affaires véhicule.
+  const pctMargeFni = g.total_prix > 0 ? g.total_profit_fni / g.total_prix : 0
   const fniParUnite = g.nb ? g.total_profit_fni / g.nb : 0
 
   // Agrégation mensuelle
@@ -12062,7 +12097,7 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
           prix_vente: v.total_prix,
           ventes_fni: v.total_ventes_fni,
           profit_fni: v.total_profit_fni,
-          pct_marge_fni: v.total_ventes_fni > 0 ? v.total_profit_fni / v.total_ventes_fni : 0,
+          pct_marge_fni: v.total_prix > 0 ? v.total_profit_fni / v.total_prix : 0,
           cash_deals: v.nb - v.nb_avec_fni,
           pct_cash: v.nb ? (v.nb - v.nb_avec_fni)/v.nb : 0,
           fni_par_unite: v.nb ? v.total_profit_fni / v.nb : 0,
@@ -12115,14 +12150,14 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
       })
       const best = sortedFniU[0]
       const bestFniPerU = best.nb ? best.total_profit_fni / best.nb : 0
-      // Meilleur % marge sur la marque (pour le manque "par FNI")
-      const bestMarge = Math.max(0, ...m.top_vendeurs.map((x:any) => x.total_ventes_fni > 0 ? x.total_profit_fni / x.total_ventes_fni : 0))
+      // Meilleur % marge sur la marque (= profit_fni / prix_vente)
+      const bestMarge = Math.max(0, ...m.top_vendeurs.map((x:any) => x.total_prix > 0 ? x.total_profit_fni / x.total_prix : 0))
 
       for (const v of m.top_vendeurs) {
         const vFniPerU = v.nb ? v.total_profit_fni / v.nb : 0
         const manque = Math.max(0, v.nb * (bestFniPerU - vFniPerU))
-        const vMarge = v.total_ventes_fni > 0 ? v.total_profit_fni / v.total_ventes_fni : 0
-        const manqueMarge = Math.max(0, v.total_ventes_fni * (bestMarge - vMarge))
+        const vMarge = v.total_prix > 0 ? v.total_profit_fni / v.total_prix : 0
+        const manqueMarge = Math.max(0, v.total_prix * (bestMarge - vMarge))
         if (!map.has(v.vendeur_nom)) map.set(v.vendeur_nom, [])
         map.get(v.vendeur_nom)!.push({
           marque: m.marque,
@@ -12149,7 +12184,7 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
   const medailles = (() => {
     const cats: { titre:string, icon:string, format:(v:any)=>string, value:(v:any)=>number, desc:string, positifEstBon:boolean }[] = [
       { titre:'Profit FNI total',   icon:'💰', format: v => fmt$(v.total_profit_fni), value: v => v.total_profit_fni, desc:'$ FNI rapportés', positifEstBon:true },
-      { titre:'% Marge FNI',        icon:'📊', format: v => fmtPct(v.total_ventes_fni>0 ? v.total_profit_fni/v.total_ventes_fni : 0), value: v => v.total_ventes_fni>0 ? v.total_profit_fni/v.total_ventes_fni : 0, desc:'marge FNI moy.', positifEstBon:true },
+      { titre:'% Marge FNI',        icon:'📊', format: v => fmtPct(v.total_prix>0 ? v.total_profit_fni/v.total_prix : 0), value: v => v.total_prix>0 ? v.total_profit_fni/v.total_prix : 0, desc:'profit FNI / prix vente', positifEstBon:true },
       { titre:'Attach FNI',         icon:'🔗', format: v => fmtPct(v.attach_fni), value: v => v.attach_fni, desc:'% deals avec FNI', positifEstBon:true },
       { titre:'FNI / unité',        icon:'💵', format: v => fmt$(v.nb ? v.total_profit_fni/v.nb : 0), value: v => v.nb ? v.total_profit_fni/v.nb : 0, desc:'$ FNI par vente', positifEstBon:true },
       { titre:'Moins de cash',      icon:'🚫', format: v => fmtPct(v.nb ? (v.nb - v.nb_avec_fni)/v.nb : 0), value: v => v.nb ? -(v.nb - v.nb_avec_fni)/v.nb : 0, desc:'plus c\'est haut, mieux c\'est', positifEstBon:true },
@@ -12181,7 +12216,7 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
     return [...m.entries()]
       .map(([mois, e]) => ({
         mois, ...e,
-        pct_marge_fni: e.ventes_fni > 0 ? e.profit_fni/e.ventes_fni : 0,
+        pct_marge_fni: e.prix > 0 ? e.profit_fni/e.prix : 0,
         pct_cash: e.units ? e.cash/e.units : 0,
         attach: e.units ? e.fni/e.units : 0,
         fni_par_unite: e.units ? e.profit_fni/e.units : 0,
@@ -12225,29 +12260,29 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
         {/* KPIs globaux FNI */}
         <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(6,1fr)',gap:8,marginBottom:12}}>
           <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
-            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Unités totales</div>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Unités totales<Info t={FNI_EXPL.unites}/></div>
             <div style={{fontSize:20,fontWeight:900}}>{fmtInt(g.nb)}</div>
           </div>
           <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
-            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Ventes FNI</div>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Ventes FNI<Info t={FNI_EXPL.ventes_fni}/></div>
             <div style={{fontSize:16,fontWeight:900,color:C.blue}}>{fmt$(g.total_ventes_fni)}</div>
           </div>
           <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.green}`}}>
-            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Profit FNI</div>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Profit FNI<Info t={FNI_EXPL.profit_fni}/></div>
             <div style={{fontSize:16,fontWeight:900,color:C.green}}>{fmt$(g.total_profit_fni)}</div>
           </div>
           <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${margeColor(pctMargeFni)}`}}>
-            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>% Marge FNI</div>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>% Marge FNI<Info t={FNI_EXPL.marge_fni}/></div>
             <div style={{fontSize:16,fontWeight:900,color:margeColor(pctMargeFni)}}>{fmtPct(pctMargeFni)}</div>
             <div style={{fontSize:10,color:sub}}>cible 9%</div>
           </div>
           <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.yellow}`}}>
-            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Cash deals</div>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Cash deals<Info t={FNI_EXPL.cash_deals}/></div>
             <div style={{fontSize:16,fontWeight:900,color:C.yellow}}>{cashDeals}</div>
             <div style={{fontSize:10,color:sub}}>{fmtPct(pctCash)} des ventes</div>
           </div>
           <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
-            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>FNI / unité</div>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>FNI / unité<Info t={FNI_EXPL.fni_par_u}/></div>
             <div style={{fontSize:16,fontWeight:900}}>{fmt$(fniParUnite)}</div>
           </div>
         </div>
@@ -12255,7 +12290,7 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
         {/* 🏅 Tableau des médailles — top 3 par catégorie */}
         {topVendeurs.length > 0 && (
           <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
-            <div style={{fontSize:12,fontWeight:800,marginBottom:10}}>🏅 Tableau des médailles</div>
+            <div style={{fontSize:12,fontWeight:800,marginBottom:10}}>🏅 Tableau des médailles<Info t={FNI_EXPL.medailles}/></div>
             <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(auto-fit, minmax(190px, 1fr))',gap:8}}>
               {medailles.map(m => (
                 <div key={m.titre} style={{padding:'10px 12px',background:dark?'#0f0f0f':'#fafbfc',border:`1px solid ${bdr}`,borderTop:`3px solid ${C.yellow}`,borderRadius:8}}>
@@ -12282,7 +12317,7 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
             <div style={{display:'flex',alignItems:'center',gap:14,flexWrap:'wrap'}}>
               <div style={{fontSize:32}}>💰</div>
               <div style={{flex:1,minWidth:220}}>
-                <div style={{fontSize:13,fontWeight:900,color:'#b06a00'}}>Manque à gagner total équipe : {fmt$(manqueTotalEquipe)}</div>
+                <div style={{fontSize:13,fontWeight:900,color:'#b06a00'}}>Manque à gagner total équipe : {fmt$(manqueTotalEquipe)}<Info t={FNI_EXPL.manque}/></div>
                 <div style={{fontSize:11,color:sub,marginTop:2}}>
                   Si chaque vendeur atteignait le FNI/u du meilleur sur chacune de ses marques, l'équipe aurait fait <strong>{fmt$(manqueTotalEquipe)} de plus</strong> sur la période.
                 </div>
@@ -12304,13 +12339,13 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
 
         {/* Vendor cards */}
         <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
-          <div style={{fontSize:12,fontWeight:800,marginBottom:10}}>👥 Performance par vendeur</div>
+          <div style={{fontSize:12,fontWeight:800,marginBottom:10}}>👥 Performance par vendeur<Info t={FNI_EXPL.vendor_card}/></div>
           {topVendeurs.length === 0 ? (
             <div style={{color:sub,fontSize:12,fontStyle:'italic',padding:10}}>Aucun vendeur identifié.</div>
           ) : (
             <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(auto-fit, minmax(220px, 1fr))',gap:10}}>
               {topVendeurs.map((v, i) => {
-                const vMargeFni = v.total_ventes_fni > 0 ? v.total_profit_fni / v.total_ventes_fni : 0
+                const vMargeFni = v.total_prix > 0 ? v.total_profit_fni / v.total_prix : 0
                 const vPctCash = v.nb ? (v.nb - v.nb_avec_fni) / v.nb : 0
                 const vFniParU = v.nb ? v.total_profit_fni / v.nb : 0
                 return (
@@ -12319,23 +12354,23 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
                     <div style={{fontSize:13,fontWeight:800,marginBottom:2}}>{v.vendeur_nom}</div>
                     <div style={{fontSize:10,color:sub,marginBottom:8}}>{v.nb} unités vendues · <span style={{opacity:.7}}>vs moyenne groupe</span></div>
                     <div style={{fontSize:11,display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid ${bdr}`}}>
-                      <span style={{color:sub}}>Profit FNI</span>
+                      <span style={{color:sub}}>Profit FNI<Info t={FNI_EXPL.profit_fni}/></span>
                       <span><strong style={{color:C.green}}>{fmt$(v.total_profit_fni)}</strong></span>
                     </div>
                     <div style={{fontSize:11,display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid ${bdr}`}}>
-                      <span style={{color:sub}}>% Marge</span>
+                      <span style={{color:sub}}>% Marge<Info t={FNI_EXPL.marge_fni}/></span>
                       <span><strong style={{color:margeColor(vMargeFni)}}>{fmtPct(vMargeFni)}</strong>{deltaBadge(vMargeFni, grpMargeFni)}</span>
                     </div>
                     <div style={{fontSize:11,display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid ${bdr}`}}>
-                      <span style={{color:sub}}>Attach FNI</span>
+                      <span style={{color:sub}}>Attach FNI<Info t={FNI_EXPL.attach_fni}/></span>
                       <span><strong>{fmtPct(v.attach_fni)}</strong>{deltaBadge(v.attach_fni, grpAttachFni)}</span>
                     </div>
                     <div style={{fontSize:11,display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid ${bdr}`}}>
-                      <span style={{color:sub}}>FNI / u</span>
+                      <span style={{color:sub}}>FNI / u<Info t={FNI_EXPL.fni_par_u}/></span>
                       <span><strong>{fmt$(vFniParU)}</strong>{delta$Badge(vFniParU, grpFniParUnite)}</span>
                     </div>
                     <div style={{fontSize:11,display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid ${bdr}`}}>
-                      <span style={{color:sub}}>% Cash</span>
+                      <span style={{color:sub}}>% Cash<Info t={FNI_EXPL.pct_cash}/></span>
                       <span><strong style={{color:vPctCash>0.4?C.yellow:undefined}}>{fmtPct(vPctCash)}</strong>{deltaBadge(vPctCash, grpPctCash, false)}</span>
                     </div>
                   </div>
@@ -12347,7 +12382,7 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
 
         {/* Classement par marque */}
         <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
-          <div style={{fontSize:12,fontWeight:800,marginBottom:8}}>🏷 Classement par marque (qui domine le FNI)</div>
+          <div style={{fontSize:12,fontWeight:800,marginBottom:8}}>🏷 Classement par marque (qui domine le FNI)<Info t={FNI_EXPL.classement}/></div>
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,minWidth:600}}>
               <thead>
@@ -12362,7 +12397,7 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
               <tbody>
                 {topFniParMarque.map(m => {
                   const pm = parMarque.find(p => p.marque === m.marque)
-                  const margeM = pm && pm.total_ventes_fni > 0 ? pm.total_profit_fni / pm.total_ventes_fni : 0
+                  const margeM = pm && pm.total_prix > 0 ? pm.total_profit_fni / pm.total_prix : 0
                   const top = m.top_vendeurs[0]
                   return (
                     <tr key={m.marque}>
@@ -12385,7 +12420,7 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
         {parMois.length > 0 && (
           <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',marginBottom:12}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-              <div style={{fontSize:12,fontWeight:800}}>📅 Cash deal vs financement par mois</div>
+              <div style={{fontSize:12,fontWeight:800}}>📅 Cash deal vs financement par mois<Info t={FNI_EXPL.mensuel_cash}/></div>
               <div style={{fontSize:11,color:sub}}>
                 <span style={{display:'inline-block',width:10,height:10,background:C.blue,borderRadius:2,marginRight:4,verticalAlign:'middle'}}></span>FNI
                 <span style={{display:'inline-block',width:10,height:10,background:C.yellow,borderRadius:2,marginLeft:10,marginRight:4,verticalAlign:'middle'}}></span>Cash
@@ -12418,7 +12453,7 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
         const v = topVendeurs.find(x => x.vendeur_nom === sousVue) || parVendeur.find(x => x.vendeur_nom === sousVue)
         if (!v) return <div style={{padding:20,color:sub,fontStyle:'italic'}}>Vendeur introuvable.</div>
         const vMarges = marquesPourVendeur(v.vendeur_nom)
-        const vMargeFni = v.total_ventes_fni > 0 ? v.total_profit_fni / v.total_ventes_fni : 0
+        const vMargeFni = v.total_prix > 0 ? v.total_profit_fni / v.total_prix : 0
         const vPctCash = v.nb ? (v.nb - v.nb_avec_fni) / v.nb : 0
         return <>
           {/* CSS @media print : ne montrer que le rapport vendeur quand on imprime */}
@@ -12442,35 +12477,35 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
           <div className="scoa-fni-print">
           <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(8,1fr)',gap:8,marginBottom:12}}>
             <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Unités</div>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Unités<Info t={FNI_EXPL.unites}/></div>
               <div style={{fontSize:18,fontWeight:900}}>{fmtInt(v.nb)}</div>
             </div>
             <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Prix vente</div>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Prix vente<Info t={FNI_EXPL.prix_vente}/></div>
               <div style={{fontSize:15,fontWeight:900,color:C.blue}}>{fmt$(v.total_prix)}</div>
             </div>
             <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.blue}`}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Ventes FNI</div>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Ventes FNI<Info t={FNI_EXPL.ventes_fni}/></div>
               <div style={{fontSize:15,fontWeight:900,color:C.blue}}>{fmt$(v.total_ventes_fni)}</div>
             </div>
             <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${v.total_profit_fni>=0?C.green:C.red}`}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Profit FNI</div>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Profit FNI<Info t={FNI_EXPL.profit_fni}/></div>
               <div style={{fontSize:15,fontWeight:900,color:v.total_profit_fni>=0?C.green:C.red}}>{fmt$(v.total_profit_fni)}</div>
             </div>
             <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${margeColor(vMargeFni)}`}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>% Marge FNI</div>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>% Marge FNI<Info t={FNI_EXPL.marge_fni}/></div>
               <div style={{fontSize:15,fontWeight:900,color:margeColor(vMargeFni)}}>{fmtPct(vMargeFni)}</div>
             </div>
             <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.yellow}`}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>% Cash</div>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>% Cash<Info t={FNI_EXPL.pct_cash}/></div>
               <div style={{fontSize:15,fontWeight:900,color:C.yellow}}>{fmtPct(vPctCash)}</div>
             </div>
             <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${sub}`}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Attach FNI</div>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Attach FNI<Info t={FNI_EXPL.attach_fni}/></div>
               <div style={{fontSize:15,fontWeight:900}}>{fmtPct(v.attach_fni)}</div>
             </div>
             <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 12px',borderLeft:`3px solid ${C.green}`}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>FNI / u</div>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>FNI / u<Info t={FNI_EXPL.fni_par_u}/></div>
               <div style={{fontSize:15,fontWeight:900,color:C.green}}>{fmt$(v.nb ? v.total_profit_fni/v.nb : 0)}</div>
             </div>
           </div>
