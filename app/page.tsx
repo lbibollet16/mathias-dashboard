@@ -5594,18 +5594,29 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   const [retourModal, setRetourModal] = useState<{ source: 'negatif'|'comptage'; ref_id: number; code_piece: string; demandeur: string } | null>(null)
   const [retourCommentaire, setRetourCommentaire] = useState('')
   const [retoursActifs, setRetoursActifs] = useState<any[]>([])
+  const [retoursTous, setRetoursTous] = useState<any[]>([])
 
   async function recharger() {
     try {
-      const [c, v, r] = await Promise.all([
+      const [c, v, r, rT] = await Promise.all([
         fetch('/api/inventaire/comptages').then(r=>r.json()),
         fetch('/api/validations-comptables').then(r=>r.json()),
         fetch('/api/comptabilite/retours?actifs=1').then(r=>r.json()),
+        fetch('/api/comptabilite/retours').then(r=>r.json()),
       ])
       if (Array.isArray(c)) setComptages(c)
       if (Array.isArray(v)) setValidationsCompta(v)
       if (Array.isArray(r)) setRetoursActifs(r)
+      if (Array.isArray(rT)) setRetoursTous(rT)
     } catch {}
+  }
+
+  // Pour un comptage (ou négatif) donné, retourne l'historique des retours
+  // comptables associés (actuel OU passés) — par ref_id ou par code_piece.
+  function historiqueRetoursPour(source: 'comptage'|'negatif', refId: number, codePiece: string): any[] {
+    return retoursTous
+      .filter((r:any) => r.source === source && (r.ref_id === refId || r.code_piece === codePiece))
+      .sort((a:any, b:any) => new Date(b.retourne_le).getTime() - new Date(a.retourne_le).getTime())
   }
 
   // Set des items déjà retournés (pour ne pas les afficher dans la liste à valider)
@@ -5812,6 +5823,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   const historiqueFiltre = filtSourceHist === 'tous' ? historique : historique.filter((v:any) => v.source === filtSourceHist)
 
   function NegDetails({n}: any) {
+    const histo = historiqueRetoursPour('negatif', n.id, n.code_piece)
     return (
       <div style={{background:dark?'#0f0f0f':'#fafbfc',padding:'14px 16px',borderTop:`1px solid ${bdr}`}}>
         <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:12}}>
@@ -5862,11 +5874,43 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
             </div>
           </div>
         )}
+
+        {/* Historique des retours comptables sur cette pièce */}
+        {histo.length > 0 && (
+          <div style={{background:dark?'#2b1f0e':'#fff8e1',border:`1px solid ${C.yellow}`,borderRadius:6,padding:'10px 12px',marginTop:10}}>
+            <div style={{fontSize:11,fontWeight:800,color:'#b06a00',textTransform:'uppercase',marginBottom:6}}>
+              📋 Historique des retours comptables ({histo.length})
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              {histo.map((r:any) => (
+                <div key={r.id} style={{background:card,borderRadius:5,padding:'8px 10px',border:`1px dashed ${C.yellow}66`}}>
+                  <div style={{display:'flex',justifyContent:'space-between',gap:8,flexWrap:'wrap',fontSize:10,color:sub,marginBottom:4}}>
+                    <span>↩ Retourné le <strong>{fmtDate(r.retourne_le)}</strong> par {r.comptable_email}</span>
+                    {r.corrige_le ? (
+                      <span style={{color:C.green,fontWeight:700}}>✓ Corrigé le {fmtDate(r.corrige_le)} par {r.corrige_par}</span>
+                    ) : (
+                      <span style={{color:C.red,fontWeight:700}}>● ACTIF</span>
+                    )}
+                  </div>
+                  <div style={{fontSize:12,whiteSpace:'pre-wrap',color:dark?'#e8e8e8':'#1a1a1a'}}>
+                    <strong style={{color:'#b06a00'}}>Commentaire compta : </strong>{r.commentaire_retour}
+                  </div>
+                  {r.commentaire_correction && (
+                    <div style={{fontSize:11,whiteSpace:'pre-wrap',color:dark?'#bbb':'#555',marginTop:4,borderTop:`1px dotted ${bdr}`,paddingTop:4}}>
+                      <strong style={{color:C.green}}>Correction : </strong>{r.commentaire_correction}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     )
   }
 
   function ComptDetails({c}: any) {
+    const histo = historiqueRetoursPour('comptage', c.id, c.code_piece)
     return (
       <div style={{background:dark?'#0f0f0f':'#fafbfc',padding:'14px 16px',borderTop:`1px solid ${bdr}`}}>
         <div style={{background:card,borderRadius:8,padding:'10px 12px',border:`1px solid ${bdr}`,marginBottom:10}}>
@@ -5885,9 +5929,39 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
         </div>
         {c.note && <div style={{background:dark?'#1a1a1a':'#f1f3f5',borderRadius:6,padding:'8px 12px',fontSize:12,color:sub,marginBottom:10,whiteSpace:'pre-wrap'}}>💬 {c.note}</div>}
         {c.photo_url && (
-          <a href={c.photo_url} target="_blank" rel="noreferrer" style={{display:'inline-block'}}>
+          <a href={c.photo_url} target="_blank" rel="noreferrer" style={{display:'inline-block',marginBottom:10}}>
             <img src={c.photo_url} alt="" onError={(e:any)=>e.target.style.display='none'} style={{width:160,height:110,objectFit:'cover',borderRadius:6,border:`2px solid ${C.green}`}}/>
           </a>
+        )}
+        {/* Historique des retours comptables sur cette pièce */}
+        {histo.length > 0 && (
+          <div style={{background:dark?'#2b1f0e':'#fff8e1',border:`1px solid ${C.yellow}`,borderRadius:6,padding:'10px 12px',marginTop:10}}>
+            <div style={{fontSize:11,fontWeight:800,color:'#b06a00',textTransform:'uppercase',marginBottom:6}}>
+              📋 Historique des retours comptables ({histo.length})
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              {histo.map((r:any) => (
+                <div key={r.id} style={{background:card,borderRadius:5,padding:'8px 10px',border:`1px dashed ${C.yellow}66`}}>
+                  <div style={{display:'flex',justifyContent:'space-between',gap:8,flexWrap:'wrap',fontSize:10,color:sub,marginBottom:4}}>
+                    <span>↩ Retourné le <strong>{fmtDate(r.retourne_le)}</strong> par {r.comptable_email}</span>
+                    {r.corrige_le ? (
+                      <span style={{color:C.green,fontWeight:700}}>✓ Corrigé le {fmtDate(r.corrige_le)} par {r.corrige_par}</span>
+                    ) : (
+                      <span style={{color:C.red,fontWeight:700}}>● ACTIF</span>
+                    )}
+                  </div>
+                  <div style={{fontSize:12,whiteSpace:'pre-wrap',color:dark?'#e8e8e8':'#1a1a1a'}}>
+                    <strong style={{color:'#b06a00'}}>Commentaire compta : </strong>{r.commentaire_retour}
+                  </div>
+                  {r.commentaire_correction && (
+                    <div style={{fontSize:11,whiteSpace:'pre-wrap',color:dark?'#bbb':'#555',marginTop:4,borderTop:`1px dotted ${bdr}`,paddingTop:4}}>
+                      <strong style={{color:C.green}}>Correction : </strong>{r.commentaire_correction}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
         <div style={{fontSize:11,color:sub,marginTop:8}}>Réconcilié le {fmtDateLong(c.date_reconciliation)}</div>
       </div>

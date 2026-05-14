@@ -49,10 +49,19 @@ export async function POST(req: NextRequest) {
     const now = new Date()
     const today = now.toISOString().split('T')[0]
 
-    // Supprimer les comptages existants du même jour pour cette pièce+localisation (éviter doublons)
-    await supabaseAdmin.from('inventaire_comptages').delete()
+    // Récupérer les IDs des anciens comptages du jour AVANT suppression,
+    // pour transférer leurs retours comptables actifs vers le nouveau comptage.
+    const { data: anciens } = await supabaseAdmin
+      .from('inventaire_comptages')
+      .select('id')
       .eq('code_piece', code_piece).eq('localisation', localisation)
       .gte('date_comptage', today + 'T00:00:00').lte('date_comptage', today + 'T23:59:59')
+    const ancienIds = (anciens || []).map((a: any) => a.id)
+
+    // Supprimer les comptages existants du même jour pour cette pièce+localisation
+    if (ancienIds.length > 0) {
+      await supabaseAdmin.from('inventaire_comptages').delete().in('id', ancienIds)
+    }
 
     const { data, error } = await supabaseAdmin.from('inventaire_comptages').insert({
       code_piece, localisation, qte_comptee, qte_systeme: qte_systeme || 0,
@@ -61,7 +70,19 @@ export async function POST(req: NextRequest) {
       date_comptage: now.toISOString(), statut: 'en_attente'
     }).select()
     if (error) throw error
-    return NextResponse.json(data?.[0] || {})
+    const nouveauComptage = data?.[0]
+
+    // Transférer les retours comptables actifs des anciens comptages vers le
+    // nouveau (préserve le commentaire de la comptable).
+    if (nouveauComptage && ancienIds.length > 0) {
+      await supabaseAdmin
+        .from('comptabilite_retours')
+        .update({ ref_id: nouveauComptage.id })
+        .eq('source', 'comptage')
+        .in('ref_id', ancienIds)
+    }
+
+    return NextResponse.json(nouveauComptage || {})
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message }, { status: 500 })
   }
