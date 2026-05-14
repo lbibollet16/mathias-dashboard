@@ -226,12 +226,12 @@ export async function POST() {
         } else if (r.source === 'comptage') {
           const c = comptagesMap.get(r.ref_id)
           if (!c) continue
-          const stockActuelInfo = stockTraction.get(c.code_piece)
-          const stockActuel = stockActuelInfo
-            ? (stockActuelInfo.qtyTotal || stockActuelInfo.stock)
-            : Number(c.stock_apres_sync || 0)
-          // Résolu si stock actuel >= qte_comptee (rien à corriger côté compta)
-          if (Number(stockActuel) >= Number(c.qte_comptee || 0)) {
+          // On compare avec stock_apres_sync (= stock J+1 du comptage, après
+          // les ventes intermédiaires normalement comptabilisées) et non
+          // avec stockTraction current. == strict : tout autre cas est un
+          // écart réel à corriger par la comptable.
+          if (c.stock_apres_sync !== null && c.stock_apres_sync !== undefined
+              && Number(c.stock_apres_sync) === Number(c.qte_comptee || 0)) {
             idsAutoCorrCpt.push(r.id)
           }
         }
@@ -250,27 +250,28 @@ export async function POST() {
         await supabaseAdmin.from('comptabilite_retours').update({
           corrige_le: nowIso, corrige_par: 'SYSTEM',
           vu_le: nowIso, vu_par: 'SYSTEM',
-          commentaire_correction: 'Auto-corrigé : stock système ≥ quantité comptée, aucune correction comptable nécessaire',
+          commentaire_correction: 'Auto-corrigé : stock J+1 = quantité comptée (match parfait, aucune correction nécessaire)',
         }).in('id', idsAutoCorrCpt)
-        log.push(`${idsAutoCorrCpt.length} retours « comptage » auto-corrigés (stock ≥ qte_comptee)`)
+        log.push(`${idsAutoCorrCpt.length} retours « comptage » auto-corrigés (stock_apres_sync = qte_comptee)`)
       }
     }
 
-    // 8d. Auto-réconciliation des comptages — stock_actuel >= qte_comptee
-    //   La Comptabilité ne traite QUE les vrais écarts (sys < compté) qui
-    //   demandent une correction du stock système vers le haut. Les autres
-    //   cas (sys = compté ou sys > compté) ne nécessitent aucune écriture.
+    // 8d. Auto-réconciliation des comptages — basée sur stock_apres_sync
+    //   stock_apres_sync = stock au J+1 du comptage, après les ventes
+    //   intermédiaires normales. C'est la référence pour décider si un
+    //   écart est résiduel (à corriger) ou résolu (équilibré).
+    //   == strict : tout écart (positif OU négatif) reste visible en
+    //   Comptabilité pour que la comptable fasse la correction.
     const { data: comptagesReconcilies } = await supabaseAdmin
       .from('inventaire_comptages')
-      .select('id, code_piece, qte_comptee, statut')
+      .select('id, code_piece, qte_comptee, stock_apres_sync, statut')
       .eq('statut', 'reconcilie')
 
     if (comptagesReconcilies && comptagesReconcilies.length > 0) {
       const idsResolus: number[] = []
       for (const c of comptagesReconcilies) {
-        const info = stockTraction.get(c.code_piece)
-        const stockActuel = info ? (info.qtyTotal || info.stock) : null
-        if (stockActuel !== null && Number(stockActuel) >= Number(c.qte_comptee || 0)) {
+        if (c.stock_apres_sync !== null && c.stock_apres_sync !== undefined
+            && Number(c.stock_apres_sync) === Number(c.qte_comptee || 0)) {
           idsResolus.push(c.id)
         }
       }
@@ -281,7 +282,7 @@ export async function POST() {
             statut: 'resolu',
           }).in('id', slice)
         }
-        log.push(`${idsResolus.length} comptages marqués « resolu » (stock ≥ qte_comptee, rien à corriger en compta)`)
+        log.push(`${idsResolus.length} comptages marqués « resolu » (stock_apres_sync = qte_comptee)`)
       }
     }
 
