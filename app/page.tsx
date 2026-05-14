@@ -12045,13 +12045,26 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
       const r = await fetch('/api/scoa/fni-assignments/import', { method:'POST', body: fd })
       const d = await r.json()
       if (r.ok && d.success) {
-        setFniAssignMsg(`✅ ${d.upserted} attributions FNI mises à jour`)
-        // Recharger la liste + rafraichir le dashboard pour appliquer les overrides
+        const diag = d.diagnostic
+        let msg = `✅ ${d.upserted} attributions sauvegardées`
+        if (diag) {
+          msg += ` · ${diag.ventes_matchees}/${d.upserted} stocks matchés en DB`
+          if (diag.ventes_avec_vendeur_change > 0) {
+            msg += ` · 🔄 ${diag.ventes_avec_vendeur_change} ventes ré-attribuées`
+          } else {
+            msg += ` · ⚠️ Aucune vente ré-attribuée (les mappings confirment l'existant)`
+          }
+        }
+        setFniAssignMsg(msg)
+        if (diag && diag.exemples_changements?.length) {
+          console.log('Exemples de ré-attributions :', diag.exemples_changements)
+        }
+        // Recharger la liste + rafraichir le dashboard
         const r2 = await fetch('/api/scoa/fni-assignments')
         const d2 = await r2.json()
         if (d2.assignments) setFniAssignments(d2.assignments)
         if (typeof onRefresh === 'function') onRefresh()
-        setTimeout(()=>setFniAssignMsg(null), 4000)
+        setTimeout(()=>setFniAssignMsg(null), 12000)
       } else {
         setFniAssignMsg(`❌ ${d.erreur || 'Erreur import'}`)
       }

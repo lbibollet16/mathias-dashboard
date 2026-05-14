@@ -86,11 +86,52 @@ export async function POST(req: NextRequest) {
     // Vider le cache pour que le dashboard reflète les nouvelles attributions immédiatement
     invaliderCacheFni()
 
+    // Diagnostic : combien de matches / overrides réels ?
+    // On scanne scoa_ventes pour voir combien de ventes ont un stock matché
+    // ET combien d'overrides changent effectivement le vendeur.
+    const { data: ventesRaw } = await supabaseAdmin
+      .from('scoa_ventes')
+      .select('stock_num, vendeur_nom')
+
+    // Extraire le « core » YY-NNNN
+    const core = (s: string) => {
+      const m = /(\d{2}-\d{4})/.exec(s || '')
+      return m ? m[1] : (s || '').trim()
+    }
+    const mapAssign = new Map<string, string>()
+    for (const a of assignments) mapAssign.set(core(a.stock_num), a.fni_vendeur_nom)
+
+    let matched = 0
+    let changed = 0
+    let alreadyOk = 0
+    const exemplesChanges: { stock: string, ancien: string, nouveau: string }[] = []
+    for (const v of (ventesRaw || [])) {
+      const c = core(v.stock_num)
+      const target = mapAssign.get(c)
+      if (!target) continue
+      matched++
+      if ((v.vendeur_nom || '').trim() === target.trim()) {
+        alreadyOk++
+      } else {
+        changed++
+        if (exemplesChanges.length < 10) {
+          exemplesChanges.push({ stock: v.stock_num, ancien: v.vendeur_nom || '(aucun)', nouveau: target })
+        }
+      }
+    }
+
     return NextResponse.json({
       success: true,
       upserted,
       total: assignments.length,
       errors,
+      diagnostic: {
+        ventes_total: (ventesRaw || []).length,
+        ventes_matchees: matched,
+        ventes_deja_bien_attribuees: alreadyOk,
+        ventes_avec_vendeur_change: changed,
+        exemples_changements: exemplesChanges,
+      },
     })
   } catch (e: any) {
     console.error('[fni-assignments/import]', e)
