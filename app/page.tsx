@@ -5682,13 +5682,22 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   }
   for (const c of (comptages||[])) {
     if (c.statut !== 'reconcilie') continue
-    const ec = c.ecart_reconcilie
-    if (ec === 0 || ec === null || ec === undefined) continue
+    // L'écart affiché dans la liste = AJUSTEMENT à appliquer maintenant
+    // = qte_comptee - stock_apres_sync (= stock J+1).
+    // Différent de ecart_reconcilie qui est l'écart figé au moment du comptage.
+    // Exemple : compté 1, J+1 = 2 → ajustement = -1 (sys doit baisser de 1).
+    let ajust: number
+    if (c.stock_apres_sync !== null && c.stock_apres_sync !== undefined) {
+      ajust = Number(c.qte_comptee || 0) - Number(c.stock_apres_sync)
+    } else {
+      ajust = Number(c.ecart_reconcilie || 0)  // fallback si pas de stock_apres_sync
+    }
+    if (ajust === 0) continue
     if (estValide('comptage', c.id)) continue
     if (estRetourne('comptage', c.id)) continue   // déjà retourné au demandeur
     items.push({
       key: `comptage:${c.id}`, source: 'comptage', id: c.id, code_piece: c.code_piece,
-      date: c.date_reconciliation || c.date_comptage, ecart: Number(ec),
+      date: c.date_reconciliation || c.date_comptage, ecart: ajust,
       valeur: 0, employe: c.employe||'',
       hasPhoto: !!c.photo_url,
       hasComment: !!c.note,
