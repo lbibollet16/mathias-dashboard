@@ -5935,8 +5935,6 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                 {id:'tous', label:`Tous (${items.length})`, color:sub},
                 {id:'negatif', label:`🔴 Nég (${nbNegatifs})`, color:C.red},
                 {id:'comptage', label:`📦 Cpt (${nbComptages})`, color:C.blue},
-                {id:'vrai_ecart', label:`🔴 Vrai écart (${nbVraiEcart})`, color:C.red},
-                {id:'sys_rattrape', label:`🟡 Sys rattrapé (${nbSysRattrape})`, color:C.yellow},
                 {id:'photo', label:`📸 Photo (${nbPhoto})`, color:C.green},
               ].map(f => (
                 <button key={f.id} onClick={()=>setFiltType(f.id as any)}
