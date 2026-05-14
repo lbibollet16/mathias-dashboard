@@ -196,7 +196,8 @@ export async function POST() {
 
     // 8c. Auto-correction des retours comptables
     //   - Retour 'négatif'  : si la pièce n'est plus en négatif → marqué corrigé
-    //   - Retour 'comptage' : si l'écart réconcilié est à 0 → marqué corrigé
+    //   - Retour 'comptage' : si le stock actuel matche la qte_comptee
+    //                        (= problème résolu, peu importe l'écart historique)
     // L'entrée reste dans la table (traçabilité), juste sortie de la liste active.
     const { data: retoursActifs } = await supabaseAdmin
       .from('comptabilite_retours')
@@ -213,7 +214,7 @@ export async function POST() {
       if (refIdsComptages.length > 0) {
         const { data: comptages } = await supabaseAdmin
           .from('inventaire_comptages')
-          .select('id, ecart_reconcilie, statut')
+          .select('id, code_piece, qte_comptee, stock_apres_sync, statut')
           .in('id', refIdsComptages)
         for (const c of comptages || []) comptagesMap.set(c.id, c)
       }
@@ -223,7 +224,14 @@ export async function POST() {
           if (!codesEncoreNegatifs.has(r.code_piece)) idsAutoCorrNeg.push(r.id)
         } else if (r.source === 'comptage') {
           const c = comptagesMap.get(r.ref_id)
-          if (c && c.statut === 'reconcilie' && Number(c.ecart_reconcilie || 0) === 0) {
+          if (!c) continue
+          // Stock actuel : on prend stockTraction (= sync qui vient de finir)
+          // qui est plus à jour que c.stock_apres_sync (snapshot du dernier sync).
+          const stockActuelInfo = stockTraction.get(c.code_piece)
+          const stockActuel = stockActuelInfo
+            ? (stockActuelInfo.qtyTotal || stockActuelInfo.stock)
+            : Number(c.stock_apres_sync || 0)
+          if (Number(stockActuel) === Number(c.qte_comptee || 0)) {
             idsAutoCorrCpt.push(r.id)
           }
         }
@@ -242,9 +250,39 @@ export async function POST() {
         await supabaseAdmin.from('comptabilite_retours').update({
           corrige_le: nowIso, corrige_par: 'SYSTEM',
           vu_le: nowIso, vu_par: 'SYSTEM',
-          commentaire_correction: 'Auto-corrigé : écart d\'inventaire résorbé (réconcilié à 0)',
+          commentaire_correction: 'Auto-corrigé : le stock actuel correspond à la quantité comptée',
         }).in('id', idsAutoCorrCpt)
-        log.push(`${idsAutoCorrCpt.length} retours « comptage » auto-corrigés (écart 0)`)
+        log.push(`${idsAutoCorrCpt.length} retours « comptage » auto-corrigés (stock actuel = qte_comptee)`)
+      }
+    }
+
+    // 8d. Auto-réconciliation des comptages eux-mêmes
+    //   Si le stock actuel matche la qte_comptee, on marque le comptage comme
+    //   « resolu » (statut séparé de « reconcilie ») pour qu'il sorte des vues
+    //   « écarts à investiguer ». L'écart_reconcilie historique reste intact.
+    const { data: comptagesReconcilies } = await supabaseAdmin
+      .from('inventaire_comptages')
+      .select('id, code_piece, qte_comptee, statut')
+      .eq('statut', 'reconcilie')
+
+    if (comptagesReconcilies && comptagesReconcilies.length > 0) {
+      const idsResolus: number[] = []
+      for (const c of comptagesReconcilies) {
+        const info = stockTraction.get(c.code_piece)
+        const stockActuel = info ? (info.qtyTotal || info.stock) : null
+        if (stockActuel !== null && Number(stockActuel) === Number(c.qte_comptee || 0)) {
+          idsResolus.push(c.id)
+        }
+      }
+      if (idsResolus.length > 0) {
+        // Mise à jour par batch
+        for (let i = 0; i < idsResolus.length; i += 200) {
+          const slice = idsResolus.slice(i, i + 200)
+          await supabaseAdmin.from('inventaire_comptages').update({
+            statut: 'resolu',
+          }).in('id', slice)
+        }
+        log.push(`${idsResolus.length} comptages marqués « resolu » (stock actuel = qte_comptee)`)
       }
     }
 
