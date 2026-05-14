@@ -5695,6 +5695,20 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     return true
   })
 
+  // Catégorise un comptage selon l'état actuel du stock vs ce qui a été compté.
+  // Sert d'indicateur visuel dans la liste « À valider ».
+  const categorieComptage = (it: any): { label: string, emoji: string, color: string } | null => {
+    if (it.source !== 'comptage') return null
+    const c = it.raw
+    const sysAct = c.stock_apres_sync
+    const compt = Number(c.qte_comptee || 0)
+    if (sysAct === null || sysAct === undefined) return { label:'À vérifier', emoji:'❓', color:sub }
+    const n = Number(sysAct)
+    if (n === compt) return { label:'Résolu', emoji:'🟢', color:C.green }
+    if (n > compt)   return { label:'Système rattrapé', emoji:'🟡', color:C.yellow }
+    return { label:'Vrai écart', emoji:'🔴', color:C.red }
+  }
+
   const itemsSorted = [...itemsFiltered].sort((a,b) => {
     if (tri === 'date_desc') return new Date(b.date).getTime() - new Date(a.date).getTime()
     if (tri === 'ecart_desc') return Math.abs(b.ecart) - Math.abs(a.ecart)
@@ -5970,6 +5984,16 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                           <div style={{flex:isMobile?2:1.5,minWidth:90,fontWeight:700,fontFamily:'monospace',fontSize:13}}>
                             <span style={{display:'inline-block',width:14,color:sub,fontFamily:'sans-serif'}}>{isExp?'▼':'▶'}</span>
                             {it.code_piece}
+                            {(() => {
+                              const cat = categorieComptage(it)
+                              if (!cat) return null
+                              return (
+                                <span title={cat.label}
+                                  style={{marginLeft:6,fontSize:11,padding:'1px 6px',borderRadius:4,background:cat.color+'22',color:cat.color,fontWeight:700,fontFamily:'sans-serif',whiteSpace:'nowrap'}}>
+                                  {cat.emoji} {cat.label}
+                                </span>
+                              )
+                            })()}
                           </div>
                           <div style={{width:isMobile?60:80,textAlign:'center',fontSize:16,fontWeight:900,color:ecartColor}}>
                             {it.ecart>=0?'+':''}{it.ecart.toFixed(0)}

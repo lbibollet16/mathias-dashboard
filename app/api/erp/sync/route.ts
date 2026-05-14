@@ -196,8 +196,8 @@ export async function POST() {
 
     // 8c. Auto-correction des retours comptables
     //   - Retour 'négatif'  : si la pièce n'est plus en négatif → marqué corrigé
-    //   - Retour 'comptage' : si le stock actuel matche la qte_comptee
-    //                        (= problème résolu, peu importe l'écart historique)
+    //   - Retour 'comptage' : si stock_actuel >= qte_comptee (= au moins autant
+    //     que ce qui a été compté → soit résolu, soit système rattrapé)
     // L'entrée reste dans la table (traçabilité), juste sortie de la liste active.
     const { data: retoursActifs } = await supabaseAdmin
       .from('comptabilite_retours')
@@ -208,7 +208,6 @@ export async function POST() {
       const idsAutoCorrNeg: number[] = []
       const idsAutoCorrCpt: number[] = []
 
-      // Récupérer les comptages référencés en un seul appel pour éviter N+1
       const refIdsComptages = retoursActifs.filter(r => r.source === 'comptage').map(r => r.ref_id)
       const comptagesMap = new Map<number, any>()
       if (refIdsComptages.length > 0) {
@@ -225,13 +224,12 @@ export async function POST() {
         } else if (r.source === 'comptage') {
           const c = comptagesMap.get(r.ref_id)
           if (!c) continue
-          // Stock actuel : on prend stockTraction (= sync qui vient de finir)
-          // qui est plus à jour que c.stock_apres_sync (snapshot du dernier sync).
           const stockActuelInfo = stockTraction.get(c.code_piece)
           const stockActuel = stockActuelInfo
             ? (stockActuelInfo.qtyTotal || stockActuelInfo.stock)
             : Number(c.stock_apres_sync || 0)
-          if (Number(stockActuel) === Number(c.qte_comptee || 0)) {
+          // Résolu si stock actuel >= qte_comptee (au moins autant que compté)
+          if (Number(stockActuel) >= Number(c.qte_comptee || 0)) {
             idsAutoCorrCpt.push(r.id)
           }
         }
@@ -250,16 +248,17 @@ export async function POST() {
         await supabaseAdmin.from('comptabilite_retours').update({
           corrige_le: nowIso, corrige_par: 'SYSTEM',
           vu_le: nowIso, vu_par: 'SYSTEM',
-          commentaire_correction: 'Auto-corrigé : le stock actuel correspond à la quantité comptée',
+          commentaire_correction: 'Auto-corrigé : stock actuel ≥ quantité comptée (problème résolu ou système rattrapé)',
         }).in('id', idsAutoCorrCpt)
-        log.push(`${idsAutoCorrCpt.length} retours « comptage » auto-corrigés (stock actuel = qte_comptee)`)
+        log.push(`${idsAutoCorrCpt.length} retours « comptage » auto-corrigés (stock ≥ qte_comptee)`)
       }
     }
 
     // 8d. Auto-réconciliation des comptages eux-mêmes
-    //   Si le stock actuel matche la qte_comptee, on marque le comptage comme
-    //   « resolu » (statut séparé de « reconcilie ») pour qu'il sorte des vues
-    //   « écarts à investiguer ». L'écart_reconcilie historique reste intact.
+    //   - Si stock_actuel == qte_comptee → statut 'resolu' (match parfait)
+    //   - Si stock_actuel > qte_comptee → statut 'resolu' (système rattrapé,
+    //     ex: réception entre comptage et aujourd'hui)
+    //   Les SYS_TROP_BAS (stock < comptage) restent en 'reconcilie' → visibles.
     const { data: comptagesReconcilies } = await supabaseAdmin
       .from('inventaire_comptages')
       .select('id, code_piece, qte_comptee, statut')
@@ -270,19 +269,56 @@ export async function POST() {
       for (const c of comptagesReconcilies) {
         const info = stockTraction.get(c.code_piece)
         const stockActuel = info ? (info.qtyTotal || info.stock) : null
-        if (stockActuel !== null && Number(stockActuel) === Number(c.qte_comptee || 0)) {
+        if (stockActuel !== null && Number(stockActuel) >= Number(c.qte_comptee || 0)) {
           idsResolus.push(c.id)
         }
       }
       if (idsResolus.length > 0) {
-        // Mise à jour par batch
         for (let i = 0; i < idsResolus.length; i += 200) {
           const slice = idsResolus.slice(i, i + 200)
           await supabaseAdmin.from('inventaire_comptages').update({
             statut: 'resolu',
           }).in('id', slice)
         }
-        log.push(`${idsResolus.length} comptages marqués « resolu » (stock actuel = qte_comptee)`)
+        log.push(`${idsResolus.length} comptages marqués « resolu » (stock ≥ qte_comptee)`)
+      }
+    }
+
+    // 8e. Déduplication des comptages — garder uniquement le PLUS RÉCENT par
+    //     (code_piece, localisation). Les anciens passent en statut 'obsolete'.
+    //     Évite les doublons dans la liste comptable quand un employé refait
+    //     le comptage sur la même pièce+loc à plusieurs jours d'intervalle.
+    const { data: tousComptages } = await supabaseAdmin
+      .from('inventaire_comptages')
+      .select('id, code_piece, localisation, date_comptage, statut')
+      .in('statut', ['reconcilie', 'resolu'])
+
+    if (tousComptages && tousComptages.length > 0) {
+      // Grouper par (code_piece, localisation)
+      const groupes = new Map<string, any[]>()
+      for (const c of tousComptages) {
+        const key = `${c.code_piece}__${c.localisation}`
+        if (!groupes.has(key)) groupes.set(key, [])
+        groupes.get(key)!.push(c)
+      }
+      // Pour chaque groupe avec ≥ 2 comptages, marquer les anciens en 'obsolete'
+      const idsObsolete: number[] = []
+      for (const [, list] of groupes) {
+        if (list.length < 2) continue
+        list.sort((a, b) => new Date(b.date_comptage).getTime() - new Date(a.date_comptage).getTime())
+        // Garder list[0] (le plus récent), marquer les autres
+        for (let i = 1; i < list.length; i++) {
+          if (list[i].statut !== 'obsolete') idsObsolete.push(list[i].id)
+        }
+      }
+      if (idsObsolete.length > 0) {
+        for (let i = 0; i < idsObsolete.length; i += 200) {
+          const slice = idsObsolete.slice(i, i + 200)
+          await supabaseAdmin.from('inventaire_comptages').update({
+            statut: 'obsolete',
+          }).in('id', slice)
+        }
+        log.push(`${idsObsolete.length} comptages anciens marqués « obsolete » (superseded par un comptage plus récent)`)
       }
     }
 
