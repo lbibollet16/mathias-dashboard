@@ -5583,7 +5583,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   const userEmail = profil?.email || profil?.nom || 'Inconnu'
   const [comptages, setComptages] = useState<any[]>([])
   const [vue, setVue] = useState<'a_valider'|'historique'>('a_valider')
-  const [filtType, setFiltType] = useState<'tous'|'negatif'|'comptage'|'photo'>('tous')
+  const [filtType, setFiltType] = useState<'tous'|'negatif'|'comptage'|'photo'|'vrai_ecart'|'sys_rattrape'>('tous')
   const [tri, setTri] = useState<'date_desc'|'ecart_desc'|'code_asc'>('date_desc')
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -5691,6 +5691,14 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     if (filtType === 'negatif' && it.source !== 'negatif') return false
     if (filtType === 'comptage' && it.source !== 'comptage') return false
     if (filtType === 'photo' && !it.hasPhoto) return false
+    if (filtType === 'vrai_ecart' || filtType === 'sys_rattrape') {
+      if (it.source !== 'comptage') return false
+      const sysAct = it.raw.stock_apres_sync
+      const compt = Number(it.raw.qte_comptee || 0)
+      if (sysAct === null || sysAct === undefined) return false
+      if (filtType === 'vrai_ecart' && Number(sysAct) >= compt) return false
+      if (filtType === 'sys_rattrape' && Number(sysAct) <= compt) return false
+    }
     if (searchLower && !it.code_piece.toLowerCase().includes(searchLower)) return false
     return true
   })
@@ -5719,6 +5727,16 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   const nbNegatifs = items.filter(i=>i.source==='negatif').length
   const nbComptages = items.filter(i=>i.source==='comptage').length
   const nbPhoto = items.filter(i=>i.hasPhoto).length
+  const nbVraiEcart = items.filter(i => {
+    if (i.source !== 'comptage') return false
+    const s = i.raw.stock_apres_sync
+    return s !== null && s !== undefined && Number(s) < Number(i.raw.qte_comptee || 0)
+  }).length
+  const nbSysRattrape = items.filter(i => {
+    if (i.source !== 'comptage') return false
+    const s = i.raw.stock_apres_sync
+    return s !== null && s !== undefined && Number(s) > Number(i.raw.qte_comptee || 0)
+  }).length
 
   function toggleExpand(k: string) {
     setExpanded(prev => {
@@ -5917,6 +5935,8 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                 {id:'tous', label:`Tous (${items.length})`, color:sub},
                 {id:'negatif', label:`🔴 Nég (${nbNegatifs})`, color:C.red},
                 {id:'comptage', label:`📦 Cpt (${nbComptages})`, color:C.blue},
+                {id:'vrai_ecart', label:`🔴 Vrai écart (${nbVraiEcart})`, color:C.red},
+                {id:'sys_rattrape', label:`🟡 Sys rattrapé (${nbSysRattrape})`, color:C.yellow},
                 {id:'photo', label:`📸 Photo (${nbPhoto})`, color:C.green},
               ].map(f => (
                 <button key={f.id} onClick={()=>setFiltType(f.id as any)}

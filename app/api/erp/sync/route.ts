@@ -196,9 +196,10 @@ export async function POST() {
 
     // 8c. Auto-correction des retours comptables
     //   - Retour 'négatif'  : si la pièce n'est plus en négatif → marqué corrigé
-    //   - Retour 'comptage' : si stock_actuel >= qte_comptee (= au moins autant
-    //     que ce qui a été compté → soit résolu, soit système rattrapé)
-    // L'entrée reste dans la table (traçabilité), juste sortie de la liste active.
+    //   - Retour 'comptage' : UNIQUEMENT si stock_actuel == qte_comptee
+    //     (match parfait, problème vraiment résolu)
+    //   Les SYS_TROP_HAUT (stock > compté) restent visibles : ça peut être
+    //   une réception normale OU une sur-correction suspecte à investiguer.
     const { data: retoursActifs } = await supabaseAdmin
       .from('comptabilite_retours')
       .select('id, source, ref_id, code_piece')
@@ -228,8 +229,8 @@ export async function POST() {
           const stockActuel = stockActuelInfo
             ? (stockActuelInfo.qtyTotal || stockActuelInfo.stock)
             : Number(c.stock_apres_sync || 0)
-          // Résolu si stock actuel >= qte_comptee (au moins autant que compté)
-          if (Number(stockActuel) >= Number(c.qte_comptee || 0)) {
+          // Résolu UNIQUEMENT si match exact (pas de sur-correction masquée)
+          if (Number(stockActuel) === Number(c.qte_comptee || 0)) {
             idsAutoCorrCpt.push(r.id)
           }
         }
@@ -248,17 +249,15 @@ export async function POST() {
         await supabaseAdmin.from('comptabilite_retours').update({
           corrige_le: nowIso, corrige_par: 'SYSTEM',
           vu_le: nowIso, vu_par: 'SYSTEM',
-          commentaire_correction: 'Auto-corrigé : stock actuel ≥ quantité comptée (problème résolu ou système rattrapé)',
+          commentaire_correction: 'Auto-corrigé : stock actuel = quantité comptée (match parfait)',
         }).in('id', idsAutoCorrCpt)
-        log.push(`${idsAutoCorrCpt.length} retours « comptage » auto-corrigés (stock ≥ qte_comptee)`)
+        log.push(`${idsAutoCorrCpt.length} retours « comptage » auto-corrigés (stock = qte_comptee)`)
       }
     }
 
-    // 8d. Auto-réconciliation des comptages eux-mêmes
-    //   - Si stock_actuel == qte_comptee → statut 'resolu' (match parfait)
-    //   - Si stock_actuel > qte_comptee → statut 'resolu' (système rattrapé,
-    //     ex: réception entre comptage et aujourd'hui)
-    //   Les SYS_TROP_BAS (stock < comptage) restent en 'reconcilie' → visibles.
+    // 8d. Auto-réconciliation des comptages — UNIQUEMENT pour les match exacts.
+    //   Les SYS_TROP_HAUT (stock > compté) restent visibles avec badge 🟡
+    //   pour que l'utilisateur puisse repérer les sur-corrections suspectes.
     const { data: comptagesReconcilies } = await supabaseAdmin
       .from('inventaire_comptages')
       .select('id, code_piece, qte_comptee, statut')
@@ -269,7 +268,7 @@ export async function POST() {
       for (const c of comptagesReconcilies) {
         const info = stockTraction.get(c.code_piece)
         const stockActuel = info ? (info.qtyTotal || info.stock) : null
-        if (stockActuel !== null && Number(stockActuel) >= Number(c.qte_comptee || 0)) {
+        if (stockActuel !== null && Number(stockActuel) === Number(c.qte_comptee || 0)) {
           idsResolus.push(c.id)
         }
       }
@@ -280,7 +279,7 @@ export async function POST() {
             statut: 'resolu',
           }).in('id', slice)
         }
-        log.push(`${idsResolus.length} comptages marqués « resolu » (stock ≥ qte_comptee)`)
+        log.push(`${idsResolus.length} comptages marqués « resolu » (stock = qte_comptee, match exact)`)
       }
     }
 
