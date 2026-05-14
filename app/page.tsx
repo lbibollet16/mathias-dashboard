@@ -12021,10 +12021,47 @@ const FNI_EXPL = {
   cible_9:       "Cible interne Mathias Marine : 9 % de marge brute FNI. 🟢 ≥9 % · 🟡 7-9 % · 🔴 <7 %.",
 }
 
-function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, dark, card, bdr, sub, thBg, C, S, onAllerImport}: any) {
+function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, dark, card, bdr, sub, thBg, C, S, onAllerImport, onRefresh}: any) {
   const [sousVue, setSousVue] = useState<string>('comparatif')
   const [analyseIa, setAnalyseIa] = useState<{texte: string, manque: number, duree: number, generee_le?: string|null, sauvegardee?: boolean}|null>(null)
   const [analyseLoading, setAnalyseLoading] = useState(false)
+  const [fniAssignments, setFniAssignments] = useState<any[]>([])
+  const [fniAssignMsg, setFniAssignMsg] = useState<string|null>(null)
+  const [fniAssignLoading, setFniAssignLoading] = useState(false)
+  const fileRefFniAssign = useRef<HTMLInputElement|null>(null)
+
+  useEffect(() => {
+    fetch('/api/scoa/fni-assignments').then(r => r.json()).then(d => {
+      if (d.assignments) setFniAssignments(d.assignments)
+    }).catch(()=>{})
+  }, [])
+
+  async function importerFniAssignments(file: File) {
+    setFniAssignLoading(true)
+    setFniAssignMsg('⏳ Import en cours…')
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const r = await fetch('/api/scoa/fni-assignments/import', { method:'POST', body: fd })
+      const d = await r.json()
+      if (r.ok && d.success) {
+        setFniAssignMsg(`✅ ${d.upserted} attributions FNI mises à jour`)
+        // Recharger la liste + rafraichir le dashboard pour appliquer les overrides
+        const r2 = await fetch('/api/scoa/fni-assignments')
+        const d2 = await r2.json()
+        if (d2.assignments) setFniAssignments(d2.assignments)
+        if (typeof onRefresh === 'function') onRefresh()
+        setTimeout(()=>setFniAssignMsg(null), 4000)
+      } else {
+        setFniAssignMsg(`❌ ${d.erreur || 'Erreur import'}`)
+      }
+    } catch (e:any) {
+      setFniAssignMsg(`❌ ${e.message}`)
+    } finally {
+      setFniAssignLoading(false)
+      if (fileRefFniAssign.current) fileRefFniAssign.current.value = ''
+    }
+  }
 
   async function lancerAnalyseIa(vendeur_nom: string) {
     setAnalyseLoading(true)
@@ -12326,11 +12363,26 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
             Cible 9 % marge brute FNI · Période : {periode} · Données : {fmtInt(g.nb)} unités importées (PDF SCOA)
           </div>
         </div>
+        <input ref={fileRefFniAssign} type="file" accept=".xlsx,.xls"
+          style={{display:'none'}}
+          onChange={e => { const f = e.target.files?.[0]; if (f) importerFniAssignments(f) }}/>
+        <button onClick={()=>fileRefFniAssign.current?.click()} disabled={fniAssignLoading}
+          title="Excel à 2 colonnes : FNI (nom du spécialiste) + Stock (#stock). Les ventes de ces stocks seront attribuées au FNI indiqué, peu importe le vendeur du véhicule."
+          style={{background:'transparent',color:C.blue,border:`1px solid ${C.blue}`,borderRadius:8,padding:'8px 12px',fontWeight:700,cursor:fniAssignLoading?'wait':'pointer',fontSize:12,whiteSpace:'nowrap'}}>
+          📋 Attributions FNI ({fniAssignments.length})
+        </button>
         <button onClick={onAllerImport}
           style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12,whiteSpace:'nowrap'}}>
           📥 Importer un rapport FNI
         </button>
       </div>
+      {fniAssignMsg && (
+        <div style={{marginBottom:10,padding:'8px 12px',borderRadius:6,fontSize:12,fontWeight:600,
+          background: fniAssignMsg.startsWith('✅') ? '#e6f4ea' : fniAssignMsg.startsWith('❌') ? '#fce8e6' : '#e8f0fe',
+          color: fniAssignMsg.startsWith('✅') ? C.green : fniAssignMsg.startsWith('❌') ? C.red : C.blue}}>
+          {fniAssignMsg}
+        </div>
+      )}
 
       {/* Sous-tabs : Comparatif + un par vendeur */}
       <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>
@@ -13063,6 +13115,7 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
           C={C}
           S={S}
           onAllerImport={() => setVue('import')}
+          onRefresh={charger}
         />
       )}
 

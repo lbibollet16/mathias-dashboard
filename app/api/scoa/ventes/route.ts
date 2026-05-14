@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { appliquerOverridesFni } from '@/lib/scoa-fni-overrides'
 
 // GET /api/scoa/ventes - liste filtrable des ventes brutes.
 // DELETE /api/scoa/ventes?type=...&periode_debut=...&periode_fin=... - purge un import.
 
-const TYPES_VALIDES = new Set(['ps_neuf', 'ps_usage', 'bateau_neuf', 'bateau_usage'])
+const TYPES_VALIDES = new Set(['ps_neuf', 'ps_usage', 'bateau_neuf', 'bateau_usage', 'rapport_fni_vendeur'])
 
 export async function GET(req: NextRequest) {
   try {
@@ -31,12 +32,15 @@ export async function GET(req: NextRequest) {
     const { data, error } = await q
     if (error) throw error
 
+    // Applique les overrides FNI (mappings stock → spécialiste FNI)
+    const ventes = await appliquerOverridesFni(data || [])
+
     // Stats rapides (comptes par type) même sans filtre
     const { data: counts } = await supabaseAdmin.from('scoa_ventes').select('type')
     const parType: Record<string, number> = {}
     for (const r of (counts || [])) parType[r.type] = (parType[r.type] || 0) + 1
 
-    return NextResponse.json({ ventes: data || [], counts: parType })
+    return NextResponse.json({ ventes, counts: parType })
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message || String(e) }, { status: 500 })
   }

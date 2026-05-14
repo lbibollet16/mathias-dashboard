@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { appliquerOverridesFni } from '@/lib/scoa-fni-overrides'
 
 // GET /api/scoa/dashboard?type=ps_neuf&type=ps_usage&date_debut=...&date_fin=...
 //
@@ -113,7 +114,11 @@ export async function GET(req: NextRequest) {
 
     const { data, error } = await q
     if (error) throw error
-    const ventes = (data || []) as Vente[]
+    // Applique les overrides FNI (scoa_fni_assignments) : pour chaque vente
+    // dont le stock matche une attribution, le vendeur_nom est remplacé par
+    // le spécialiste FNI assigné. C'est cette valeur qui est ensuite utilisée
+    // pour tous les agrégats par vendeur.
+    const ventes = (await appliquerOverridesFni(data || [])) as Vente[]
 
     if (ventes.length === 0) {
       return NextResponse.json({
