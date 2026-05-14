@@ -194,6 +194,60 @@ export async function POST() {
       log.push(`${verifiesASupprimer.length} négatifs vérifiés supprimés (stock corrigé)`)
     }
 
+    // 8c. Auto-correction des retours comptables
+    //   - Retour 'négatif'  : si la pièce n'est plus en négatif → marqué corrigé
+    //   - Retour 'comptage' : si l'écart réconcilié est à 0 → marqué corrigé
+    // L'entrée reste dans la table (traçabilité), juste sortie de la liste active.
+    const { data: retoursActifs } = await supabaseAdmin
+      .from('comptabilite_retours')
+      .select('id, source, ref_id, code_piece')
+      .is('corrige_le', null)
+
+    if (retoursActifs && retoursActifs.length > 0) {
+      const idsAutoCorrNeg: number[] = []
+      const idsAutoCorrCpt: number[] = []
+
+      // Récupérer les comptages référencés en un seul appel pour éviter N+1
+      const refIdsComptages = retoursActifs.filter(r => r.source === 'comptage').map(r => r.ref_id)
+      const comptagesMap = new Map<number, any>()
+      if (refIdsComptages.length > 0) {
+        const { data: comptages } = await supabaseAdmin
+          .from('inventaire_comptages')
+          .select('id, ecart_reconcilie, statut')
+          .in('id', refIdsComptages)
+        for (const c of comptages || []) comptagesMap.set(c.id, c)
+      }
+
+      for (const r of retoursActifs) {
+        if (r.source === 'negatif' && r.code_piece) {
+          if (!codesEncoreNegatifs.has(r.code_piece)) idsAutoCorrNeg.push(r.id)
+        } else if (r.source === 'comptage') {
+          const c = comptagesMap.get(r.ref_id)
+          if (c && c.statut === 'reconcilie' && Number(c.ecart_reconcilie || 0) === 0) {
+            idsAutoCorrCpt.push(r.id)
+          }
+        }
+      }
+
+      const nowIso = now.toISOString()
+      if (idsAutoCorrNeg.length > 0) {
+        await supabaseAdmin.from('comptabilite_retours').update({
+          corrige_le: nowIso, corrige_par: 'SYSTEM',
+          vu_le: nowIso, vu_par: 'SYSTEM',
+          commentaire_correction: 'Auto-corrigé : stock revenu à zéro ou positif',
+        }).in('id', idsAutoCorrNeg)
+        log.push(`${idsAutoCorrNeg.length} retours « négatif » auto-corrigés (stock OK)`)
+      }
+      if (idsAutoCorrCpt.length > 0) {
+        await supabaseAdmin.from('comptabilite_retours').update({
+          corrige_le: nowIso, corrige_par: 'SYSTEM',
+          vu_le: nowIso, vu_par: 'SYSTEM',
+          commentaire_correction: 'Auto-corrigé : écart d\'inventaire résorbé (réconcilié à 0)',
+        }).in('id', idsAutoCorrCpt)
+        log.push(`${idsAutoCorrCpt.length} retours « comptage » auto-corrigés (écart 0)`)
+      }
+    }
+
     // 9. Réconciliation inventaire cyclique
     const hier = new Date(now)
     hier.setDate(hier.getDate() - 1)
