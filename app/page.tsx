@@ -12150,6 +12150,21 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
 
   const topVendeurs = [...parVendeur].sort((a,b)=>b.total_profit_fni - a.total_profit_fni).slice(0, 6)
 
+  // Détecte les « marques fantômes » = fragments de noms d'entreprises clientes
+  // mal interprétés par le parser SCOA (cas : nom de client avec un numéro
+  // stock-like dedans). Ex : « Inc. », « Inc », « Qc », « In », « Ltée ».
+  // Ces deals sont valides côté ventes mais leur marque est inutilisable.
+  // Le fix permanent est dans le parser (commit 899daeb + ré-import).
+  const SUFFIXES_ENTREPRISE = new Set(['INC','INC.','QC','IN','LTD','LTD.','LTÉE','LTEE','ENR','CO','CORP','SA','SARL','SAS','EURL'])
+  const estMarqueFantome = (marque: string): boolean => {
+    if (!marque) return true
+    const m = marque.trim().toUpperCase()
+    if (m.length <= 3 && SUFFIXES_ENTREPRISE.has(m)) return true
+    if (m.endsWith('.') && m.length <= 5) return true   // "Inc.", "Ltd.", "Co."
+    if (SUFFIXES_ENTREPRISE.has(m)) return true
+    return false
+  }
+
   // Reconstruit la performance par marque pour un vendeur précis directement
   // depuis les ventes brutes (et non depuis topFniParMarque qui limite à top 3).
   // Ça garantit que le tableau « Performance par marque » contient TOUTES les
@@ -12167,18 +12182,20 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
       e.profit_fni += Number(v.profit_fni || 0)
       if (Math.abs(Number(v.profit_fni || 0)) > 0.01) e.nb_avec_fni++
     }
-    return [...m.entries()].map(([marque, e]) => ({
-      marque,
-      units: e.units,
-      prix_vente: e.prix,
-      ventes_fni: e.ventes_fni,
-      profit_fni: e.profit_fni,
-      pct_marge_fni: e.prix > 0 ? e.profit_fni / e.prix : 0,
-      cash_deals: e.units - e.nb_avec_fni,
-      pct_cash: e.units ? (e.units - e.nb_avec_fni) / e.units : 0,
-      fni_par_unite: e.units ? e.profit_fni / e.units : 0,
-      attach_fni: e.units ? e.nb_avec_fni / e.units : 0,
-    })).sort((a, b) => b.units - a.units)
+    return [...m.entries()]
+      .filter(([marque]) => !estMarqueFantome(marque))
+      .map(([marque, e]) => ({
+        marque,
+        units: e.units,
+        prix_vente: e.prix,
+        ventes_fni: e.ventes_fni,
+        profit_fni: e.profit_fni,
+        pct_marge_fni: e.prix > 0 ? e.profit_fni / e.prix : 0,
+        cash_deals: e.units - e.nb_avec_fni,
+        pct_cash: e.units ? (e.units - e.nb_avec_fni) / e.units : 0,
+        fni_par_unite: e.units ? e.profit_fni / e.units : 0,
+        attach_fni: e.units ? e.nb_avec_fni / e.units : 0,
+      })).sort((a, b) => b.units - a.units)
   }
 
   const margeColor = (pct: number) => pct >= CIBLE_FNI ? C.green : pct >= SEUIL_AMBRE ? C.yellow : C.red
@@ -12470,7 +12487,7 @@ function ScoaFniView({dashboard, ventes, loading, filtDebut, filtFin, isMobile, 
                 </tr>
               </thead>
               <tbody>
-                {topFniParMarque.map(m => {
+                {topFniParMarque.filter(m => !estMarqueFantome(m.marque)).map(m => {
                   const pm = parMarque.find(p => p.marque === m.marque)
                   const margeM = pm && pm.total_prix > 0 ? pm.total_profit_fni / pm.total_prix : 0
                   const top = m.top_vendeurs[0]
