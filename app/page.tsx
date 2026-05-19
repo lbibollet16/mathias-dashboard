@@ -8,7 +8,7 @@ const supabaseCli = createClient(
 )
 
 const ROLES_ONGLETS: Record<string, string[]> = {
-  admin:        ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','scoa','utilisateurs'],
+  admin:        ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','verification','comptabilite','amazon','scoa','utilisateurs'],
   gestionnaire: ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','scoa'],
   commis:       ['commandes','commandes_attente','fournitures','retours'],
   employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours'],
@@ -112,6 +112,7 @@ export default function Dashboard() {
   const [alts, setAlts] = useState<Map<string,string[]>>(new Map())
   const [negsVerifies, setNegsVerifies] = useState<any[]>([])
   const [validationsCompta, setValidationsCompta] = useState<any[]>([])
+  const [verifsDoubles, setVerifsDoubles] = useState<any[]>([])
   const [retoursActifsGlobal, setRetoursActifsGlobal] = useState<any[]>([])
   const [commandesAttenteGlobal, setCommandesAttenteGlobal] = useState<any[]>([])
   const [forceMesSuivis, setForceMesSuivis] = useState(false)  // déclenche le filtre dans CommandesAttenteTab
@@ -177,7 +178,7 @@ export default function Dashboard() {
   async function fetchAll() {
     setLoading(true)
     try {
-      const [d, l, n, a, f, nv, vc, ret, cmdAtt] = await Promise.all([
+      const [d, l, n, a, f, nv, vc, ret, cmdAtt, vd] = await Promise.all([
         fetch('/api/calculateur').then(r=>r.json()),
         fetch('/api/lots').then(r=>r.json()),
         fetch('/api/negatifs').then(r=>r.json()),
@@ -187,6 +188,7 @@ export default function Dashboard() {
         fetch('/api/validations-comptables').then(r=>r.json()),
         fetch('/api/comptabilite/retours?actifs=1').then(r=>r.json()).catch(()=>[]),
         fetch('/api/commandes-attente').then(r=>r.json()).catch(()=>({lignes:[]})),
+        fetch('/api/verifications-doubles').then(r=>r.json()).catch(()=>[]),
       ])
       setData(d); setLots(Array.isArray(l)?l:[]); setNegs(Array.isArray(n)?n:[])
       if(f&&f.catalogue) setFournituresData(f)
@@ -194,6 +196,7 @@ export default function Dashboard() {
       if(Array.isArray(vc)) setValidationsCompta(vc)
       if(Array.isArray(ret)) setRetoursActifsGlobal(ret)
       if(cmdAtt && Array.isArray(cmdAtt.lignes)) setCommandesAttenteGlobal(cmdAtt.lignes)
+      if(Array.isArray(vd)) setVerifsDoubles(vd)
       // Construire les maps d'alternatives
       if (Array.isArray(a)) {
         const fwd = new Map<string,string[]>()
@@ -368,7 +371,7 @@ export default function Dashboard() {
 
       {/* TABS */}
       <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,overflowX:'auto',display:'flex',WebkitOverflowScrolling:'touch',scrollbarWidth:'none',gap:isMobile?2:0}}>
-        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'commandes_attente',l:isMobile?'⏳':'⏳ Commandes en attente'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},{id:'scoa',l:isMobile?'🏍 SCOA':'🏍 SCOA'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>ongletsVisibles(profil).includes(t.id)).map(t=>(
+        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'commandes_attente',l:isMobile?'⏳':'⏳ Commandes en attente'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'verification',l:isMobile?'🔍':'🔍 Vérification'},{id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},{id:'scoa',l:isMobile?'🏍 SCOA':'🏍 SCOA'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>ongletsVisibles(profil).includes(t.id)).map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:isMobile?'12px 14px':'12px 16px',border:'none',background:tab===t.id?(dark?'#1a233a':'#dbeafe'):'transparent',cursor:'pointer',fontSize:isMobile?14:13,fontWeight:tab===t.id?800:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',borderRadius:isMobile?'8px 8px 0 0':0,transition:'all .15s',whiteSpace:'nowrap',flexShrink:0}}>
             {t.l}
           </button>
@@ -785,7 +788,8 @@ export default function Dashboard() {
         {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts} fournituresData={fournituresData} setFournituresData={setFournituresData} profil={profil} validationsCompta={validationsCompta}/>}
         {tab==='commandes_attente' && <CommandesAttenteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} forceMesSuivis={forceMesSuivis} setForceMesSuivis={setForceMesSuivis}/>}
         {tab==='inventaire' && <InventaireTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} validationsCompta={validationsCompta} retoursActifs={retoursActifsGlobal} setRetoursActifs={setRetoursActifsGlobal}/>}
-        {tab==='comptabilite' && <ComptabiliteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} validationsCompta={validationsCompta} setValidationsCompta={setValidationsCompta}/>}
+        {tab==='comptabilite' && <ComptabiliteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} validationsCompta={validationsCompta} setValidationsCompta={setValidationsCompta} verifsDoubles={verifsDoubles} setVerifsDoubles={setVerifsDoubles}/>}
+        {tab==='verification' && <VerificationTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} verifsDoubles={verifsDoubles} setVerifsDoubles={setVerifsDoubles} validationsCompta={validationsCompta}/>}
         {tab==='amazon' && <AmazonTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
         {tab==='scoa' && <ScoaTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
         {tab==='utilisateurs' && <UtilisateursTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
@@ -5588,7 +5592,408 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
 
 // ── Comptabilité Tab ─────────────────────────────────────────────────────────
 // ── Comptabilité Tab ─────────────────────────────────────────────────────────
-function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVerifies, validationsCompta, setValidationsCompta}: any) {
+// Onglet de DOUBLE VÉRIFICATION admin : tout comptage / pièce négative avec
+// |écart| > 3 doit y passer avant d'apparaître en Comptabilité.
+function VerificationTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVerifies, verifsDoubles, setVerifsDoubles, validationsCompta}: any) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+  const userEmail = profil?.email || profil?.nom || 'Inconnu'
+  const SEUIL = 3
+  const [comptages, setComptages] = useState<any[]>([])
+  const [locsParCode, setLocsParCode] = useState<Map<string, Set<string>>>(new Map())
+  const [descParCode, setDescParCode] = useState<Map<string, string>>(new Map())
+  const [retoursActifs, setRetoursActifs] = useState<any[]>([])
+  const [search, setSearch] = useState('')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [loadingAction, setLoadingAction] = useState<string|null>(null)
+  const [retourModal, setRetourModal] = useState<{ source: 'negatif'|'comptage'; ids: number[]; code_piece: string; demandeur: string } | null>(null)
+  const [retourCommentaire, setRetourCommentaire] = useState('')
+  const [validerModal, setValiderModal] = useState<{ source: 'negatif'|'comptage'; ids: number[]; code_piece: string; ecart: number; snapshot: any } | null>(null)
+  const [validerCommentaire, setValiderCommentaire] = useState('')
+
+  async function recharger() {
+    try {
+      const [c, vd, r] = await Promise.all([
+        fetch('/api/inventaire/comptages').then(r=>r.json()),
+        fetch('/api/verifications-doubles').then(r=>r.json()),
+        fetch('/api/comptabilite/retours?actifs=1').then(r=>r.json()).catch(()=>[]),
+      ])
+      if (Array.isArray(c)) setComptages(c)
+      if (Array.isArray(vd) && setVerifsDoubles) setVerifsDoubles(vd)
+      if (Array.isArray(r)) setRetoursActifs(r)
+
+      if (Array.isArray(c)) {
+        const codesUniques = Array.from(new Set(c
+          .filter((x:any) => x.statut === 'reconcilie' || x.statut === 'en_attente')
+          .map((x:any) => x.code_piece)
+          .filter(Boolean)))
+        if (codesUniques.length > 0) {
+          const rLoc = await fetch('/api/inventaire/localisations?codes=' + encodeURIComponent(codesUniques.join('|')))
+          const rows = await rLoc.json()
+          if (Array.isArray(rows)) {
+            const map = new Map<string, Set<string>>()
+            const desc = new Map<string, string>()
+            for (const row of rows) {
+              if (!row.code_piece || row.code_piece.startsWith('LOC_')) continue
+              const set = map.get(row.code_piece) || new Set<string>()
+              for (const l of [row.localisation1, row.localisation2, row.localisation3, row.localisation4]) {
+                if (l) set.add(String(l).toUpperCase())
+              }
+              map.set(row.code_piece, set)
+              if (row.description && !desc.has(row.code_piece)) desc.set(row.code_piece, String(row.description))
+            }
+            for (const n of (negsVerifies || [])) {
+              if (n.code_piece && n.description && !desc.has(n.code_piece)) desc.set(n.code_piece, String(n.description))
+            }
+            setLocsParCode(map)
+            setDescParCode(desc)
+          }
+        }
+      }
+    } catch {}
+  }
+  useEffect(() => { recharger() }, [])
+
+  const validations = validationsCompta || []
+  const validesKey = new Set(validations.map((v:any) => `${v.source}:${v.ref_id}`))
+  const estValide = (s:string, id:any) => validesKey.has(`${s}:${id}`)
+  const retournesKey = new Set((retoursActifs||[]).map((r:any) => `${r.source}:${r.ref_id}`))
+  const estRetourne = (s:string, id:any) => retournesKey.has(`${s}:${id}`)
+  const verifsKey = new Map<string, any>()
+  for (const v of (verifsDoubles || [])) verifsKey.set(`${v.source}:${v.ref_id}`, v)
+  const dejaVerifie = (source: string, ids: number[]) => ids.some(id => verifsKey.has(`${source}:${id}`))
+
+  type ItemV = {
+    key: string; source: 'negatif'|'comptage'; ids: number[]; code_piece: string;
+    date: string; ecart: number; valeur: number; employe: string; raw: any;
+  }
+  const items: ItemV[] = []
+  // Pieces négatives
+  const CAUSES_HORS_COMPTA = [
+    'Pièce non réceptionnée mais facturée (logiciel/service)',
+    'Réservation (pièce mal importée dans facture)',
+  ]
+  for (const n of (negsVerifies||[])) {
+    if (estValide('negatif', n.id)) continue
+    if (estRetourne('negatif', n.id)) continue
+    if (n.cause && CAUSES_HORS_COMPTA.includes(n.cause)) continue
+    const ecart = Number(n.ajustement || 0)
+    if (Math.abs(ecart) <= SEUIL) continue           // hors seuil → directement en Compta
+    if (dejaVerifie('negatif', [n.id])) continue     // déjà validé → est passé en Compta
+    items.push({
+      key: `negatif:${n.id}`, source: 'negatif', ids: [n.id], code_piece: n.code_piece,
+      date: n.date_verification, ecart, valeur: Number(n.valeur_au_moment || 0),
+      employe: n.employe || '', raw: n,
+    })
+  }
+  // Comptages multi-loc / single-loc — même logique d'agrégation que ComptabiliteTab
+  const compteesParCode = new Map<string, Set<string>>()
+  for (const c of (comptages || [])) {
+    if (c.statut === 'obsolete' || c.statut === 'resolu') continue
+    const set = compteesParCode.get(c.code_piece) || new Set<string>()
+    set.add(String(c.localisation || '').toUpperCase())
+    compteesParCode.set(c.code_piece, set)
+  }
+  const codesMultiTraites = new Set<string>()
+  for (const c of (comptages || [])) {
+    if (c.statut !== 'reconcilie') continue
+    const locsConnues = locsParCode.get(c.code_piece) || new Set<string>()
+    const estMultiLoc = locsConnues.size > 1
+    if (estMultiLoc) {
+      if (codesMultiTraites.has(c.code_piece)) continue
+      codesMultiTraites.add(c.code_piece)
+      const compteesLoc = compteesParCode.get(c.code_piece) || new Set<string>()
+      const toutesComptees = Array.from(locsConnues).every(l => compteesLoc.has(l))
+      if (!toutesComptees) continue
+      const reconcs = (comptages || []).filter((x:any) => x.code_piece === c.code_piece && x.statut === 'reconcilie')
+      const sumComptee = reconcs.reduce((s:number, x:any) => s + Number(x.qte_comptee || 0), 0)
+      const oldest = [...reconcs].sort((a:any,b:any) => new Date(a.date_comptage).getTime() - new Date(b.date_comptage).getTime())[0]
+      const latest = [...reconcs].sort((a:any,b:any) => new Date(b.date_reconciliation || b.date_comptage).getTime() - new Date(a.date_reconciliation || a.date_comptage).getTime())[0]
+      const ajust = sumComptee - Number(oldest?.qte_systeme || 0)
+      if (ajust === 0) continue
+      if (Math.abs(ajust) <= SEUIL) continue
+      const ids = reconcs.map((x:any) => x.id)
+      if (ids.some((id:number) => estValide('comptage', id))) continue
+      if (ids.some((id:number) => estRetourne('comptage', id))) continue
+      if (dejaVerifie('comptage', ids)) continue
+      items.push({
+        key: `comptage:multi:${c.code_piece}`, source: 'comptage', ids, code_piece: c.code_piece,
+        date: latest?.date_reconciliation || latest?.date_comptage || c.date_comptage, ecart: ajust,
+        valeur: 0, employe: Array.from(new Set(reconcs.map((x:any) => x.employe).filter(Boolean))).join(', '),
+        raw: { ...latest, qte_comptee: sumComptee, qte_systeme: Number(oldest?.qte_systeme || 0),
+          multi_loc: true, nb_locs: locsConnues.size,
+          locs_connues: Array.from(locsConnues),
+          comptages_par_loc: reconcs.map((x:any) => ({
+            id: x.id, localisation: x.localisation, qte_comptee: x.qte_comptee,
+            employe: x.employe, date_comptage: x.date_comptage, note: x.note, photo_url: x.photo_url
+          })),
+        },
+      })
+    } else {
+      let ajust: number
+      if (c.stock_apres_sync !== null && c.stock_apres_sync !== undefined) ajust = Number(c.qte_comptee || 0) - Number(c.stock_apres_sync)
+      else ajust = Number(c.ecart_reconcilie || 0)
+      if (ajust === 0) continue
+      if (Math.abs(ajust) <= SEUIL) continue
+      if (estValide('comptage', c.id)) continue
+      if (estRetourne('comptage', c.id)) continue
+      if (dejaVerifie('comptage', [c.id])) continue
+      items.push({
+        key: `comptage:${c.id}`, source: 'comptage', ids: [c.id], code_piece: c.code_piece,
+        date: c.date_reconciliation || c.date_comptage, ecart: ajust, valeur: 0,
+        employe: c.employe || '', raw: c,
+      })
+    }
+  }
+
+  const searchLower = search.trim().toLowerCase()
+  const itemsFiltered = items.filter(it => !searchLower || it.code_piece.toLowerCase().includes(searchLower))
+  itemsFiltered.sort((a, b) => Math.abs(b.ecart) - Math.abs(a.ecart))
+
+  const fmtDate = (d:string) => d ? new Date(d).toLocaleDateString('fr-CA',{year:'2-digit',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'
+
+  function toggleExpand(k: string) {
+    setExpanded(prev => { const s = new Set(prev); if (s.has(k)) s.delete(k); else s.add(k); return s })
+  }
+
+  async function envoyerValidation() {
+    if (!validerModal) return
+    setLoadingAction(`valid:${validerModal.code_piece}`)
+    try {
+      const r = await fetch('/api/verifications-doubles', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          source: validerModal.source, ref_ids: validerModal.ids,
+          code_piece: validerModal.code_piece, ecart: validerModal.ecart,
+          snapshot: validerModal.snapshot, valide_par: userEmail,
+          commentaire: validerCommentaire.trim() || null,
+        }),
+      })
+      const j = await r.json()
+      if (j.erreur) { alert(j.erreur); return }
+      setValiderModal(null)
+      setValiderCommentaire('')
+      await recharger()
+    } finally { setLoadingAction(null) }
+  }
+
+  async function envoyerRetour() {
+    if (!retourModal) return
+    const commentaire = retourCommentaire.trim()
+    if (!commentaire) { alert('Le commentaire est obligatoire.'); return }
+    setLoadingAction(`retour:${retourModal.code_piece}`)
+    try {
+      for (const id of retourModal.ids) {
+        await fetch('/api/comptabilite/retours', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            source: retourModal.source, ref_id: id, code_piece: retourModal.code_piece,
+            demandeur_employe: retourModal.demandeur, comptable_email: userEmail,
+            commentaire_retour: commentaire,
+          }),
+        })
+      }
+      setRetourModal(null); setRetourCommentaire('')
+      await recharger()
+    } finally { setLoadingAction(null) }
+  }
+
+  const valeurTotale = itemsFiltered.reduce((s, it) => s + Math.abs(it.valeur), 0)
+
+  return (
+    <div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10,marginBottom:12}}>
+        <div>
+          <div style={{fontSize:20,fontWeight:900}}>🔍 Double vérification</div>
+          <div style={{fontSize:11,color:sub,marginTop:2}}>Tout écart supérieur à {SEUIL} unités doit être validé ici avant d'aller en Comptabilité</div>
+        </div>
+        <button onClick={recharger} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'7px 12px',fontWeight:700,cursor:'pointer',fontSize:12}}>🔄 Actualiser</button>
+      </div>
+
+      <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:10,display:'flex',gap:18,flexWrap:'wrap',alignItems:'center',fontSize:12}}>
+        <div><span style={{color:sub}}>À vérifier : </span><strong style={{fontSize:15,color:dark?'#fff':'#1a1a1a'}}>{items.length}</strong></div>
+        <div style={{color:sub}}>•</div>
+        <div><span style={{color:C.red}}>🔴 Nég : </span><strong>{items.filter(i=>i.source==='negatif').length}</strong></div>
+        <div><span style={{color:C.blue}}>📦 Cpt : </span><strong>{items.filter(i=>i.source==='comptage').length}</strong></div>
+        <div style={{color:sub}}>•</div>
+        <div><span style={{color:sub}}>Valeur en jeu : </span><strong style={{color:C.red}}>{valeurTotale.toFixed(0)}$</strong></div>
+      </div>
+
+      <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:10}}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Rechercher par code pièce…"
+          style={{...S,maxWidth:240,fontSize:12,padding:'7px 10px'}}/>
+      </div>
+
+      <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,overflow:'hidden'}}>
+        {items.length === 0 ? (
+          <div style={{padding:30,textAlign:'center',color:sub,fontSize:13}}>
+            ✅ Aucune pièce en attente de double-vérification
+          </div>
+        ) : (
+          <>
+            <div style={{display:'flex',gap:10,padding:'10px 12px',borderBottom:`1px solid ${bdr}`,background:thBg,fontWeight:700,fontSize:11,textTransform:'uppercase',color:sub}}>
+              <div style={{width:60}}>Type</div>
+              <div style={{flex:isMobile?2:1.5,minWidth:120}}>Pièce</div>
+              <div style={{width:isMobile?80:90,textAlign:'center'}}>Écart</div>
+              {!isMobile && <div style={{width:80,textAlign:'right'}}>Valeur</div>}
+              {!isMobile && <div style={{width:120}}>Par</div>}
+              {!isMobile && <div style={{width:110,textAlign:'right'}}>Date</div>}
+              <div style={{width:isMobile?100:180,textAlign:'right'}}></div>
+            </div>
+            {itemsFiltered.map(it => {
+              const isExp = expanded.has(it.key)
+              const ecartColor = it.ecart >= 0 ? C.green : C.red
+              return (
+                <div key={it.key} style={{borderBottom:`1px solid ${bdr}`}}>
+                  <div onClick={()=>toggleExpand(it.key)}
+                    onMouseEnter={(e:any)=>e.currentTarget.style.background=hvr}
+                    onMouseLeave={(e:any)=>e.currentTarget.style.background='transparent'}
+                    style={{display:'flex',gap:10,padding:'10px 12px',alignItems:'center',cursor:'pointer'}}>
+                    <div style={{width:60}}>
+                      <span style={{background:(it.source==='negatif'?C.red:C.blue)+'22',color:it.source==='negatif'?C.red:C.blue,padding:'2px 6px',borderRadius:8,fontSize:10,fontWeight:700}}>{it.source==='negatif'?'🔴 Nég':'📦 Cpt'}</span>
+                    </div>
+                    <div style={{flex:isMobile?2:1.5,minWidth:120,fontWeight:700,fontFamily:'monospace',fontSize:13,overflow:'hidden'}}>
+                      <span style={{display:'inline-block',width:14,color:sub,fontFamily:'sans-serif'}}>{isExp?'▼':'▶'}</span>
+                      {it.code_piece}
+                      {it.raw?.multi_loc && (
+                        <span style={{marginLeft:6,fontSize:10,padding:'1px 6px',borderRadius:4,background:C.blue+'22',color:C.blue,fontWeight:700,fontFamily:'sans-serif',whiteSpace:'nowrap'}}>
+                          📍 Multi-loc ({it.raw.nb_locs})
+                        </span>
+                      )}
+                      {descParCode.get(it.code_piece) && (
+                        <div style={{fontFamily:'sans-serif',fontSize:11,fontWeight:400,color:sub,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}} title={descParCode.get(it.code_piece)}>
+                          {descParCode.get(it.code_piece)}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{width:isMobile?80:90,textAlign:'center',fontSize:18,fontWeight:900,color:ecartColor}}>
+                      {it.ecart>=0?'+':''}{it.ecart.toFixed(0)}
+                    </div>
+                    {!isMobile && <div style={{width:80,textAlign:'right',fontSize:12,fontWeight:700,color:it.valeur>0?C.red:sub}}>
+                      {it.valeur>0?`−${it.valeur.toFixed(0)}$`:'—'}
+                    </div>}
+                    {!isMobile && <div style={{width:120,fontSize:11,color:sub,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>👤 {it.employe}</div>}
+                    {!isMobile && <div style={{width:110,textAlign:'right',fontSize:11,color:sub,whiteSpace:'nowrap'}}>{fmtDate(it.date)}</div>}
+                    <div style={{width:isMobile?100:180,textAlign:'right',display:'flex',gap:4,justifyContent:'flex-end'}}>
+                      <button disabled={loadingAction!==null}
+                        onClick={(e:any)=>{e.stopPropagation();setRetourModal({source:it.source,ids:it.ids,code_piece:it.code_piece,demandeur:it.employe});setRetourCommentaire('')}}
+                        title="Retourner au demandeur pour recompte"
+                        style={{background:'transparent',border:`1px solid ${C.yellow}`,color:C.yellow,borderRadius:6,padding:'6px 9px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                        ↩
+                      </button>
+                      <button disabled={loadingAction!==null}
+                        onClick={(e:any)=>{e.stopPropagation();setValiderModal({source:it.source,ids:it.ids,code_piece:it.code_piece,ecart:it.ecart,snapshot:it.raw});setValiderCommentaire('')}}
+                        style={{background:C.green,color:'#fff',border:'none',borderRadius:6,padding:'6px 11px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                        ✓ Valider
+                      </button>
+                    </div>
+                  </div>
+                  {isExp && (
+                    <div style={{background:dark?'#0f0f0f':'#fafbfc',padding:'14px 16px',borderTop:`1px solid ${bdr}`}}>
+                      {it.source === 'comptage' ? (
+                        <>
+                          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,textAlign:'center',background:card,borderRadius:8,padding:'10px 12px',border:`1px solid ${bdr}`,marginBottom:10}}>
+                            <div><div style={{fontSize:9,color:sub}}>{it.raw.multi_loc?'Système (snap)':'Système'}</div><div style={{fontSize:16,fontWeight:900,color:C.blue}}>{it.raw.qte_systeme}</div></div>
+                            <div><div style={{fontSize:9,color:sub}}>{it.raw.multi_loc?'Compté (Σ)':'Compté'}</div><div style={{fontSize:16,fontWeight:900,color:C.green}}>{it.raw.qte_comptee}</div></div>
+                            <div><div style={{fontSize:9,color:sub}}>Stock J+1</div><div style={{fontSize:16,fontWeight:900,color:C.blue}}>{it.raw.stock_apres_sync??'—'}</div></div>
+                            <div><div style={{fontSize:9,color:sub}}>Loc</div><div style={{fontSize:13,fontWeight:700,fontFamily:'monospace',color:C.blue}}>{it.raw.multi_loc?(it.raw.locs_connues||[]).join(', '):it.raw.localisation}</div></div>
+                          </div>
+                          {it.raw.multi_loc && Array.isArray(it.raw.comptages_par_loc) && (
+                            <div style={{background:card,borderRadius:8,padding:'10px 12px',border:`1px solid ${bdr}`,marginBottom:10}}>
+                              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Détail par localisation</div>
+                              <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                                {it.raw.comptages_par_loc.map((p:any) => (
+                                  <div key={p.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:12,borderBottom:`1px dotted ${bdr}`,paddingBottom:4}}>
+                                    <span style={{fontFamily:'monospace',fontWeight:700,color:C.blue}}>{p.localisation}</span>
+                                    <span style={{color:sub}}>👤 {p.employe || '—'}</span>
+                                    <span style={{fontWeight:900,color:C.green}}>{Number(p.qte_comptee||0)} unité(s)</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {it.raw.note && <div style={{background:dark?'#1a1a1a':'#f1f3f5',borderRadius:6,padding:'8px 12px',fontSize:12,color:sub,whiteSpace:'pre-wrap'}}>💬 {it.raw.note}</div>}
+                          {it.raw.photo_url && (
+                            <a href={it.raw.photo_url} target="_blank" rel="noreferrer" style={{display:'inline-block',marginTop:10}}>
+                              <img src={it.raw.photo_url} alt="" style={{width:160,height:110,objectFit:'cover',borderRadius:6,border:`2px solid ${C.green}`}}/>
+                            </a>
+                          )}
+                        </>
+                      ) : (
+                        <div style={{background:card,borderRadius:8,padding:'10px 12px',border:`1px solid ${bdr}`}}>
+                          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6,textAlign:'center',marginBottom:8}}>
+                            <div><div style={{fontSize:9,color:sub}}>Système (au moment)</div><div style={{fontSize:16,fontWeight:900,color:C.red}}>{it.raw.stock_au_moment}</div></div>
+                            <div><div style={{fontSize:9,color:sub}}>Tablette</div><div style={{fontSize:16,fontWeight:900,color:C.blue}}>{it.raw.qte_reelle??'—'}</div></div>
+                            <div><div style={{fontSize:9,color:sub}}>Valeur</div><div style={{fontSize:13,fontWeight:700,color:C.red}}>−{Number(it.raw.valeur_au_moment||0).toFixed(0)}$</div></div>
+                          </div>
+                          {it.raw.commentaire && <div style={{background:dark?'#1a1a1a':'#f1f3f5',borderRadius:6,padding:'8px 12px',fontSize:12,color:sub,whiteSpace:'pre-wrap'}}>💬 {it.raw.commentaire}</div>}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </>
+        )}
+      </div>
+
+      {/* Modale validation */}
+      {validerModal && (
+        <div onClick={()=>{setValiderModal(null);setValiderCommentaire('')}}
+          style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}}>
+          <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,padding:'18px 22px',maxWidth:500,width:'100%',border:`2px solid ${C.green}`}}>
+            <div style={{fontSize:16,fontWeight:900,color:C.green,marginBottom:8}}>✓ Valider la double-vérification</div>
+            <div style={{fontSize:13,color:sub,marginBottom:12}}>
+              Pièce <strong style={{fontFamily:'monospace'}}>{validerModal.code_piece}</strong> — écart <strong>{validerModal.ecart>=0?'+':''}{validerModal.ecart}</strong>
+            </div>
+            <textarea value={validerCommentaire} onChange={e=>setValiderCommentaire(e.target.value)}
+              placeholder="Commentaire (optionnel)"
+              style={{...S,width:'100%',minHeight:80,fontSize:12,padding:8,resize:'vertical'}}/>
+            <div style={{display:'flex',gap:8,marginTop:12,justifyContent:'flex-end'}}>
+              <button onClick={()=>{setValiderModal(null);setValiderCommentaire('')}}
+                style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                Annuler
+              </button>
+              <button disabled={loadingAction!==null} onClick={envoyerValidation}
+                style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                {loadingAction?'⏳':'Valider et envoyer en Compta'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modale retour */}
+      {retourModal && (
+        <div onClick={()=>{setRetourModal(null);setRetourCommentaire('')}}
+          style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}}>
+          <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,padding:'18px 22px',maxWidth:500,width:'100%',border:`2px solid ${C.yellow}`}}>
+            <div style={{fontSize:16,fontWeight:900,color:C.yellow,marginBottom:8}}>↩ Retourner au demandeur</div>
+            <div style={{fontSize:13,color:sub,marginBottom:12}}>
+              Pièce <strong style={{fontFamily:'monospace'}}>{retourModal.code_piece}</strong> — demandeur : <strong>{retourModal.demandeur}</strong>
+            </div>
+            <textarea value={retourCommentaire} onChange={e=>setRetourCommentaire(e.target.value)}
+              placeholder="Raison du retour (obligatoire) — ex: « Recompte demandé, vérifie LOC-B »"
+              style={{...S,width:'100%',minHeight:90,fontSize:12,padding:8,resize:'vertical'}}/>
+            <div style={{display:'flex',gap:8,marginTop:12,justifyContent:'flex-end'}}>
+              <button onClick={()=>{setRetourModal(null);setRetourCommentaire('')}}
+                style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                Annuler
+              </button>
+              <button disabled={loadingAction!==null} onClick={envoyerRetour}
+                style={{background:C.yellow,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                {loadingAction?'⏳':'Renvoyer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVerifies, validationsCompta, setValidationsCompta, verifsDoubles, setVerifsDoubles}: any) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const userEmail = profil?.email || profil?.nom || 'Inconnu'
   const [comptages, setComptages] = useState<any[]>([])
@@ -5614,16 +6019,18 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
 
   async function recharger() {
     try {
-      const [c, v, r, rT] = await Promise.all([
+      const [c, v, r, rT, vd] = await Promise.all([
         fetch('/api/inventaire/comptages').then(r=>r.json()),
         fetch('/api/validations-comptables').then(r=>r.json()),
         fetch('/api/comptabilite/retours?actifs=1').then(r=>r.json()),
         fetch('/api/comptabilite/retours').then(r=>r.json()),
+        fetch('/api/verifications-doubles').then(r=>r.json()).catch(()=>[]),
       ])
       if (Array.isArray(c)) setComptages(c)
       if (Array.isArray(v)) setValidationsCompta(v)
       if (Array.isArray(r)) setRetoursActifs(r)
       if (Array.isArray(rT)) setRetoursTous(rT)
+      if (Array.isArray(vd) && setVerifsDoubles) setVerifsDoubles(vd)
 
       // Charger les localisations connues pour les codes en jeu (reconcilie ou récents)
       if (Array.isArray(c)) {
@@ -5717,10 +6124,24 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   const validesKey = new Set(validations.map((v:any) => `${v.source}:${v.ref_id}`))
   const estValide = (source:string, refId:any) => validesKey.has(`${source}:${refId}`)
 
+  // Double-vérification admin : tout item avec |écart| > 3 doit être validé par
+  // un admin avant d'apparaître en Comptabilité.
+  const SEUIL_DOUBLE_VERIF = 3
+  const verifsKey = new Map<string, any>()
+  for (const v of (verifsDoubles || [])) verifsKey.set(`${v.source}:${v.ref_id}`, v)
+  const verifPour = (source:string, ids:number[]): any | null => {
+    for (const id of ids) {
+      const v = verifsKey.get(`${source}:${id}`)
+      if (v) return v
+    }
+    return null
+  }
+
   type Item = {
     key: string; source: 'negatif'|'comptage'; id: number; code_piece: string;
     date: string; ecart: number; valeur: number; employe: string;
     hasPhoto: boolean; hasComment: boolean; hasAlt: boolean; raw: any;
+    verif?: { valide_par: string, valide_le: string, commentaire: string|null } | null;
   }
   const items: Item[] = []
   // Causes à exclure de la Comptabilité (corrections internes, pas d'écriture comptable)
@@ -5732,14 +6153,19 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     if (estValide('negatif', n.id)) continue
     if (estRetourne('negatif', n.id)) continue   // déjà retourné au demandeur
     if (n.cause && CAUSES_HORS_COMPTA.includes(n.cause)) continue
+    const ecartN = Number(n.ajustement || 0)
+    const verifN = verifPour('negatif', [n.id])
+    // |écart| > 3 → masque tant que la double-vérif n'est pas faite
+    if (Math.abs(ecartN) > SEUIL_DOUBLE_VERIF && !verifN) continue
     items.push({
       key: `negatif:${n.id}`, source: 'negatif', id: n.id, code_piece: n.code_piece,
-      date: n.date_verification, ecart: Number(n.ajustement||0),
+      date: n.date_verification, ecart: ecartN,
       valeur: Number(n.valeur_au_moment||0), employe: n.employe||'',
       hasPhoto: !!(n.photo_url || n.photo_url2),
       hasComment: !!n.commentaire,
       hasAlt: !!n.alt_code_piece,
       raw: n,
+      verif: verifN || null,
     })
   }
   // Construire la map des localisations COMPTÉES par code (depuis les comptages
@@ -5798,6 +6224,9 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
       if (ids.some((id:number) => estValide('comptage', id))) continue
       if (ids.some((id:number) => estRetourne('comptage', id))) continue
 
+      const verifMulti = verifPour('comptage', ids)
+      if (Math.abs(ajust) > SEUIL_DOUBLE_VERIF && !verifMulti) continue
+
       items.push({
         key: `comptage:multi:${c.code_piece}`, source: 'comptage', id: latest?.id || c.id, code_piece: c.code_piece,
         date: latest?.date_reconciliation || latest?.date_comptage || c.date_comptage, ecart: ajust,
@@ -5805,6 +6234,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
         hasPhoto: reconcs.some((x:any) => x.photo_url),
         hasComment: reconcs.some((x:any) => x.note),
         hasAlt: false,
+        verif: verifMulti || null,
         raw: {
           ...latest,
           qte_comptee: sumComptee,
@@ -5837,6 +6267,8 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     if (ajust === 0) continue
     if (estValide('comptage', c.id)) continue
     if (estRetourne('comptage', c.id)) continue
+    const verifSingle = verifPour('comptage', [c.id])
+    if (Math.abs(ajust) > SEUIL_DOUBLE_VERIF && !verifSingle) continue
     items.push({
       key: `comptage:${c.id}`, source: 'comptage', id: c.id, code_piece: c.code_piece,
       date: c.date_reconciliation || c.date_comptage, ecart: ajust,
@@ -5845,6 +6277,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
       hasComment: !!c.note,
       hasAlt: false,
       raw: c,
+      verif: verifSingle || null,
     })
   }
 
@@ -6007,7 +6440,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   const historique = [...validations].sort((a:any,b:any) => new Date(b.date_validation).getTime() - new Date(a.date_validation).getTime())
   const historiqueFiltre = filtSourceHist === 'tous' ? historique : historique.filter((v:any) => v.source === filtSourceHist)
 
-  function NegDetails({n}: any) {
+  function NegDetails({n, verif}: any) {
     const histo = historiqueRetoursPour('negatif', n.id, n.code_piece)
     return (
       <div style={{background:dark?'#0f0f0f':'#fafbfc',padding:'14px 16px',borderTop:`1px solid ${bdr}`}}>
@@ -6041,6 +6474,15 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
           </div>
         </div>
 
+        {verif && (
+          <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}`,borderRadius:8,padding:'10px 12px',marginTop:10}}>
+            <div style={{fontSize:11,fontWeight:800,color:C.green,textTransform:'uppercase',marginBottom:4}}>✅ Double-vérification validée</div>
+            <div style={{fontSize:12,color:dark?'#ccc':'#333'}}>
+              Par <strong>{verif.valide_par}</strong> le <strong>{fmtDate(verif.valide_le)}</strong>
+            </div>
+            {verif.commentaire && <div style={{fontSize:11,color:sub,marginTop:4,fontStyle:'italic'}}>💬 {verif.commentaire}</div>}
+          </div>
+        )}
         {n.cause && <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:6,padding:'8px 12px',fontSize:12,color:C.blue,marginTop:10,fontWeight:600,whiteSpace:'pre-wrap'}}>📋 {n.cause}</div>}
         {n.commentaire && <div style={{background:dark?'#1a1a1a':'#f1f3f5',borderRadius:6,padding:'8px 12px',fontSize:12,color:sub,marginTop:8,whiteSpace:'pre-wrap'}}>💬 {n.commentaire}</div>}
 
@@ -6094,7 +6536,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     )
   }
 
-  function ComptDetails({c}: any) {
+  function ComptDetails({c, verif}: any) {
     const histo = historiqueRetoursPour('comptage', c.id, c.code_piece)
     return (
       <div style={{background:dark?'#0f0f0f':'#fafbfc',padding:'14px 16px',borderTop:`1px solid ${bdr}`}}>
@@ -6145,6 +6587,15 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                 </div>
               ))}
             </div>
+          </div>
+        )}
+        {verif && (
+          <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}`,borderRadius:8,padding:'10px 12px',marginBottom:10}}>
+            <div style={{fontSize:11,fontWeight:800,color:C.green,textTransform:'uppercase',marginBottom:4}}>✅ Double-vérification validée</div>
+            <div style={{fontSize:12,color:dark?'#ccc':'#333'}}>
+              Par <strong>{verif.valide_par}</strong> le <strong>{fmtDate(verif.valide_le)}</strong>
+            </div>
+            {verif.commentaire && <div style={{fontSize:11,color:sub,marginTop:4,fontStyle:'italic'}}>💬 {verif.commentaire}</div>}
           </div>
         )}
         {c.note && <div style={{background:dark?'#1a1a1a':'#f1f3f5',borderRadius:6,padding:'8px 12px',fontSize:12,color:sub,marginBottom:10,whiteSpace:'pre-wrap'}}>💬 {c.note}</div>}
@@ -6317,6 +6768,12 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                                 </span>
                               )
                             })()}
+                            {it.verif && (
+                              <span title={`Double-vérification validée par ${it.verif.valide_par} le ${fmtDate(it.verif.valide_le)}`}
+                                style={{marginLeft:6,fontSize:10,padding:'1px 6px',borderRadius:4,background:C.green+'22',color:C.green,fontWeight:800,fontFamily:'sans-serif',whiteSpace:'nowrap'}}>
+                                ✅ Double-vérif
+                              </span>
+                            )}
                             {(() => {
                               const d = descParCode.get(it.code_piece)
                               if (!d) return null
@@ -6353,7 +6810,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                             </button>
                           </div>
                         </div>
-                        {isExp && (it.source === 'negatif' ? <NegDetails n={it.raw}/> : <ComptDetails c={it.raw}/>)}
+                        {isExp && (it.source === 'negatif' ? <NegDetails n={it.raw} verif={it.verif}/> : <ComptDetails c={it.raw} verif={it.verif}/>)}
                       </div>
                     )
                   })}
