@@ -4571,13 +4571,21 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     if (vd.source === 'negatif') verifsNegMap.set(Number(vd.ref_id), vd)
   }
   const SEUIL_DOUBLE_VERIF = 3
+  // Causes hors comptabilité — passent par Vérification (admin) au lieu de Compta.
+  const CAUSES_HORS_COMPTA_LOCAL = new Set([
+    'Pièce non réceptionnée mais facturée (logiciel/service)',
+    'Réservation (pièce mal importée dans facture)',
+    'Double facturation',
+  ])
   // Calcule le statut de double-vérif pour un négatif vérifié.
+  // Va en Vérification si |ajustement| > 3 OU si la cause est « hors compta ».
   function statutDoubleVerif(v: any): { label: string; color: string; valide_par?: string } | null {
     const ecart = Math.abs(Number(v.ajustement || 0))
-    if (ecart <= SEUIL_DOUBLE_VERIF) return null
+    const horsCompta = !!(v.cause && CAUSES_HORS_COMPTA_LOCAL.has(v.cause))
+    if (!horsCompta && ecart <= SEUIL_DOUBLE_VERIF) return null
     const verif = verifsNegMap.get(v.id)
     if (verif) return { label: '✅ Double-vérif', color: C.green, valide_par: verif.valide_par }
-    return { label: '⏳ Double-vérif attendue', color: C.yellow }
+    return { label: horsCompta ? '⏳ Vérif admin (hors compta)' : '⏳ Double-vérif attendue', color: C.yellow }
   }
   // Description par code pièce — depuis les négatifs actifs et la liste complète.
   const descByCode = new Map<string, string>()
@@ -4731,16 +4739,19 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
   ]
 
   // Ces causes ne doivent PAS apparaître dans l'onglet Comptabilité
-  // (ce sont des corrections internes, pas des écritures comptables)
+  // (ce sont des corrections internes ou facturation — pas une écriture comptable).
+  // À la place, elles passent par l'onglet Vérification pour validation admin.
   const CAUSES_HORS_COMPTA = [
     'Pièce non réceptionnée mais facturée (logiciel/service)',
     'Réservation (pièce mal importée dans facture)',
+    'Double facturation',
   ]
 
   // Messages d'action spécifiques par cause
   const CAUSES_MESSAGES: Record<string, string> = {
     'Pièce non réceptionnée mais facturée (logiciel/service)': '📋 Valider avec la réception/expédition pour réceptionner le stock',
     'Réservation (pièce mal importée dans facture)': '📋 Corriger la réservation dans Lautopak menu 251',
+    'Double facturation': '📋 Corriger la facture en double avec la facturation (non comptable)',
   }
 
   const emptyForm = () => ({
@@ -5715,22 +5726,27 @@ function VerificationTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     date: string; ecart: number; valeur: number; employe: string; raw: any;
   }
   const items: ItemV[] = []
-  // Pieces négatives
+  // Causes qui ne nécessitent PAS d'action comptable — elles passent par
+  // Vérification pour validation admin, indépendamment du seuil d'écart.
   const CAUSES_HORS_COMPTA = [
     'Pièce non réceptionnée mais facturée (logiciel/service)',
     'Réservation (pièce mal importée dans facture)',
+    'Double facturation',
   ]
   for (const n of (negsVerifies||[])) {
     if (estValide('negatif', n.id)) continue
     if (estRetourne('negatif', n.id)) continue
-    if (n.cause && CAUSES_HORS_COMPTA.includes(n.cause)) continue
+    if (dejaVerifie('negatif', [n.id])) continue     // déjà validé → fin du parcours
     const ecart = Number(n.ajustement || 0)
-    if (Math.abs(ecart) <= SEUIL) continue           // hors seuil → directement en Compta
-    if (dejaVerifie('negatif', [n.id])) continue     // déjà validé → est passé en Compta
+    const horsCompta = !!(n.cause && CAUSES_HORS_COMPTA.includes(n.cause))
+    // Critères d'entrée en Vérification :
+    //  - cause hors comptabilité (quelle que soit la valeur de l'écart) ; OU
+    //  - |écart| > seuil (double-vérif obligatoire avant Compta)
+    if (!horsCompta && Math.abs(ecart) <= SEUIL) continue
     items.push({
       key: `negatif:${n.id}`, source: 'negatif', ids: [n.id], code_piece: n.code_piece,
       date: n.date_verification, ecart, valeur: Number(n.valeur_au_moment || 0),
-      employe: n.employe || '', raw: n,
+      employe: n.employe || '', raw: { ...n, _hors_compta: horsCompta },
     })
   }
   // Comptages multi-loc / single-loc — même logique d'agrégation que ComptabiliteTab
@@ -5908,9 +5924,20 @@ function VerificationTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                           📍 Multi-loc ({it.raw.nb_locs})
                         </span>
                       )}
+                      {it.raw?._hors_compta && (
+                        <span style={{marginLeft:6,fontSize:10,padding:'1px 6px',borderRadius:4,background:C.yellow+'22',color:C.yellow,fontWeight:700,fontFamily:'sans-serif',whiteSpace:'nowrap'}}
+                          title="Cause hors comptabilité — pas une écriture comptable">
+                          📋 Hors compta
+                        </span>
+                      )}
                       {descParCode.get(it.code_piece) && (
                         <div style={{fontFamily:'sans-serif',fontSize:11,fontWeight:400,color:sub,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}} title={descParCode.get(it.code_piece)}>
                           {descParCode.get(it.code_piece)}
+                        </div>
+                      )}
+                      {it.raw?._hors_compta && it.raw?.cause && (
+                        <div style={{fontFamily:'sans-serif',fontSize:11,fontWeight:600,color:C.yellow,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}} title={it.raw.cause}>
+                          📋 {it.raw.cause}
                         </div>
                       )}
                     </div>
@@ -6005,7 +6032,7 @@ function VerificationTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
               </button>
               <button disabled={loadingAction!==null} onClick={envoyerValidation}
                 style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontWeight:700,cursor:'pointer',fontSize:12}}>
-                {loadingAction?'⏳':'Valider et envoyer en Compta'}
+                {loadingAction?'⏳':'Valider'}
               </button>
             </div>
           </div>
@@ -6196,6 +6223,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   const CAUSES_HORS_COMPTA = [
     'Pièce non réceptionnée mais facturée (logiciel/service)',
     'Réservation (pièce mal importée dans facture)',
+    'Double facturation',
   ]
   for (const n of (negsVerifies||[])) {
     if (estValide('negatif', n.id)) continue
