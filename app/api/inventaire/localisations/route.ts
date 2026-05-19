@@ -28,6 +28,25 @@ export async function GET(req: NextRequest) {
     }
     const loc = req.nextUrl.searchParams.get('loc')?.trim()
     const code = req.nextUrl.searchParams.get('code')?.trim()
+    const codes = req.nextUrl.searchParams.get('codes')?.trim()
+
+    // Recherche multi-codes (pipe-séparé) — pour batch fetch des localisations
+    // de plusieurs pièces sans saturer le serveur de requêtes individuelles.
+    if (codes) {
+      const list = codes.split('|').map(s => s.trim()).filter(Boolean)
+      if (list.length === 0) return NextResponse.json([])
+      const out: any[] = []
+      for (let i = 0; i < list.length; i += 200) {
+        const slice = list.slice(i, i + 200)
+        const { data, error } = await supabaseAdmin
+          .from('inventaire_localisations')
+          .select('code_piece, localisation1, localisation2, localisation3, localisation4')
+          .in('code_piece', slice)
+        if (error) throw error
+        if (data) out.push(...data)
+      }
+      return NextResponse.json(out)
+    }
 
     if (code) {
       const { data, error } = await supabaseAdmin

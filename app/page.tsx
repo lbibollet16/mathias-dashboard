@@ -5591,10 +5591,14 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   const [loadingAction, setLoadingAction] = useState<string|null>(null)
   const [filtSourceHist, setFiltSourceHist] = useState<'tous'|'negatif'|'comptage'>('tous')
   // Retour au demandeur (avec commentaire obligatoire)
-  const [retourModal, setRetourModal] = useState<{ source: 'negatif'|'comptage'; ref_id: number; code_piece: string; demandeur: string } | null>(null)
+  const [retourModal, setRetourModal] = useState<{ source: 'negatif'|'comptage'; ref_id: number; ids?: number[]; code_piece: string; demandeur: string } | null>(null)
   const [retourCommentaire, setRetourCommentaire] = useState('')
   const [retoursActifs, setRetoursActifs] = useState<any[]>([])
   const [retoursTous, setRetoursTous] = useState<any[]>([])
+  // Map<code_piece, Set<localisation_upper>> — sources « connues » via inventaire_localisations.
+  // Sert à détecter les pièces multi-localisation et savoir si toutes les locs ont été comptées
+  // avant d'envoyer la pièce en Comptabilité.
+  const [locsParCode, setLocsParCode] = useState<Map<string, Set<string>>>(new Map())
 
   async function recharger() {
     try {
@@ -5608,6 +5612,32 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
       if (Array.isArray(v)) setValidationsCompta(v)
       if (Array.isArray(r)) setRetoursActifs(r)
       if (Array.isArray(rT)) setRetoursTous(rT)
+
+      // Charger les localisations connues pour les codes en jeu (reconcilie ou récents)
+      if (Array.isArray(c)) {
+        const codesUniques = Array.from(new Set(c
+          .filter((x:any) => x.statut === 'reconcilie' || x.statut === 'en_attente')
+          .map((x:any) => x.code_piece)
+          .filter(Boolean)))
+        if (codesUniques.length > 0) {
+          const rLoc = await fetch('/api/inventaire/localisations?codes=' + encodeURIComponent(codesUniques.join('|')))
+          const rows = await rLoc.json()
+          if (Array.isArray(rows)) {
+            const map = new Map<string, Set<string>>()
+            for (const row of rows) {
+              if (!row.code_piece || row.code_piece.startsWith('LOC_')) continue
+              const set = map.get(row.code_piece) || new Set<string>()
+              for (const l of [row.localisation1, row.localisation2, row.localisation3, row.localisation4]) {
+                if (l) set.add(String(l).toUpperCase())
+              }
+              map.set(row.code_piece, set)
+            }
+            setLocsParCode(map)
+          }
+        } else {
+          setLocsParCode(new Map())
+        }
+      }
     } catch {}
   }
 
@@ -5629,20 +5659,27 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     if (!commentaire) { alert('Le commentaire est obligatoire pour expliquer la raison du retour.'); return }
     setLoadingAction(`retour:${retourModal.source}:${retourModal.ref_id}`)
     try {
-      const r = await fetch('/api/comptabilite/retours', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({
-          source: retourModal.source,
-          ref_id: retourModal.ref_id,
-          code_piece: retourModal.code_piece,
-          demandeur_employe: retourModal.demandeur,
-          comptable_email: userEmail,
-          commentaire_retour: commentaire,
+      // Pour un item multi-loc (plusieurs ids agrégés), créer un retour pour chaque
+      // comptage sous-jacent afin que tous disparaissent de la liste « À valider ».
+      const ids = (retourModal.ids && retourModal.ids.length > 0) ? retourModal.ids : [retourModal.ref_id]
+      let lastErr: string | null = null
+      for (const id of ids) {
+        const r = await fetch('/api/comptabilite/retours', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            source: retourModal.source,
+            ref_id: id,
+            code_piece: retourModal.code_piece,
+            demandeur_employe: retourModal.demandeur,
+            comptable_email: userEmail,
+            commentaire_retour: commentaire,
+          })
         })
-      })
-      const j = await r.json()
-      if (j.erreur) { alert(j.erreur); return }
+        const j = await r.json()
+        if (j.erreur) lastErr = j.erreur
+      }
+      if (lastErr) { alert(lastErr); return }
       setRetourModal(null)
       setRetourCommentaire('')
       await recharger()
@@ -5680,21 +5717,93 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
       raw: n,
     })
   }
+  // Construire la map des localisations COMPTÉES par code (depuis les comptages
+  // récents, statut reconcilie ou en_attente). Sert à savoir si une pièce
+  // multi-loc a été totalement comptée avant de l'envoyer en Comptabilité.
+  const compteesParCode = new Map<string, Set<string>>()
+  for (const c of (comptages || [])) {
+    if (c.statut === 'obsolete' || c.statut === 'resolu') continue
+    const set = compteesParCode.get(c.code_piece) || new Set<string>()
+    set.add(String(c.localisation || '').toUpperCase())
+    compteesParCode.set(c.code_piece, set)
+  }
+  // Pour les pièces multi-loc déjà traitées (= un seul item agrégé), éviter
+  // d'ajouter une ligne par comptage individuel.
+  const codesMultiTraites = new Set<string>()
   for (const c of (comptages||[])) {
     if (c.statut !== 'reconcilie') continue
+
+    const locsConnues = locsParCode.get(c.code_piece) || new Set<string>()
+    const estMultiLoc = locsConnues.size > 1
+
+    if (estMultiLoc) {
+      // Une seule ligne agrégée par pièce — skip si déjà traitée
+      if (codesMultiTraites.has(c.code_piece)) continue
+      codesMultiTraites.add(c.code_piece)
+
+      // Toutes les localisations doivent avoir été comptées (au moins un
+      // comptage non-obsolete/non-resolu existant pour chaque loc connue).
+      const compteesLoc = compteesParCode.get(c.code_piece) || new Set<string>()
+      const toutesComptees = Array.from(locsConnues).every(l => compteesLoc.has(l))
+      if (!toutesComptees) continue  // attendre la fin du comptage
+
+      // Agréger tous les comptages reconcilies de cette pièce
+      const reconcs = (comptages || []).filter((x:any) =>
+        x.code_piece === c.code_piece && x.statut === 'reconcilie')
+      const sumComptee = reconcs.reduce((s:number, x:any) => s + Number(x.qte_comptee || 0), 0)
+      // stock_apres_sync est global (toutes locs confondues) — prendre celui
+      // du comptage le plus récent. Idem pour qte_systeme.
+      const latest = [...reconcs].sort((a:any,b:any) =>
+        new Date(b.date_reconciliation || b.date_comptage).getTime()
+        - new Date(a.date_reconciliation || a.date_comptage).getTime())[0]
+      const stockApresSync = latest?.stock_apres_sync
+      let ajust: number
+      if (stockApresSync !== null && stockApresSync !== undefined) {
+        ajust = sumComptee - Number(stockApresSync)
+      } else {
+        ajust = sumComptee - Number(latest?.qte_systeme || 0)
+      }
+      if (ajust === 0) continue
+
+      const ids = reconcs.map((x:any) => x.id)
+      if (ids.some((id:number) => estValide('comptage', id))) continue
+      if (ids.some((id:number) => estRetourne('comptage', id))) continue
+
+      items.push({
+        key: `comptage:multi:${c.code_piece}`, source: 'comptage', id: latest?.id || c.id, code_piece: c.code_piece,
+        date: latest?.date_reconciliation || latest?.date_comptage || c.date_comptage, ecart: ajust,
+        valeur: 0, employe: Array.from(new Set(reconcs.map((x:any) => x.employe).filter(Boolean))).join(', '),
+        hasPhoto: reconcs.some((x:any) => x.photo_url),
+        hasComment: reconcs.some((x:any) => x.note),
+        hasAlt: false,
+        raw: {
+          ...latest,
+          qte_comptee: sumComptee,
+          multi_loc: true,
+          nb_locs: locsConnues.size,
+          locs_connues: Array.from(locsConnues),
+          comptages_par_loc: reconcs.map((x:any) => ({
+            id: x.id, localisation: x.localisation, qte_comptee: x.qte_comptee,
+            employe: x.employe, date_comptage: x.date_comptage, note: x.note, photo_url: x.photo_url
+          })),
+          ids_agreges: ids,
+        },
+      })
+      continue
+    }
+
+    // Single-loc — comportement classique
     // L'écart affiché dans la liste = AJUSTEMENT à appliquer maintenant
     // = qte_comptee - stock_apres_sync (= stock J+1).
-    // Différent de ecart_reconcilie qui est l'écart figé au moment du comptage.
-    // Exemple : compté 1, J+1 = 2 → ajustement = -1 (sys doit baisser de 1).
     let ajust: number
     if (c.stock_apres_sync !== null && c.stock_apres_sync !== undefined) {
       ajust = Number(c.qte_comptee || 0) - Number(c.stock_apres_sync)
     } else {
-      ajust = Number(c.ecart_reconcilie || 0)  // fallback si pas de stock_apres_sync
+      ajust = Number(c.ecart_reconcilie || 0)
     }
     if (ajust === 0) continue
     if (estValide('comptage', c.id)) continue
-    if (estRetourne('comptage', c.id)) continue   // déjà retourné au demandeur
+    if (estRetourne('comptage', c.id)) continue
     items.push({
       key: `comptage:${c.id}`, source: 'comptage', id: c.id, code_piece: c.code_piece,
       date: c.date_reconciliation || c.date_comptage, ecart: ajust,
@@ -5746,6 +5855,18 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   const totalValeur = itemsFiltered.reduce((s,it) => s + Math.abs(it.valeur), 0)
   const nbNegatifs = items.filter(i=>i.source==='negatif').length
   const nbComptages = items.filter(i=>i.source==='comptage').length
+  // Pièces multi-loc en attente (au moins une loc non comptée) — pour
+  // signaler que des comptages sont en cours et n'apparaissent pas encore ici.
+  const codesEnAttenteMultiLoc = new Set<string>()
+  for (const c of (comptages||[])) {
+    if (c.statut !== 'reconcilie') continue
+    const locsConnues = locsParCode.get(c.code_piece) || new Set<string>()
+    if (locsConnues.size <= 1) continue
+    const comptees = compteesParCode.get(c.code_piece) || new Set<string>()
+    const toutesComptees = Array.from(locsConnues).every(l => comptees.has(l))
+    if (!toutesComptees) codesEnAttenteMultiLoc.add(c.code_piece)
+  }
+  const nbAttenteMultiLoc = codesEnAttenteMultiLoc.size
   const nbPhoto = items.filter(i=>i.hasPhoto).length
   const nbVraiEcart = items.filter(i => {
     if (i.source !== 'comptage') return false
@@ -5778,14 +5899,21 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     else setSelected(new Set(itemsSorted.map(i=>i.key)))
   }
 
+  // Pour un item multi-loc, on doit valider/retourner CHAQUE comptage sous-jacent.
+  function idsACibler(it: Item): number[] {
+    const ids = (it.raw as any)?.ids_agreges
+    return Array.isArray(ids) && ids.length > 0 ? ids : [it.id]
+  }
+
   async function valider(it: Item) {
     setLoadingAction(it.key)
     try {
-      await fetch('/api/validations-comptables', {
+      const ids = idsACibler(it)
+      await Promise.all(ids.map(id => fetch('/api/validations-comptables', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ source: it.source, ref_id: it.id, code_piece: it.code_piece, snapshot: it.raw, user_email: userEmail })
-      })
+        body: JSON.stringify({ source: it.source, ref_id: id, code_piece: it.code_piece, snapshot: it.raw, user_email: userEmail })
+      })))
       setSelected(prev => { const s = new Set(prev); s.delete(it.key); return s })
       await recharger()
     } finally { setLoadingAction(null) }
@@ -5797,13 +5925,17 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     setLoadingAction('lot')
     try {
       const toValidate = itemsSorted.filter(i => selected.has(i.key))
-      await Promise.all(toValidate.map(it =>
-        fetch('/api/validations-comptables', {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ source: it.source, ref_id: it.id, code_piece: it.code_piece, snapshot: it.raw, user_email: userEmail })
-        })
-      ))
+      const calls: Promise<any>[] = []
+      for (const it of toValidate) {
+        for (const id of idsACibler(it)) {
+          calls.push(fetch('/api/validations-comptables', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ source: it.source, ref_id: id, code_piece: it.code_piece, snapshot: it.raw, user_email: userEmail })
+          }))
+        }
+      }
+      await Promise.all(calls)
       setSelected(new Set())
       await recharger()
     } finally { setLoadingAction(null) }
@@ -5923,19 +6055,40 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     return (
       <div style={{background:dark?'#0f0f0f':'#fafbfc',padding:'14px 16px',borderTop:`1px solid ${bdr}`}}>
         <div style={{background:card,borderRadius:8,padding:'10px 12px',border:`1px solid ${bdr}`,marginBottom:10}}>
-          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6}}>Quantités</div>
+          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span>Quantités</span>
+            {c.multi_loc && (
+              <span style={{background:C.blue+'22',color:C.blue,fontWeight:800,padding:'2px 8px',borderRadius:10,fontSize:10}}>
+                📍 Multi-loc ({c.nb_locs} localisations agrégées)
+              </span>
+            )}
+          </div>
           <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,textAlign:'center'}}>
             <div><div style={{fontSize:9,color:sub}}>Système</div><div style={{fontSize:16,fontWeight:900,color:C.blue}}>{c.qte_systeme}</div></div>
-            <div><div style={{fontSize:9,color:sub}}>Compté</div><div style={{fontSize:16,fontWeight:900,color:C.green}}>{c.qte_comptee}</div></div>
+            <div><div style={{fontSize:9,color:sub}}>{c.multi_loc?'Compté (Σ)':'Compté'}</div><div style={{fontSize:16,fontWeight:900,color:C.green}}>{c.qte_comptee}</div></div>
             <div><div style={{fontSize:9,color:sub}}>Stock J+1</div><div style={{fontSize:16,fontWeight:900,color:C.blue}}>{c.stock_apres_sync??'—'}</div></div>
-            <div><div style={{fontSize:9,color:sub}}>Loc</div><div style={{fontSize:13,fontWeight:700,fontFamily:'monospace',color:C.blue}}>{c.localisation}</div></div>
+            <div><div style={{fontSize:9,color:sub}}>Loc</div><div style={{fontSize:13,fontWeight:700,fontFamily:'monospace',color:C.blue}}>{c.multi_loc?(c.locs_connues||[]).join(', '):c.localisation}</div></div>
           </div>
-          {c.ecart !== c.ecart_reconcilie && (
+          {!c.multi_loc && c.ecart !== c.ecart_reconcilie && (
             <div style={{fontSize:11,color:sub,marginTop:8,textAlign:'center'}}>
               Ventes entre-temps : <strong style={{color:C.blue}}>{c.qte_systeme - c.stock_apres_sync}</strong> unité(s)
             </div>
           )}
         </div>
+        {c.multi_loc && Array.isArray(c.comptages_par_loc) && c.comptages_par_loc.length > 0 && (
+          <div style={{background:card,borderRadius:8,padding:'10px 12px',border:`1px solid ${bdr}`,marginBottom:10}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Détail par localisation</div>
+            <div style={{display:'flex',flexDirection:'column',gap:6}}>
+              {c.comptages_par_loc.map((p:any) => (
+                <div key={p.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:12,borderBottom:`1px dotted ${bdr}`,paddingBottom:4}}>
+                  <span style={{fontFamily:'monospace',fontWeight:700,color:C.blue}}>{p.localisation}</span>
+                  <span style={{color:sub}}>👤 {p.employe || '—'}</span>
+                  <span style={{fontWeight:900,color:C.green}}>{Number(p.qte_comptee||0)} unité(s)</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {c.note && <div style={{background:dark?'#1a1a1a':'#f1f3f5',borderRadius:6,padding:'8px 12px',fontSize:12,color:sub,marginBottom:10,whiteSpace:'pre-wrap'}}>💬 {c.note}</div>}
         {c.photo_url && (
           <a href={c.photo_url} target="_blank" rel="noreferrer" style={{display:'inline-block',marginBottom:10}}>
@@ -6008,6 +6161,15 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
             <div><span style={{color:sub}}>📸 {nbPhoto}</span></div>
             <div style={{color:sub}}>•</div>
             <div><span style={{color:sub}}>Valeur en jeu : </span><strong style={{color:C.red}}>{totalValeur.toFixed(0)}$</strong></div>
+            {nbAttenteMultiLoc > 0 && (
+              <>
+                <div style={{color:sub}}>•</div>
+                <div title="Pièces présentes dans plusieurs localisations dont au moins une n'a pas encore été comptée. Elles n'apparaissent pas tant que le cycle de comptage n'est pas complet.">
+                  <span style={{color:C.yellow}}>📍 En attente multi-loc : </span>
+                  <strong style={{color:C.yellow}}>{nbAttenteMultiLoc}</strong>
+                </div>
+              </>
+            )}
           </div>
 
           <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:10,display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
@@ -6113,7 +6275,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                           {!isMobile && <div style={{width:110,textAlign:'right',fontSize:11,color:sub,whiteSpace:'nowrap'}}>{fmtDate(it.date)}</div>}
                           <div style={{width:isMobile?80:130,textAlign:'right',display:'flex',gap:4,justifyContent:'flex-end'}}>
                             <button disabled={loadingAction===it.key}
-                              onClick={(e:any)=>{e.stopPropagation();setRetourModal({source:it.source,ref_id:it.id,code_piece:it.code_piece,demandeur:it.employe});setRetourCommentaire('')}}
+                              onClick={(e:any)=>{e.stopPropagation();setRetourModal({source:it.source,ref_id:it.id,ids:idsACibler(it),code_piece:it.code_piece,demandeur:it.employe});setRetourCommentaire('')}}
                               title="Retourner au demandeur pour correction"
                               style={{background:'transparent',border:`1px solid ${C.yellow}`,color:C.yellow,borderRadius:6,padding:isMobile?'6px 8px':'6px 10px',fontWeight:700,cursor:'pointer',fontSize:11}}>
                               ↩

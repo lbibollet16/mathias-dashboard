@@ -260,21 +260,83 @@ export async function POST() {
     //   stock_apres_sync = stock au J+1 du comptage, après les ventes
     //   intermédiaires normales. C'est la référence pour décider si un
     //   écart est résiduel (à corriger) ou résolu (équilibré).
-    //   == strict : tout écart (positif OU négatif) reste visible en
-    //   Comptabilité pour que la comptable fasse la correction.
+    //
+    //   PIÈCES MULTI-LOCALISATION : qte_comptee est par localisation alors que
+    //   stock_apres_sync est le TOTAL système (toutes locs confondues). On
+    //   regroupe donc les comptages par code_piece et on compare la SOMME des
+    //   qte_comptee au stock_apres_sync. Le statut n'est passé en « resolu »
+    //   que lorsque TOUTES les localisations connues de la pièce ont été
+    //   comptées, sinon on attendrait que l'employé finisse son cycle.
     const { data: comptagesReconcilies } = await supabaseAdmin
       .from('inventaire_comptages')
-      .select('id, code_piece, qte_comptee, stock_apres_sync, statut')
+      .select('id, code_piece, localisation, qte_comptee, stock_apres_sync, statut')
       .eq('statut', 'reconcilie')
 
     if (comptagesReconcilies && comptagesReconcilies.length > 0) {
-      const idsResolus: number[] = []
-      for (const c of comptagesReconcilies) {
-        if (c.stock_apres_sync !== null && c.stock_apres_sync !== undefined
-            && Number(c.stock_apres_sync) === Number(c.qte_comptee || 0)) {
-          idsResolus.push(c.id)
+      // Charger les localisations connues pour ces codes
+      const codesUniq = Array.from(new Set(comptagesReconcilies.map((c:any) => c.code_piece)))
+      const locsParCode = new Map<string, Set<string>>()
+      for (let i = 0; i < codesUniq.length; i += 200) {
+        const slice = codesUniq.slice(i, i + 200)
+        const { data: rows } = await supabaseAdmin
+          .from('inventaire_localisations')
+          .select('code_piece, localisation1, localisation2, localisation3, localisation4')
+          .in('code_piece', slice)
+        for (const r of rows || []) {
+          if (!r.code_piece || r.code_piece.startsWith('LOC_')) continue
+          const set = locsParCode.get(r.code_piece) || new Set<string>()
+          for (const l of [r.localisation1, r.localisation2, r.localisation3, r.localisation4]) {
+            if (l) set.add(String(l).toUpperCase())
+          }
+          locsParCode.set(r.code_piece, set)
         }
       }
+      // Tous les comptages récents (statut reconcilie ou en_attente) pour
+      // vérifier la couverture des localisations.
+      const { data: tousRecents } = await supabaseAdmin
+        .from('inventaire_comptages')
+        .select('code_piece, localisation, statut')
+        .in('code_piece', codesUniq)
+        .in('statut', ['reconcilie', 'en_attente', 'resolu'])
+      const compteesParCode = new Map<string, Set<string>>()
+      for (const c of tousRecents || []) {
+        const set = compteesParCode.get(c.code_piece) || new Set<string>()
+        set.add(String(c.localisation || '').toUpperCase())
+        compteesParCode.set(c.code_piece, set)
+      }
+
+      // Grouper les reconciliés par code_piece
+      const parCode = new Map<string, any[]>()
+      for (const c of comptagesReconcilies) {
+        if (!parCode.has(c.code_piece)) parCode.set(c.code_piece, [])
+        parCode.get(c.code_piece)!.push(c)
+      }
+
+      const idsResolus: number[] = []
+      for (const [code, list] of parCode) {
+        const locsConnues = locsParCode.get(code) || new Set<string>()
+        const sumComptee = list.reduce((s:number, x:any) => s + Number(x.qte_comptee || 0), 0)
+        const stockApres = list.find((x:any) => x.stock_apres_sync !== null && x.stock_apres_sync !== undefined)?.stock_apres_sync
+        if (stockApres === null || stockApres === undefined) continue
+        if (locsConnues.size > 1) {
+          // Pièce multi-loc : exiger que toutes les locs aient été comptées
+          const comptees = compteesParCode.get(code) || new Set<string>()
+          const toutesComptees = Array.from(locsConnues).every(l => comptees.has(l))
+          if (!toutesComptees) continue
+          if (Number(stockApres) === sumComptee) {
+            for (const x of list) idsResolus.push(x.id)
+          }
+        } else {
+          // Single-loc : ancien comportement
+          for (const x of list) {
+            if (x.stock_apres_sync !== null && x.stock_apres_sync !== undefined
+                && Number(x.stock_apres_sync) === Number(x.qte_comptee || 0)) {
+              idsResolus.push(x.id)
+            }
+          }
+        }
+      }
+
       if (idsResolus.length > 0) {
         for (let i = 0; i < idsResolus.length; i += 200) {
           const slice = idsResolus.slice(i, i + 200)
@@ -282,7 +344,7 @@ export async function POST() {
             statut: 'resolu',
           }).in('id', slice)
         }
-        log.push(`${idsResolus.length} comptages marqués « resolu » (stock_apres_sync = qte_comptee)`)
+        log.push(`${idsResolus.length} comptages marqués « resolu » (stock_apres_sync = somme(qte_comptee))`)
       }
     }
 
