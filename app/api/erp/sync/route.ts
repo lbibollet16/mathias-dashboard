@@ -316,17 +316,22 @@ export async function POST() {
       for (const [code, list] of parCode) {
         const locsConnues = locsParCode.get(code) || new Set<string>()
         const sumComptee = list.reduce((s:number, x:any) => s + Number(x.qte_comptee || 0), 0)
-        const stockApres = list.find((x:any) => x.stock_apres_sync !== null && x.stock_apres_sync !== undefined)?.stock_apres_sync
-        if (stockApres === null || stockApres === undefined) continue
         if (locsConnues.size > 1) {
           // Pièce multi-loc : exiger que toutes les locs aient été comptées
           const comptees = compteesParCode.get(code) || new Set<string>()
           const toutesComptees = Array.from(locsConnues).every(l => comptees.has(l))
           if (!toutesComptees) continue
-          if (Number(stockApres) === sumComptee) {
+          // Snapshot au PREMIER comptage : si sum(qte_comptee) == qte_systeme du
+          // comptage le plus ancien, l'ajustement est nul → auto-resolve.
+          const ordered = [...list].sort((a:any, b:any) =>
+            new Date(a.date_comptage).getTime() - new Date(b.date_comptage).getTime())
+          const qteSysFirst = Number(ordered[0]?.qte_systeme || 0)
+          if (sumComptee === qteSysFirst) {
             for (const x of list) idsResolus.push(x.id)
           }
         } else {
+          const stockApres = list.find((x:any) => x.stock_apres_sync !== null && x.stock_apres_sync !== undefined)?.stock_apres_sync
+          if (stockApres === null || stockApres === undefined) continue
           // Single-loc : ancien comportement
           for (const x of list) {
             if (x.stock_apres_sync !== null && x.stock_apres_sync !== undefined

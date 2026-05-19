@@ -5776,19 +5776,23 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
       const reconcs = (comptages || []).filter((x:any) =>
         x.code_piece === c.code_piece && x.statut === 'reconcilie')
       const sumComptee = reconcs.reduce((s:number, x:any) => s + Number(x.qte_comptee || 0), 0)
-      // stock_apres_sync est global (toutes locs confondues) — prendre celui
-      // du comptage le plus récent. Idem pour qte_systeme.
+      // SNAPSHOT au PREMIER comptage : qte_systeme du comptage le plus ancien
+      // sert de référence. Toutes les ventes ultérieures sont traitées comme
+      // du trafic normal — l'ajustement final = compte_sum - qte_systeme_initial.
+      const oldest = [...reconcs].sort((a:any,b:any) =>
+        new Date(a.date_comptage).getTime() - new Date(b.date_comptage).getTime())[0]
       const latest = [...reconcs].sort((a:any,b:any) =>
         new Date(b.date_reconciliation || b.date_comptage).getTime()
         - new Date(a.date_reconciliation || a.date_comptage).getTime())[0]
-      const stockApresSync = latest?.stock_apres_sync
-      let ajust: number
-      if (stockApresSync !== null && stockApresSync !== undefined) {
-        ajust = sumComptee - Number(stockApresSync)
-      } else {
-        ajust = sumComptee - Number(latest?.qte_systeme || 0)
-      }
+      const qteSysSnapshot = Number(oldest?.qte_systeme || 0)
+      const ajust = sumComptee - qteSysSnapshot
       if (ajust === 0) continue
+      // Calculer l'amplitude du cycle (jours entre premier et dernier comptage)
+      const dateOldest = oldest ? new Date(oldest.date_comptage).getTime() : 0
+      const dateLatest = latest ? new Date(latest.date_comptage).getTime() : 0
+      const cycleJours = dateOldest && dateLatest
+        ? Math.max(0, Math.round((dateLatest - dateOldest) / (1000 * 60 * 60 * 24)))
+        : 0
 
       const ids = reconcs.map((x:any) => x.id)
       if (ids.some((id:number) => estValide('comptage', id))) continue
@@ -5804,9 +5808,13 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
         raw: {
           ...latest,
           qte_comptee: sumComptee,
+          qte_systeme: qteSysSnapshot,
           multi_loc: true,
           nb_locs: locsConnues.size,
           locs_connues: Array.from(locsConnues),
+          cycle_jours: cycleJours,
+          date_premier_comptage: oldest?.date_comptage,
+          date_dernier_comptage: latest?.date_comptage,
           comptages_par_loc: reconcs.map((x:any) => ({
             id: x.id, localisation: x.localisation, qte_comptee: x.qte_comptee,
             employe: x.employe, date_comptage: x.date_comptage, note: x.note, photo_url: x.photo_url
@@ -5840,6 +5848,18 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     })
   }
 
+  // Référence système pour le calcul de catégorie :
+  // - multi-loc  → snapshot du PREMIER comptage (raw.qte_systeme)
+  // - single-loc → stock J+1 (raw.stock_apres_sync = état actuel après ventes intermédiaires)
+  function refSysteme(c: any): number | null {
+    if (c.multi_loc) {
+      const v = c.qte_systeme
+      return (v === null || v === undefined) ? null : Number(v)
+    }
+    const v = c.stock_apres_sync
+    return (v === null || v === undefined) ? null : Number(v)
+  }
+
   const searchLower = search.trim().toLowerCase()
   const itemsFiltered = items.filter(it => {
     if (filtType === 'negatif' && it.source !== 'negatif') return false
@@ -5847,27 +5867,26 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     if (filtType === 'photo' && !it.hasPhoto) return false
     if (filtType === 'vrai_ecart' || filtType === 'sys_rattrape') {
       if (it.source !== 'comptage') return false
-      const sysAct = it.raw.stock_apres_sync
+      const sysAct = refSysteme(it.raw)
       const compt = Number(it.raw.qte_comptee || 0)
-      if (sysAct === null || sysAct === undefined) return false
-      if (filtType === 'vrai_ecart' && Number(sysAct) >= compt) return false
-      if (filtType === 'sys_rattrape' && Number(sysAct) <= compt) return false
+      if (sysAct === null) return false
+      if (filtType === 'vrai_ecart' && sysAct >= compt) return false
+      if (filtType === 'sys_rattrape' && sysAct <= compt) return false
     }
     if (searchLower && !it.code_piece.toLowerCase().includes(searchLower)) return false
     return true
   })
 
-  // Catégorise un comptage selon l'état actuel du stock vs ce qui a été compté.
+  // Catégorise un comptage selon l'écart entre système et physique.
   // Sert d'indicateur visuel dans la liste « À valider ».
   const categorieComptage = (it: any): { label: string, emoji: string, color: string } | null => {
     if (it.source !== 'comptage') return null
     const c = it.raw
-    const sysAct = c.stock_apres_sync
+    const sysAct = refSysteme(c)
     const compt = Number(c.qte_comptee || 0)
-    if (sysAct === null || sysAct === undefined) return { label:'À vérifier', emoji:'❓', color:sub }
-    const n = Number(sysAct)
-    if (n === compt) return { label:'Résolu', emoji:'🟢', color:C.green }
-    if (n > compt)   return { label:'Système rattrapé', emoji:'🟡', color:C.yellow }
+    if (sysAct === null) return { label:'À vérifier', emoji:'❓', color:sub }
+    if (sysAct === compt) return { label:'Résolu', emoji:'🟢', color:C.green }
+    if (sysAct > compt)   return { label:'Système rattrapé', emoji:'🟡', color:C.yellow }
     return { label:'Vrai écart', emoji:'🔴', color:C.red }
   }
 
@@ -5895,13 +5914,13 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   const nbPhoto = items.filter(i=>i.hasPhoto).length
   const nbVraiEcart = items.filter(i => {
     if (i.source !== 'comptage') return false
-    const s = i.raw.stock_apres_sync
-    return s !== null && s !== undefined && Number(s) < Number(i.raw.qte_comptee || 0)
+    const s = refSysteme(i.raw)
+    return s !== null && s < Number(i.raw.qte_comptee || 0)
   }).length
   const nbSysRattrape = items.filter(i => {
     if (i.source !== 'comptage') return false
-    const s = i.raw.stock_apres_sync
-    return s !== null && s !== undefined && Number(s) > Number(i.raw.qte_comptee || 0)
+    const s = refSysteme(i.raw)
+    return s !== null && s > Number(i.raw.qte_comptee || 0)
   }).length
 
   function toggleExpand(k: string) {
@@ -6089,7 +6108,12 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
             )}
           </div>
           <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,textAlign:'center'}}>
-            <div><div style={{fontSize:9,color:sub}}>Système</div><div style={{fontSize:16,fontWeight:900,color:C.blue}}>{c.qte_systeme}</div></div>
+            <div>
+              <div style={{fontSize:9,color:sub}} title={c.multi_loc?'Snapshot du système au premier comptage':'Système au moment du comptage'}>
+                {c.multi_loc?'Système (snap)':'Système'}
+              </div>
+              <div style={{fontSize:16,fontWeight:900,color:C.blue}}>{c.qte_systeme}</div>
+            </div>
             <div><div style={{fontSize:9,color:sub}}>{c.multi_loc?'Compté (Σ)':'Compté'}</div><div style={{fontSize:16,fontWeight:900,color:C.green}}>{c.qte_comptee}</div></div>
             <div><div style={{fontSize:9,color:sub}}>Stock J+1</div><div style={{fontSize:16,fontWeight:900,color:C.blue}}>{c.stock_apres_sync??'—'}</div></div>
             <div><div style={{fontSize:9,color:sub}}>Loc</div><div style={{fontSize:13,fontWeight:700,fontFamily:'monospace',color:C.blue}}>{c.multi_loc?(c.locs_connues||[]).join(', '):c.localisation}</div></div>
@@ -6097,6 +6121,15 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
           {!c.multi_loc && c.ecart !== c.ecart_reconcilie && (
             <div style={{fontSize:11,color:sub,marginTop:8,textAlign:'center'}}>
               Ventes entre-temps : <strong style={{color:C.blue}}>{c.qte_systeme - c.stock_apres_sync}</strong> unité(s)
+            </div>
+          )}
+          {c.multi_loc && (
+            <div style={{fontSize:11,marginTop:8,textAlign:'center',color:c.cycle_jours>1?C.yellow:sub}}>
+              {c.cycle_jours > 1 ? '⚠️ ' : ''}Cycle de comptage : <strong>{c.cycle_jours} jour{c.cycle_jours>1?'s':''}</strong>
+              {c.cycle_jours > 1 && ' — les ventes intermédiaires peuvent fausser la précision'}
+              {c.qte_systeme !== c.stock_apres_sync && c.stock_apres_sync !== null && c.stock_apres_sync !== undefined && (
+                <span> · ventes entre temps : <strong style={{color:C.blue}}>{c.qte_systeme - c.stock_apres_sync}</strong> u.</span>
+              )}
             </div>
           )}
         </div>
