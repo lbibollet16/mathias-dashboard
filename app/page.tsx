@@ -2845,10 +2845,11 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
         .filter(Boolean).filter((l:string) => l.toUpperCase() !== locActive?.toUpperCase())
     }
 
-    // Si multi-loc, vérifier si déjà comptée aujourd'hui à une autre localisation
+    // Si multi-loc, vérifier si déjà comptée à une autre localisation dans le
+    // cycle actif (statut en_attente ou reconcilie, sans limite de date).
     if (autresLocs.length > 0) {
       try {
-        const rCheck = await fetch('/api/inventaire/comptages?code_today=' + encodeURIComponent(code))
+        const rCheck = await fetch('/api/inventaire/comptages?code_actifs=' + encodeURIComponent(code))
         const comptagesAuj = await rCheck.json()
         const comptageAutreLoc = Array.isArray(comptagesAuj) ? comptagesAuj.find((c:any) => c.localisation?.toUpperCase() !== locActive?.toUpperCase()) : null
         if (comptageAutreLoc) {
@@ -3386,7 +3387,16 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
                 </div>
                 <div style={{fontSize:12,color:sub}}>
                   Par <strong>{pieceDejaComptee.comptage.employe}</strong> — Qté : <strong style={{fontSize:15}}>{pieceDejaComptee.comptage.qte_comptee}</strong>
-                  <span style={{marginLeft:6}}>({new Date(pieceDejaComptee.comptage.date_comptage).toLocaleTimeString('fr-CA',{hour:'2-digit',minute:'2-digit'})})</span>
+                  <span style={{marginLeft:6}}>
+                    {(() => {
+                      const d = new Date(pieceDejaComptee.comptage.date_comptage)
+                      const today = new Date()
+                      const sameDay = d.toDateString() === today.toDateString()
+                      return sameDay
+                        ? `(aujourd'hui ${d.toLocaleTimeString('fr-CA',{hour:'2-digit',minute:'2-digit'})})`
+                        : `(${d.toLocaleDateString('fr-CA',{day:'numeric',month:'short'})} à ${d.toLocaleTimeString('fr-CA',{hour:'2-digit',minute:'2-digit'})})`
+                    })()}
+                  </span>
                 </div>
               </div>
               <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>

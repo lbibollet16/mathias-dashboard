@@ -22,6 +22,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(data || [])
     }
 
+    // Comptages ACTIFS (non résolus, non obsolètes) sur une pièce — sans limite
+    // de date. Sert à signaler à l'employé qu'une autre loc a déjà été comptée
+    // dans le cycle en cours, même si c'était il y a plusieurs jours.
+    const codeActifs = req.nextUrl.searchParams.get('code_actifs')
+    if (codeActifs) {
+      const { data, error } = await supabaseAdmin.from('inventaire_comptages').select('*')
+        .eq('code_piece', codeActifs)
+        .in('statut', ['en_attente', 'reconcilie'])
+        .order('date_comptage', { ascending: false })
+      if (error) throw error
+      return NextResponse.json(data || [])
+    }
+
     let query = supabaseAdmin.from('inventaire_comptages').select('*').order('date_comptage', { ascending: false })
     let all: any[] = []
     let from = 0
