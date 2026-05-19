@@ -784,7 +784,7 @@ export default function Dashboard() {
         {tab==='booking' && <BookingTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} alts={alts}/>}
 
         {/* ── NÉGATIFS ────────────────────────────────────────────── */}
-        {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts} negsVerifies={negsVerifies} setNegsVerifies={setNegsVerifies} profil={profil} data={data} lancerSync={lancerSync} syncing={syncing} syncLog={syncLog} validationsCompta={validationsCompta} retoursActifs={retoursActifsGlobal} setRetoursActifs={setRetoursActifsGlobal}/>}
+        {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts} negsVerifies={negsVerifies} setNegsVerifies={setNegsVerifies} profil={profil} data={data} lancerSync={lancerSync} syncing={syncing} syncLog={syncLog} validationsCompta={validationsCompta} retoursActifs={retoursActifsGlobal} setRetoursActifs={setRetoursActifsGlobal} verifsDoubles={verifsDoubles}/>}
         {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts} fournituresData={fournituresData} setFournituresData={setFournituresData} profil={profil} validationsCompta={validationsCompta}/>}
         {tab==='commandes_attente' && <CommandesAttenteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} forceMesSuivis={forceMesSuivis} setForceMesSuivis={setForceMesSuivis}/>}
         {tab==='inventaire' && <InventaireTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} validationsCompta={validationsCompta} retoursActifs={retoursActifsGlobal} setRetoursActifs={setRetoursActifsGlobal}/>}
@@ -4563,8 +4563,30 @@ function RetoursComptaBandeau({ retours, source, employe, dark, card, bdr, sub, 
   )
 }
 
-function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVerifies, setNegsVerifies, profil, data, lancerSync, syncing, syncLog, validationsCompta, retoursActifs, setRetoursActifs}: any) {
+function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVerifies, setNegsVerifies, profil, data, lancerSync, syncing, syncLog, validationsCompta, retoursActifs, setRetoursActifs, verifsDoubles}: any) {
   const validesNegatifIds = new Set((validationsCompta||[]).filter((v:any)=>v.source==='negatif').map((v:any)=>v.ref_id))
+  // Double-vérification : map ref_id → record (pour afficher badge et auteur)
+  const verifsNegMap = new Map<number, any>()
+  for (const vd of (verifsDoubles || [])) {
+    if (vd.source === 'negatif') verifsNegMap.set(Number(vd.ref_id), vd)
+  }
+  const SEUIL_DOUBLE_VERIF = 3
+  // Calcule le statut de double-vérif pour un négatif vérifié.
+  function statutDoubleVerif(v: any): { label: string; color: string; valide_par?: string } | null {
+    const ecart = Math.abs(Number(v.ajustement || 0))
+    if (ecart <= SEUIL_DOUBLE_VERIF) return null
+    const verif = verifsNegMap.get(v.id)
+    if (verif) return { label: '✅ Double-vérif', color: C.green, valide_par: verif.valide_par }
+    return { label: '⏳ Double-vérif attendue', color: C.yellow }
+  }
+  // Description par code pièce — depuis les négatifs actifs et la liste complète.
+  const descByCode = new Map<string, string>()
+  for (const n of (negs || [])) {
+    if (n.code_piece && n.description) descByCode.set(n.code_piece, n.description)
+  }
+  for (const item of (data?.liste_complete || [])) {
+    if (item.pk && item.desc && !descByCode.has(item.pk)) descByCode.set(item.pk, item.desc)
+  }
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const employe = profil?.nom || profil?.email || 'Inconnu'
 
@@ -5425,10 +5447,20 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                 : negsVerifiesVisibles.map((v:any)=>(
                     <div key={v.id} style={{background:card,borderRadius:14,border:`2px solid ${Number(v.ajustement)!==0?C.red:C.green}`,padding:'16px',marginBottom:4}}>
                       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12}}>
-                        <div>
+                        <div style={{flex:1}}>
                           <div style={{fontWeight:900,fontSize:17,fontFamily:'monospace'}}>{v.code_piece}</div>
-                          <div style={{fontSize:12,color:sub,marginTop:2}}>👤 {v.employe}</div>
+                          {descByCode.get(v.code_piece) && <div style={{fontSize:12,color:sub,marginTop:2,fontWeight:400}}>{descByCode.get(v.code_piece)}</div>}
+                          <div style={{fontSize:12,color:sub,marginTop:4}}>👤 {v.employe}</div>
                           <div style={{fontSize:11,color:sub}}>{new Date(v.date_verification).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
+                          {(() => {
+                            const s = statutDoubleVerif(v); if (!s) return null
+                            return (
+                              <div style={{display:'inline-block',marginTop:6,background:s.color+'22',color:s.color,padding:'3px 8px',borderRadius:6,fontSize:11,fontWeight:800}}
+                                title={s.valide_par ? `Validé par ${s.valide_par}` : 'En attente de double-vérification admin'}>
+                                {s.label}{s.valide_par?` — ${s.valide_par}`:''}
+                              </div>
+                            )
+                          })()}
                         </div>
                         <div style={{textAlign:'right'}}>
                           <div style={{fontSize:11,color:sub,marginBottom:2}}>Ajustement</div>
@@ -5532,7 +5564,23 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
                     ? <tr><td colSpan={19} style={{textAlign:'center',padding:60,color:sub}}>Aucune pièce vérifiée</td></tr>
                     : negsVerifiesVisibles.map((v:any)=>(
                         <tr key={v.id} onMouseEnter={e=>e.currentTarget.style.background=hvr} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace',fontSize:11}}>{v.code_piece}</td>
+                          <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace',fontSize:11}}>
+                            <div>{v.code_piece}</div>
+                            {descByCode.get(v.code_piece) && (
+                              <div style={{fontFamily:'sans-serif',fontSize:10,fontWeight:400,color:sub,marginTop:2,maxWidth:200,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}} title={descByCode.get(v.code_piece)}>
+                                {descByCode.get(v.code_piece)}
+                              </div>
+                            )}
+                            {(() => {
+                              const s = statutDoubleVerif(v); if (!s) return null
+                              return (
+                                <div style={{display:'inline-block',marginTop:3,background:s.color+'22',color:s.color,padding:'1px 6px',borderRadius:4,fontSize:10,fontWeight:800,fontFamily:'sans-serif'}}
+                                  title={s.valide_par ? `Validé par ${s.valide_par}` : 'En attente de double-vérification admin'}>
+                                  {s.label}
+                                </div>
+                              )
+                            })()}
+                          </td>
                           <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.red,fontWeight:700}}>{v.stock_au_moment}</td>
                           <td style={{padding:'8px',borderBottom:`1px solid ${bdr}`,textAlign:'center',fontWeight:900,color:Number(v.ajustement)>=0?C.green:C.red}}>
                             {Number(v.ajustement)>=0?'+':''}{Number(v.ajustement).toFixed(0)}
