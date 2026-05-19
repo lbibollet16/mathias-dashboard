@@ -5609,6 +5609,8 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   // Sert à détecter les pièces multi-localisation et savoir si toutes les locs ont été comptées
   // avant d'envoyer la pièce en Comptabilité.
   const [locsParCode, setLocsParCode] = useState<Map<string, Set<string>>>(new Map())
+  // Description par code_piece (depuis inventaire_localisations ou memoire_negatifs)
+  const [descParCode, setDescParCode] = useState<Map<string, string>>(new Map())
 
   async function recharger() {
     try {
@@ -5634,6 +5636,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
           const rows = await rLoc.json()
           if (Array.isArray(rows)) {
             const map = new Map<string, Set<string>>()
+            const desc = new Map<string, string>()
             for (const row of rows) {
               if (!row.code_piece || row.code_piece.startsWith('LOC_')) continue
               const set = map.get(row.code_piece) || new Set<string>()
@@ -5641,11 +5644,23 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                 if (l) set.add(String(l).toUpperCase())
               }
               map.set(row.code_piece, set)
+              if (row.description && !desc.has(row.code_piece)) {
+                desc.set(row.code_piece, String(row.description))
+              }
             }
             setLocsParCode(map)
+            // Compléter avec les descriptions des pièces négatives (qui ne sont
+            // peut-être pas dans inventaire_localisations)
+            for (const n of (negsVerifies || [])) {
+              if (n.code_piece && n.description && !desc.has(n.code_piece)) {
+                desc.set(n.code_piece, String(n.description))
+              }
+            }
+            setDescParCode(desc)
           }
         } else {
           setLocsParCode(new Map())
+          setDescParCode(new Map())
         }
       }
     } catch {}
@@ -6256,7 +6271,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                           <div style={{width:60}}>
                             <span style={{background:colorSource(it.source)+'22',color:colorSource(it.source),padding:'2px 6px',borderRadius:8,fontSize:10,fontWeight:700}}>{labelSource(it.source)}</span>
                           </div>
-                          <div style={{flex:isMobile?2:1.5,minWidth:90,fontWeight:700,fontFamily:'monospace',fontSize:13}}>
+                          <div style={{flex:isMobile?2:1.5,minWidth:90,fontWeight:700,fontFamily:'monospace',fontSize:13,overflow:'hidden'}}>
                             <span style={{display:'inline-block',width:14,color:sub,fontFamily:'sans-serif'}}>{isExp?'▼':'▶'}</span>
                             {it.code_piece}
                             {(() => {
@@ -6267,6 +6282,15 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                                   style={{marginLeft:6,fontSize:11,padding:'1px 6px',borderRadius:4,background:cat.color+'22',color:cat.color,fontWeight:700,fontFamily:'sans-serif',whiteSpace:'nowrap'}}>
                                   {cat.emoji} {cat.label}
                                 </span>
+                              )
+                            })()}
+                            {(() => {
+                              const d = descParCode.get(it.code_piece)
+                              if (!d) return null
+                              return (
+                                <div style={{fontFamily:'sans-serif',fontSize:11,fontWeight:400,color:sub,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}} title={d}>
+                                  {d}
+                                </div>
                               )
                             })()}
                           </div>
@@ -6348,7 +6372,14 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                             <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`}}>
                               <span style={{background:colorSource(v.source)+'22',color:colorSource(v.source),padding:'2px 8px',borderRadius:8,fontSize:10,fontWeight:700}}>{labelSource(v.source)}</span>
                             </td>
-                            <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace'}}>{v.code_piece}</td>
+                            <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontWeight:700,fontFamily:'monospace'}}>
+                              {v.code_piece}
+                              {descParCode.get(v.code_piece) && (
+                                <div style={{fontFamily:'sans-serif',fontSize:10,fontWeight:400,color:sub,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:220}} title={descParCode.get(v.code_piece)}>
+                                  {descParCode.get(v.code_piece)}
+                                </div>
+                              )}
+                            </td>
                             <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11,color:sub}}>{detail}</td>
                             <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,fontSize:11}}>👤 {v.user_email||'—'}</td>
                             <td style={{padding:'8px 10px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontSize:11,color:sub,whiteSpace:'nowrap'}}>{fmtDate(v.date_validation)}</td>

@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
         const slice = list.slice(i, i + 200)
         const { data, error } = await supabaseAdmin
           .from('inventaire_localisations')
-          .select('code_piece, localisation1, localisation2, localisation3, localisation4')
+          .select('code_piece, description, localisation1, localisation2, localisation3, localisation4')
           .in('code_piece', slice)
         if (error) throw error
         if (data) out.push(...data)
