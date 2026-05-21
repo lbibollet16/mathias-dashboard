@@ -12905,7 +12905,7 @@ const FNI_EXPL = {
   cash_deals:    "Nombre de deals vendus SANS produit FNI. Chaque cash deal = manque à gagner.",
   pct_cash:      "Cash deals ÷ Unités totales. Plus c'est bas, mieux c'est (= tu as vendu du FNI à plus de monde).",
   manque:        "Si tu avais le FNI/unité du meilleur vendeur sur chacune de tes marques, combien tu aurais gagné en plus. Formule : tes_unités × (meilleur_FNI/u − ton_FNI/u).",
-  manque_marge:  "Variante du manque à gagner basée sur la marge FNI : tes_ventes_fni × (meilleure_marge − ta_marge).",
+  manque_marge:  "Variante du manque à gagner basée sur la marge FNI : ton_total_prix_vente × (meilleure_marge − ta_marge). La base reste le prix de vente des machines (jamais les ventes FNI).",
   occasion:      "Véhicules d'occasion : tout #stock avec au moins une lettre (ex. C24-0001B, AC25-0331). Regroupés ensemble, peu importe la marque réelle.",
   medailles:     "Top 3 vendeurs par catégorie. 🥇 Or = #1, 🥈 Argent = #2, 🥉 Bronze = #3.",
   classement:    "Pour chaque marque : qui domine en profit FNI (et la marge totale de l'équipe sur cette marque).",
