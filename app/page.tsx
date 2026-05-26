@@ -47,6 +47,12 @@ interface Negatif {
 
 const C = { blue:'#1a73e8', green:'#188038', yellow:'#f9ab00', red:'#d93025' }
 
+// Sous-catégories disponibles pour le module Vente. L'admin coche celles
+// applicables à chaque marque, et chaque promo/package peut être liée à une.
+const SOUS_CATEGORIES_VENTE = [
+  'VTT','Côte à Côte','Motoneige','Double usage','Cruiser','Sport','Enfant','Boutique'
+] as const
+
 const TIPS: Record<string, string> = {
   'Matrice':     'ABC = volume (A=fort ≥2/mois, B=moyen ≥0.5, C=faible). XYZ = régularité (X=stable CV≤0.6, Y=variable, Z=imprévisible). Calculé par EMA α=0.3.',
   'Fournisseur': 'Fournisseur selon Traction + code de ligne de produit.',
@@ -14468,6 +14474,7 @@ function VenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [promotions, setPromotions] = useState<any[]>([])
   const [packages, setPackages] = useState<any[]>([])
   const [marqueId, setMarqueId] = useState<number|null>(null)
+  const [sousCategorie, setSousCategorie] = useState<string|null>(null)
   const [montant, setMontant] = useState('')
 
   async function recharger() {
@@ -14485,6 +14492,8 @@ function VenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
     } catch {}
   }
   useEffect(() => { recharger() }, [])
+  // Quand on change de marque, réinitialiser la sous-catégorie sélectionnée
+  useEffect(() => { setSousCategorie(null) }, [marqueId])
 
   const rabaisPour = (mId: number|null, mt: number): { rabais: number, palier: any|null } => {
     if (!mId || !mt || mt <= 0) return { rabais: 0, palier: null }
@@ -14506,12 +14515,17 @@ function VenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const next = prochainPalier(marqueId, mt)
   const marqueObj = marques.find((m:any) => m.id === marqueId)
 
-  const promosVisibles = marqueId
+  // Filtrer par marque puis par sous-catégorie (les items sans sous-catégorie
+  // restent visibles dans toutes les sous-catégories de leur marque).
+  const matchSousCat = (sc: string|null) => !sousCategorie || sc === sousCategorie || sc == null
+  const promosVisibles = (marqueId
     ? promotions.filter((p:any) => p.marque_id === marqueId || p.marque_id == null)
     : promotions
-  const packagesVisibles = marqueId
+  ).filter((p:any) => matchSousCat(p.sous_categorie))
+  const packagesVisibles = (marqueId
     ? packages.filter((p:any) => p.marque_id === marqueId || p.marque_id == null)
     : packages
+  ).filter((p:any) => matchSousCat(p.sous_categorie))
 
   const fmt$ = (n:number) => '$' + Math.round(Number(n||0)).toLocaleString('fr-CA')
 
@@ -14536,6 +14550,24 @@ function VenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 {m.nom}
               </button>
             ))}
+          </div>
+        )}
+        {/* Sous-catégories de la marque sélectionnée */}
+        {marqueObj && Array.isArray(marqueObj.sous_categories) && marqueObj.sous_categories.length > 0 && (
+          <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${bdr}`}}>
+            <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Sous-catégorie</div>
+            <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+              <button onClick={()=>setSousCategorie(null)}
+                style={{padding:'6px 14px',borderRadius:16,border:`2px solid ${!sousCategorie?C.yellow:bdr}`,background:!sousCategorie?C.yellow:'transparent',color:!sousCategorie?'#fff':sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+                Toutes
+              </button>
+              {marqueObj.sous_categories.map((sc: string) => (
+                <button key={sc} onClick={()=>setSousCategorie(sc)}
+                  style={{padding:'6px 14px',borderRadius:16,border:`2px solid ${sousCategorie===sc?C.yellow:bdr}`,background:sousCategorie===sc?C.yellow:'transparent',color:sousCategorie===sc?'#fff':sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+                  {sc}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -14596,6 +14628,7 @@ function VenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                       const mm = marques.find((m:any) => m.id === p.marque_id); if (!mm) return null
                       return <span style={{background:C.blue+'22',color:C.blue,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700}}>🏷 {mm.nom}</span>
                     })()}
+                    {p.sous_categorie && <span style={{background:C.yellow+'22',color:C.yellow,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700}}>🗂 {p.sous_categorie}</span>}
                     {p.modele && <span style={{background:sub+'22',color:sub,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700}}>📋 {p.modele}</span>}
                     {p.annee && <span style={{background:sub+'22',color:sub,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700}}>📅 {p.annee}</span>}
                     {p.sku && <span style={{background:sub+'22',color:sub,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700,fontFamily:'monospace'}}>#{p.sku}</span>}
@@ -14640,10 +14673,15 @@ function VenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 <div style={{padding:'14px 16px'}}>
                   <div style={{fontSize:16,fontWeight:900,color:C.blue,marginBottom:4}}>{pk.titre}</div>
                   {pk.description && <div style={{fontSize:12,color:sub,marginBottom:8,whiteSpace:'pre-wrap'}}>{pk.description}</div>}
-                  {pk.marque_id && (() => {
-                    const mm = marques.find((m:any) => m.id === pk.marque_id); if (!mm) return null
-                    return <div style={{marginBottom:8}}><span style={{background:C.blue+'22',color:C.blue,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700}}>🏷 {mm.nom}</span></div>
-                  })()}
+                  {(pk.marque_id || pk.sous_categorie) && (
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
+                      {pk.marque_id && (() => {
+                        const mm = marques.find((m:any) => m.id === pk.marque_id); if (!mm) return null
+                        return <span style={{background:C.blue+'22',color:C.blue,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700}}>🏷 {mm.nom}</span>
+                      })()}
+                      {pk.sous_categorie && <span style={{background:C.yellow+'22',color:C.yellow,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700}}>🗂 {pk.sous_categorie}</span>}
+                    </div>
+                  )}
                   {(pk.items || []).length > 0 && (
                     <div style={{background:dark?'#0f0f0f':'#fafbfc',border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 12px',marginBottom:10}}>
                       <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6}}>Inclus</div>
@@ -14713,6 +14751,24 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
   const fmt$ = (n:number) => '$' + Math.round(Number(n||0)).toLocaleString('fr-CA')
 
   const [nouvMarque, setNouvMarque] = useState('')
+  const [marqueEdit, setMarqueEdit] = useState<any|null>(null) // pour gérer les sous-catégories
+  async function sauverSousCategories() {
+    if (!marqueEdit) return
+    setLoadingAction(`marque_sc_${marqueEdit.id}`)
+    try {
+      await fetch('/api/vente/marques', { method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ id: marqueEdit.id, sous_categories: marqueEdit.sous_categories || [] }) })
+      setMarqueEdit(null)
+      await recharger()
+    } finally { setLoadingAction(null) }
+  }
+  function toggleSousCatPourMarque(sc: string) {
+    setMarqueEdit((m: any) => {
+      const cur: string[] = Array.isArray(m.sous_categories) ? m.sous_categories : []
+      const next = cur.includes(sc) ? cur.filter((x:string) => x !== sc) : [...cur, sc]
+      return { ...m, sous_categories: next }
+    })
+  }
   async function ajouterMarque() {
     const nom = nouvMarque.trim()
     if (!nom) return
@@ -14769,9 +14825,17 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
 
   const [promoEdit, setPromoEdit] = useState<any|null>(null)
   function ouvrirNouvellePromo() {
-    setPromoEdit({ titre:'', description:'', marque_id:null, modele:'', annee:null, sku:'',
+    setPromoEdit({ titre:'', description:'', marque_id:null, sous_categorie:null, modele:'', annee:null, sku:'',
       type_rabais:'autre', valeur:null, prix_avant:null, prix_apres:null,
       image_url:'', date_debut:'', date_fin:'', actif:true })
+  }
+  // Renvoie les sous-catégories disponibles pour la marque choisie dans le
+  // formulaire (toutes si aucune marque sélectionnée).
+  function sousCatPourForm(marqueId: number|null|undefined): readonly string[] {
+    if (!marqueId) return SOUS_CATEGORIES_VENTE
+    const mm = marques.find((m:any) => m.id === marqueId)
+    if (!mm || !Array.isArray(mm.sous_categories) || mm.sous_categories.length === 0) return []
+    return mm.sous_categories
   }
   async function sauverPromo() {
     if (!promoEdit?.titre?.trim()) { alert('Le titre est requis.'); return }
@@ -14806,7 +14870,7 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
 
   const [pkgEdit, setPkgEdit] = useState<any|null>(null)
   function ouvrirNouveauPackage() {
-    setPkgEdit({ titre:'', description:'', marque_id:null, prix_avant:null, prix_apres:null, mo_montant:null,
+    setPkgEdit({ titre:'', description:'', marque_id:null, sous_categorie:null, prix_avant:null, prix_apres:null, mo_montant:null,
       image_url:'', date_debut:'', date_fin:'', actif:true, items: [] })
   }
   function ajouterItem() {
@@ -14880,6 +14944,7 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
               <thead><tr style={{background:thBg}}>
                 <th style={{padding:'8px 10px',textAlign:'left'}}>Nom</th>
+                <th style={{padding:'8px 10px',textAlign:'left'}}>Sous-catégories</th>
                 <th style={{padding:'8px 10px',textAlign:'center'}}>Paliers</th>
                 <th style={{padding:'8px 10px',textAlign:'center'}}>Statut</th>
                 <th style={{padding:'8px 10px',textAlign:'right'}}></th>
@@ -14887,9 +14952,17 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
               <tbody>
                 {marques.map((m:any) => {
                   const nbPaliers = paliers.filter((p:any) => p.marque_id === m.id).length
+                  const sousCats = Array.isArray(m.sous_categories) ? m.sous_categories : []
                   return (
                     <tr key={m.id}>
                       <td style={{padding:'8px 10px',borderTop:`1px solid ${bdr}`,fontWeight:700}}>{m.nom}</td>
+                      <td style={{padding:'8px 10px',borderTop:`1px solid ${bdr}`,fontSize:11,color:sub}}>
+                        {sousCats.length === 0 ? <span style={{fontStyle:'italic'}}>aucune</span> : (
+                          <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                            {sousCats.map((sc: string) => <span key={sc} style={{background:C.yellow+'22',color:C.yellow,padding:'1px 6px',borderRadius:4,fontWeight:700}}>{sc}</span>)}
+                          </div>
+                        )}
+                      </td>
                       <td style={{padding:'8px 10px',borderTop:`1px solid ${bdr}`,textAlign:'center',color:sub}}>{nbPaliers}</td>
                       <td style={{padding:'8px 10px',borderTop:`1px solid ${bdr}`,textAlign:'center'}}>
                         <button onClick={()=>toggleActifMarque(m)} disabled={loadingAction===`marque_${m.id}`}
@@ -14897,7 +14970,11 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
                           {m.actif ? '✓ Actif' : '✕ Inactif'}
                         </button>
                       </td>
-                      <td style={{padding:'8px 10px',borderTop:`1px solid ${bdr}`,textAlign:'right'}}>
+                      <td style={{padding:'8px 10px',borderTop:`1px solid ${bdr}`,textAlign:'right',whiteSpace:'nowrap'}}>
+                        <button onClick={()=>setMarqueEdit({ ...m, sous_categories: Array.isArray(m.sous_categories) ? [...m.sous_categories] : [] })}
+                          style={{background:C.yellow+'22',color:C.yellow,border:`1px solid ${C.yellow}`,borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:11,marginRight:4}}>
+                          🗂 Sous-cat.
+                        </button>
                         <button onClick={()=>supprimerMarque(m)} disabled={loadingAction===`marque_del_${m.id}`}
                           style={{background:'transparent',border:`1px solid ${C.red}`,color:C.red,borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:11}}>
                           🗑
@@ -14908,6 +14985,34 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
                 })}
               </tbody>
             </table>
+          )}
+
+          {/* Modale sous-catégories */}
+          {marqueEdit && (
+            <div onClick={()=>setMarqueEdit(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}}>
+              <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,padding:'18px 22px',maxWidth:500,width:'100%',border:`2px solid ${C.yellow}`}}>
+                <div style={{fontSize:16,fontWeight:900,color:C.yellow,marginBottom:6}}>🗂 Sous-catégories — {marqueEdit.nom}</div>
+                <div style={{fontSize:12,color:sub,marginBottom:14}}>Coche les sous-catégories applicables à cette marque. Elles seront sélectionnables dans les promotions, les packages et le filtre de l'onglet Vente.</div>
+                <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:14}}>
+                  {SOUS_CATEGORIES_VENTE.map(sc => {
+                    const checked = (marqueEdit.sous_categories || []).includes(sc)
+                    return (
+                      <label key={sc} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 12px',background:checked?(dark?'#2b2411':'#fef7e0'):'transparent',border:`1px solid ${checked?C.yellow:bdr}`,borderRadius:8,cursor:'pointer'}}>
+                        <input type="checkbox" checked={checked} onChange={()=>toggleSousCatPourMarque(sc)}/>
+                        <span style={{fontSize:13,fontWeight:700,color:checked?C.yellow:undefined}}>{sc}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+                <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+                  <button onClick={()=>setMarqueEdit(null)} style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>Annuler</button>
+                  <button onClick={sauverSousCategories} disabled={loadingAction===`marque_sc_${marqueEdit.id}`}
+                    style={{background:C.yellow,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontWeight:700,cursor:'pointer',fontSize:12}}>
+                    {loadingAction===`marque_sc_${marqueEdit.id}`?'⏳':'💾 Enregistrer'}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -14984,6 +15089,7 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
                     {p.description && <div style={{fontSize:11,color:sub,marginBottom:6,whiteSpace:'pre-wrap'}}>{p.description}</div>}
                     <div style={{display:'flex',gap:4,flexWrap:'wrap',marginBottom:6}}>
                       {mm && <span style={{background:C.blue+'22',color:C.blue,padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700}}>{mm.nom}</span>}
+                      {p.sous_categorie && <span style={{background:C.yellow+'22',color:C.yellow,padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700}}>{p.sous_categorie}</span>}
                     </div>
                     {(p.prix_avant != null || p.prix_apres != null) && (
                       <div style={{display:'flex',gap:6,alignItems:'baseline',marginBottom:6}}>
@@ -15018,15 +15124,22 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
                     <div>
                       <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Marque</div>
-                      <select value={promoEdit.marque_id||''} onChange={e=>setPromoEdit({...promoEdit,marque_id:e.target.value?Number(e.target.value):null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}>
+                      <select value={promoEdit.marque_id||''} onChange={e=>setPromoEdit({...promoEdit,marque_id:e.target.value?Number(e.target.value):null,sous_categorie:null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}>
                         <option value="">— Toutes —</option>
                         {marques.map((m:any) => <option key={m.id} value={m.id}>{m.nom}</option>)}
                       </select>
                     </div>
                     <div>
-                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Modèle</div>
-                      <input value={promoEdit.modele||''} onChange={e=>setPromoEdit({...promoEdit,modele:e.target.value})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Sous-catégorie</div>
+                      <select value={promoEdit.sous_categorie||''} onChange={e=>setPromoEdit({...promoEdit,sous_categorie:e.target.value||null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}>
+                        <option value="">— Aucune —</option>
+                        {sousCatPourForm(promoEdit.marque_id).map(sc => <option key={sc} value={sc}>{sc}</option>)}
+                      </select>
                     </div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Modèle</div>
+                    <input value={promoEdit.modele||''} onChange={e=>setPromoEdit({...promoEdit,modele:e.target.value})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
                   </div>
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
                     <div>
@@ -15106,6 +15219,7 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
                     </div>
                     <div style={{display:'flex',gap:4,flexWrap:'wrap',marginBottom:6}}>
                       {mm && <span style={{background:C.blue+'22',color:C.blue,padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700}}>{mm.nom}</span>}
+                      {pk.sous_categorie && <span style={{background:C.yellow+'22',color:C.yellow,padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700}}>{pk.sous_categorie}</span>}
                       <span style={{background:sub+'22',color:sub,padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700}}>{(pk.items||[]).length} items</span>
                     </div>
                     <div style={{display:'flex',gap:6,alignItems:'baseline',marginBottom:6}}>
@@ -15136,14 +15250,23 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
                     <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Description</div>
                     <textarea value={pkgEdit.description||''} onChange={e=>setPkgEdit({...pkgEdit,description:e.target.value})} style={{...S,fontSize:12,padding:'8px 12px',width:'100%',minHeight:60}}/>
                   </div>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}}>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
                     <div>
                       <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Marque</div>
-                      <select value={pkgEdit.marque_id||''} onChange={e=>setPkgEdit({...pkgEdit,marque_id:e.target.value?Number(e.target.value):null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}>
+                      <select value={pkgEdit.marque_id||''} onChange={e=>setPkgEdit({...pkgEdit,marque_id:e.target.value?Number(e.target.value):null,sous_categorie:null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}>
                         <option value="">— Toutes —</option>
                         {marques.map((m:any) => <option key={m.id} value={m.id}>{m.nom}</option>)}
                       </select>
                     </div>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Sous-catégorie</div>
+                      <select value={pkgEdit.sous_categorie||''} onChange={e=>setPkgEdit({...pkgEdit,sous_categorie:e.target.value||null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}>
+                        <option value="">— Aucune —</option>
+                        {sousCatPourForm(pkgEdit.marque_id).map(sc => <option key={sc} value={sc}>{sc}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
                     <div>
                       <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Prix avant ($)</div>
                       <input type="number" value={pkgEdit.prix_avant??''} onChange={e=>setPkgEdit({...pkgEdit,prix_avant:e.target.value?Number(e.target.value):null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
