@@ -14989,7 +14989,7 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
 
           {/* Modale sous-catégories */}
           {marqueEdit && (
-            <div onClick={()=>setMarqueEdit(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}}>
+            <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}}>
               <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,padding:'18px 22px',maxWidth:500,width:'100%',border:`2px solid ${C.yellow}`}}>
                 <div style={{fontSize:16,fontWeight:900,color:C.yellow,marginBottom:6}}>🗂 Sous-catégories — {marqueEdit.nom}</div>
                 <div style={{fontSize:12,color:sub,marginBottom:14}}>Coche les sous-catégories applicables à cette marque. Elles seront sélectionnables dans les promotions, les packages et le filtre de l'onglet Vente.</div>
@@ -15109,7 +15109,7 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
           )}
 
           {promoEdit && (
-            <div onClick={()=>setPromoEdit(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}}>
+            <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}}>
               <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,padding:'18px 22px',maxWidth:600,width:'100%',maxHeight:'90vh',overflowY:'auto',border:`2px solid ${C.green}`}}>
                 <div style={{fontSize:16,fontWeight:900,color:C.green,marginBottom:12}}>{promoEdit.id?'✎ Modifier':'➕ Nouvelle'} promotion</div>
                 <div style={{display:'grid',gridTemplateColumns:'1fr',gap:10}}>
@@ -15238,7 +15238,7 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
           )}
 
           {pkgEdit && (
-            <div onClick={()=>setPkgEdit(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}}>
+            <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}}>
               <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,padding:'18px 22px',maxWidth:700,width:'100%',maxHeight:'90vh',overflowY:'auto',border:`2px solid ${C.blue}`}}>
                 <div style={{fontSize:16,fontWeight:900,color:C.blue,marginBottom:12}}>{pkgEdit.id?'✎ Modifier':'➕ Nouveau'} package</div>
                 <div style={{display:'grid',gridTemplateColumns:'1fr',gap:10}}>
