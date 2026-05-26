@@ -14648,15 +14648,10 @@ function VenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                             {it.sku && <span style={{fontFamily:'monospace',fontWeight:700,color:C.blue,marginRight:6}}>{it.sku}</span>}
                             <span style={{color:sub}}>{it.description || ''}</span>
                           </div>
-                          <div style={{whiteSpace:'nowrap',color:sub,fontSize:11}}>
-                            ×{Number(it.quantite || 1)} {it.prix_unitaire != null && <span style={{marginLeft:6}}>{fmt$(Number(it.prix_unitaire) * Number(it.quantite || 1))}</span>}
-                          </div>
+                          <div style={{whiteSpace:'nowrap',color:sub,fontSize:11}}>×{Number(it.quantite || 1)}</div>
                         </div>
                       ))}
                     </div>
-                  )}
-                  {pk.mo_montant != null && Number(pk.mo_montant) > 0 && (
-                    <div style={{fontSize:12,color:sub,marginBottom:8}}>👷 Main-d'œuvre : <strong>{fmt$(pk.mo_montant)}</strong></div>
                   )}
                   <div style={{display:'flex',alignItems:'baseline',justifyContent:'center',gap:10,padding:'12px 0',background:dark?'#0d2a18':'#e6f4ea',borderRadius:8}}>
                     {pk.prix_avant != null && Number(pk.prix_avant) > 0 && (
@@ -15149,10 +15144,6 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
                       <input type="number" value={pkgEdit.prix_apres??''} onChange={e=>setPkgEdit({...pkgEdit,prix_apres:e.target.value?Number(e.target.value):null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
                     </div>
                   </div>
-                  <div>
-                    <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Main d'œuvre ($)</div>
-                    <input type="number" value={pkgEdit.mo_montant??''} onChange={e=>setPkgEdit({...pkgEdit,mo_montant:e.target.value?Number(e.target.value):null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
-                  </div>
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
                     <div>
                       <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Date début</div>
@@ -15180,11 +15171,10 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
                       <button onClick={ajouterItem} style={{background:C.blue+'22',color:C.blue,border:`1px solid ${C.blue}`,borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:11}}>➕ Item</button>
                     </div>
                     {(pkgEdit.items||[]).map((it:any, i:number) => (
-                      <div key={i} style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 2fr 60px 80px auto',gap:6,marginBottom:6,alignItems:'center'}}>
+                      <div key={i} style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 2fr 60px auto',gap:6,marginBottom:6,alignItems:'center'}}>
                         <input value={it.sku||''} onChange={e=>modifierItem(i,'sku',e.target.value)} placeholder="SKU" style={{...S,fontSize:12,padding:'6px 10px',fontFamily:'monospace'}}/>
                         <input value={it.description||''} onChange={e=>modifierItem(i,'description',e.target.value)} placeholder="Description" style={{...S,fontSize:12,padding:'6px 10px'}}/>
                         <input type="number" value={it.quantite||''} onChange={e=>modifierItem(i,'quantite',Number(e.target.value)||1)} placeholder="Qté" style={{...S,fontSize:12,padding:'6px 10px',textAlign:'center'}}/>
-                        <input type="number" value={it.prix_unitaire??''} onChange={e=>modifierItem(i,'prix_unitaire',e.target.value?Number(e.target.value):null)} placeholder="Prix u." style={{...S,fontSize:12,padding:'6px 10px',textAlign:'right'}}/>
                         <button onClick={()=>retirerItem(i)} style={{background:'transparent',border:`1px solid ${C.red}`,color:C.red,borderRadius:6,padding:'4px 8px',fontWeight:700,cursor:'pointer',fontSize:11}}>🗑</button>
                       </div>
                     ))}
