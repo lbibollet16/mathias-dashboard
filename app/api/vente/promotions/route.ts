@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { titre, description, marque_id, modele, annee, sku, type_rabais, valeur, image_url, date_debut, date_fin, actif, cree_par } = body
+    const { titre, description, marque_id, modele, annee, sku, type_rabais, valeur, prix_avant, prix_apres, image_url, date_debut, date_fin, actif, cree_par } = body
     if (!titre || !titre.trim()) return NextResponse.json({ erreur: 'titre requis' }, { status: 400 })
     const { data, error } = await supabaseAdmin.from('vente_promotions').insert({
       titre: titre.trim(),
@@ -38,6 +38,8 @@ export async function POST(req: NextRequest) {
       sku: sku || null,
       type_rabais: type_rabais || 'autre',
       valeur: valeur != null ? Number(valeur) : null,
+      prix_avant: prix_avant != null ? Number(prix_avant) : null,
+      prix_apres: prix_apres != null ? Number(prix_apres) : null,
       image_url: image_url || null,
       date_debut: date_debut || null,
       date_fin: date_fin || null,
@@ -57,7 +59,7 @@ export async function PATCH(req: NextRequest) {
     const { id, ...rest } = body
     if (!id) return NextResponse.json({ erreur: 'id requis' }, { status: 400 })
     const update: any = {}
-    for (const k of ['titre','description','marque_id','modele','annee','sku','type_rabais','valeur','image_url','date_debut','date_fin','actif']) {
+    for (const k of ['titre','description','marque_id','modele','annee','sku','type_rabais','valeur','prix_avant','prix_apres','image_url','date_debut','date_fin','actif']) {
       if (rest[k] !== undefined) update[k] = rest[k]
     }
     const { data, error } = await supabaseAdmin

@@ -14600,9 +14600,14 @@ function VenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     {p.annee && <span style={{background:sub+'22',color:sub,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700}}>📅 {p.annee}</span>}
                     {p.sku && <span style={{background:sub+'22',color:sub,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700,fontFamily:'monospace'}}>#{p.sku}</span>}
                   </div>
-                  {p.valeur != null && (
-                    <div style={{fontSize:28,fontWeight:900,color:C.red,textAlign:'center',padding:'8px 0',background:dark?'#2a1413':'#fef2f2',borderRadius:8}}>
-                      {p.type_rabais === 'pourcentage' ? `-${p.valeur}%` : p.type_rabais === 'fixe' ? `${fmt$(p.valeur)} OFF` : `${p.valeur}`}
+                  {(p.prix_avant != null || p.prix_apres != null) && (
+                    <div style={{display:'flex',alignItems:'baseline',justifyContent:'center',gap:10,padding:'12px 0',background:dark?'#0d2a18':'#e6f4ea',borderRadius:8}}>
+                      {p.prix_avant != null && Number(p.prix_avant) > 0 && (
+                        <span style={{fontSize:18,color:sub,textDecoration:'line-through',fontWeight:600}}>{fmt$(p.prix_avant)}</span>
+                      )}
+                      {p.prix_apres != null && (
+                        <span style={{fontSize:30,color:C.green,fontWeight:900}}>{fmt$(p.prix_apres)}</span>
+                      )}
                     </div>
                   )}
                   {(p.date_debut || p.date_fin) && (
@@ -14765,7 +14770,8 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
   const [promoEdit, setPromoEdit] = useState<any|null>(null)
   function ouvrirNouvellePromo() {
     setPromoEdit({ titre:'', description:'', marque_id:null, modele:'', annee:null, sku:'',
-      type_rabais:'autre', valeur:null, image_url:'', date_debut:'', date_fin:'', actif:true })
+      type_rabais:'autre', valeur:null, prix_avant:null, prix_apres:null,
+      image_url:'', date_debut:'', date_fin:'', actif:true })
   }
   async function sauverPromo() {
     if (!promoEdit?.titre?.trim()) { alert('Le titre est requis.'); return }
@@ -14978,8 +14984,13 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
                     {p.description && <div style={{fontSize:11,color:sub,marginBottom:6,whiteSpace:'pre-wrap'}}>{p.description}</div>}
                     <div style={{display:'flex',gap:4,flexWrap:'wrap',marginBottom:6}}>
                       {mm && <span style={{background:C.blue+'22',color:C.blue,padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700}}>{mm.nom}</span>}
-                      {p.valeur != null && <span style={{background:C.red+'22',color:C.red,padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700}}>{p.type_rabais==='pourcentage'?`-${p.valeur}%`:p.type_rabais==='fixe'?`${fmt$(p.valeur)} OFF`:`${p.valeur}`}</span>}
                     </div>
+                    {(p.prix_avant != null || p.prix_apres != null) && (
+                      <div style={{display:'flex',gap:6,alignItems:'baseline',marginBottom:6}}>
+                        {p.prix_avant != null && Number(p.prix_avant) > 0 && <span style={{fontSize:12,color:sub,textDecoration:'line-through'}}>{fmt$(p.prix_avant)}</span>}
+                        {p.prix_apres != null && <span style={{fontSize:16,color:C.green,fontWeight:900}}>{fmt$(p.prix_apres)}</span>}
+                      </div>
+                    )}
                     <div style={{fontSize:10,color:sub,marginBottom:8}}>{p.date_debut||'—'} → {p.date_fin||'—'}</div>
                     <div style={{display:'flex',gap:6}}>
                       <button onClick={()=>setPromoEdit({...p})} style={{background:C.blue+'22',color:C.blue,border:`1px solid ${C.blue}`,borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:11,flex:1}}>✎ Modifier</button>
@@ -15029,16 +15040,14 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
                   </div>
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
                     <div>
-                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Type rabais</div>
-                      <select value={promoEdit.type_rabais||'autre'} onChange={e=>setPromoEdit({...promoEdit,type_rabais:e.target.value})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}>
-                        <option value="autre">Autre</option>
-                        <option value="pourcentage">Pourcentage (%)</option>
-                        <option value="fixe">Montant fixe ($)</option>
-                      </select>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Prix avant ($)</div>
+                      <input type="number" value={promoEdit.prix_avant??''} onChange={e=>setPromoEdit({...promoEdit,prix_avant:e.target.value?Number(e.target.value):null})} placeholder="Prix barré"
+                        style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
                     </div>
                     <div>
-                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Valeur</div>
-                      <input type="number" value={promoEdit.valeur??''} onChange={e=>setPromoEdit({...promoEdit,valeur:e.target.value?Number(e.target.value):null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Prix PDSF ($)</div>
+                      <input type="number" value={promoEdit.prix_apres??''} onChange={e=>setPromoEdit({...promoEdit,prix_apres:e.target.value?Number(e.target.value):null})} placeholder="Nouveau prix"
+                        style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
                     </div>
                   </div>
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
