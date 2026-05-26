@@ -8,10 +8,11 @@ const supabaseCli = createClient(
 )
 
 const ROLES_ONGLETS: Record<string, string[]> = {
-  admin:        ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','verification','comptabilite','amazon','scoa','utilisateurs'],
-  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','scoa'],
+  admin:        ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','verification','comptabilite','amazon','scoa','vente','parametre_vente','utilisateurs'],
+  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','scoa','vente','parametre_vente'],
   commis:       ['commandes','commandes_attente','fournitures','retours'],
   employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours'],
+  vente:        ['vente'],
 }
 
 // Onglets TOUJOURS visibles pour tout le monde — même si l'utilisateur a un
@@ -371,7 +372,7 @@ export default function Dashboard() {
 
       {/* TABS */}
       <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,overflowX:'auto',display:'flex',WebkitOverflowScrolling:'touch',scrollbarWidth:'none',gap:isMobile?2:0}}>
-        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'commandes_attente',l:isMobile?'⏳':'⏳ Commandes en attente'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'verification',l:isMobile?'🔍':'🔍 Vérification'},{id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},{id:'scoa',l:isMobile?'🏍 SCOA':'🏍 SCOA'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>ongletsVisibles(profil).includes(t.id)).map(t=>(
+        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'commandes_attente',l:isMobile?'⏳':'⏳ Commandes en attente'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'verification',l:isMobile?'🔍':'🔍 Vérification'},{id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},{id:'scoa',l:isMobile?'🏍 SCOA':'🏍 SCOA'},{id:'vente',l:isMobile?'🛒':'🛒 Vente'},{id:'parametre_vente',l:isMobile?'⚙️':'⚙️ Paramètre Vente'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>ongletsVisibles(profil).includes(t.id)).map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:isMobile?'12px 14px':'12px 16px',border:'none',background:tab===t.id?(dark?'#1a233a':'#dbeafe'):'transparent',cursor:'pointer',fontSize:isMobile?14:13,fontWeight:tab===t.id?800:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',borderRadius:isMobile?'8px 8px 0 0':0,transition:'all .15s',whiteSpace:'nowrap',flexShrink:0}}>
             {t.l}
           </button>
@@ -790,6 +791,8 @@ export default function Dashboard() {
         {tab==='inventaire' && <InventaireTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} validationsCompta={validationsCompta} retoursActifs={retoursActifsGlobal} setRetoursActifs={setRetoursActifsGlobal}/>}
         {tab==='comptabilite' && <ComptabiliteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} validationsCompta={validationsCompta} setValidationsCompta={setValidationsCompta} verifsDoubles={verifsDoubles} setVerifsDoubles={setVerifsDoubles}/>}
         {tab==='verification' && <VerificationTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} verifsDoubles={verifsDoubles} setVerifsDoubles={setVerifsDoubles} validationsCompta={validationsCompta}/>}
+        {tab==='vente' && <VenteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
+        {tab==='parametre_vente' && <ParametreVenteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
         {tab==='amazon' && <AmazonTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
         {tab==='scoa' && <ScoaTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
         {tab==='utilisateurs' && <UtilisateursTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
@@ -4110,10 +4113,11 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
   ]
 
   const ROLES_LEGACY: Record<string, string[]> = {
-    admin:         ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','scoa','utilisateurs'],
-    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','scoa'],
+    admin:         ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','verification','comptabilite','amazon','scoa','vente','parametre_vente','utilisateurs'],
+    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','scoa','vente','parametre_vente'],
     commis:        ['commandes','commandes_attente','fournitures','retours'],
     employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours'],
+    vente:         ['vente'],
   }
 
   const ROLES = [
@@ -4121,6 +4125,7 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
     {val:'gestionnaire', label:'Gestionnaire',   color:C.blue},
     {val:'commis',       label:'Commis',         color:C.green},
     {val:'employe_piece',label:'Employé pièce',  color:C.yellow},
+    {val:'vente',        label:'Vente',          color:'#a855f7'},
   ]
 
   useEffect(() => { chargerUsers() }, [])
@@ -14445,6 +14450,757 @@ function ScoaTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
               </table>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Onglet VENTE — vue conseiller : sélectionne une marque, entre l'estimé,
+// reçoit le $ de rabais autorisé selon les paliers configurés. Affiche aussi
+// les promotions et packages actifs pour cette marque.
+// ──────────────────────────────────────────────────────────────────────────
+function VenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+  const [marques, setMarques] = useState<any[]>([])
+  const [paliers, setPaliers] = useState<any[]>([])
+  const [promotions, setPromotions] = useState<any[]>([])
+  const [packages, setPackages] = useState<any[]>([])
+  const [marqueId, setMarqueId] = useState<number|null>(null)
+  const [montant, setMontant] = useState('')
+
+  async function recharger() {
+    try {
+      const [m, p, pr, pk] = await Promise.all([
+        fetch('/api/vente/marques').then(r=>r.json()).catch(()=>[]),
+        fetch('/api/vente/paliers').then(r=>r.json()).catch(()=>[]),
+        fetch('/api/vente/promotions?actives=1').then(r=>r.json()).catch(()=>[]),
+        fetch('/api/vente/packages?actives=1').then(r=>r.json()).catch(()=>[]),
+      ])
+      if (Array.isArray(m)) setMarques(m.filter((x:any) => x.actif !== false))
+      if (Array.isArray(p)) setPaliers(p)
+      if (Array.isArray(pr)) setPromotions(pr)
+      if (Array.isArray(pk)) setPackages(pk)
+    } catch {}
+  }
+  useEffect(() => { recharger() }, [])
+
+  const rabaisPour = (mId: number|null, mt: number): { rabais: number, palier: any|null } => {
+    if (!mId || !mt || mt <= 0) return { rabais: 0, palier: null }
+    const palier = paliers.find((p:any) =>
+      Number(p.marque_id) === mId
+      && mt >= Number(p.montant_min)
+      && mt <= Number(p.montant_max))
+    return { rabais: palier ? Number(palier.rabais_montant) : 0, palier: palier || null }
+  }
+  const prochainPalier = (mId: number|null, mt: number): any|null => {
+    if (!mId) return null
+    const dessus = paliers.filter((p:any) => Number(p.marque_id) === mId && Number(p.montant_min) > mt)
+      .sort((a:any,b:any) => Number(a.montant_min) - Number(b.montant_min))
+    return dessus[0] || null
+  }
+
+  const mt = parseFloat(montant) || 0
+  const { rabais, palier } = rabaisPour(marqueId, mt)
+  const next = prochainPalier(marqueId, mt)
+  const marqueObj = marques.find((m:any) => m.id === marqueId)
+
+  const promosVisibles = marqueId
+    ? promotions.filter((p:any) => p.marque_id === marqueId || p.marque_id == null)
+    : promotions
+  const packagesVisibles = marqueId
+    ? packages.filter((p:any) => p.marque_id === marqueId || p.marque_id == null)
+    : packages
+
+  const fmt$ = (n:number) => '$' + Math.round(Number(n||0)).toLocaleString('fr-CA')
+
+  return (
+    <div>
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14,flexWrap:'wrap'}}>
+        <div>
+          <div style={{fontSize:22,fontWeight:900}}>🛒 Vente</div>
+          <div style={{fontSize:12,color:sub,marginTop:2}}>Sélectionne une marque, entre l'estimé, et obtiens le rabais autorisé.</div>
+        </div>
+      </div>
+
+      <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:12,padding:'14px 16px',marginBottom:14}}>
+        <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Marque</div>
+        {marques.length === 0 ? (
+          <div style={{color:sub,fontSize:13,fontStyle:'italic'}}>Aucune marque configurée — demande à l'admin d'en créer dans « ⚙️ Paramètre Vente ».</div>
+        ) : (
+          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+            {marques.map((m:any) => (
+              <button key={m.id} onClick={()=>setMarqueId(m.id)}
+                style={{padding:'10px 16px',borderRadius:20,border:`2px solid ${marqueId===m.id?C.blue:bdr}`,background:marqueId===m.id?C.blue:'transparent',color:marqueId===m.id?'#fff':sub,fontWeight:700,cursor:'pointer',fontSize:13}}>
+                {m.nom}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {marqueId && (
+        <div style={{background:card,border:`2px solid ${C.blue}`,borderRadius:12,padding:'16px 18px',marginBottom:14}}>
+          <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:18,alignItems:'center'}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6}}>Montant de l'estimé ({marqueObj?.nom})</div>
+              <input type="number" min="0" step="0.01" inputMode="decimal"
+                value={montant} onChange={e=>setMontant(e.target.value)}
+                placeholder="0"
+                style={{...S,fontSize:28,fontWeight:900,padding:'12px 14px',textAlign:'center'}}/>
+            </div>
+            <div style={{textAlign:'center'}}>
+              <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6}}>Rabais autorisé</div>
+              <div style={{fontSize:48,fontWeight:900,color:rabais>0?C.green:sub,letterSpacing:-1}}>
+                {rabais > 0 ? `${fmt$(rabais)} OFF` : '—'}
+              </div>
+              {palier && (
+                <div style={{fontSize:11,color:sub,marginTop:4}}>
+                  Palier : {fmt$(palier.montant_min)} – {fmt$(palier.montant_max)}
+                </div>
+              )}
+              {!palier && mt > 0 && (
+                <div style={{fontSize:12,color:sub,marginTop:6}}>Aucun palier ne couvre ce montant.</div>
+              )}
+              {next && (
+                <div style={{marginTop:10,background:dark?'#2b2411':'#fef7e0',color:C.yellow,padding:'6px 12px',borderRadius:6,fontSize:12,fontWeight:700,display:'inline-block'}}>
+                  💡 À {fmt$(next.montant_min)}, tu débloques <strong>{fmt$(next.rabais_montant)} OFF</strong>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{marginBottom:14}}>
+        <div style={{fontSize:14,fontWeight:800,marginBottom:10}}>🎯 Promotions actives {marqueId && marqueObj ? `— ${marqueObj.nom}` : ''} ({promosVisibles.length})</div>
+        {promosVisibles.length === 0 ? (
+          <div style={{background:card,border:`1px dashed ${bdr}`,borderRadius:12,padding:20,textAlign:'center',color:sub,fontSize:13}}>
+            Aucune promotion active{marqueId ? ' pour cette marque' : ''}.
+          </div>
+        ) : (
+          <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(auto-fill, minmax(280px, 1fr))',gap:12}}>
+            {promosVisibles.map((p:any) => (
+              <div key={p.id} style={{background:card,border:`2px solid ${C.green}`,borderRadius:12,overflow:'hidden',display:'flex',flexDirection:'column'}}>
+                {p.image_url && (
+                  <a href={p.image_url} target="_blank" rel="noreferrer">
+                    <img src={p.image_url} alt="" style={{width:'100%',height:160,objectFit:'cover'}}/>
+                  </a>
+                )}
+                <div style={{padding:'12px 14px',flex:1,display:'flex',flexDirection:'column'}}>
+                  <div style={{fontSize:15,fontWeight:900,color:C.green,marginBottom:4}}>{p.titre}</div>
+                  {p.description && <div style={{fontSize:12,color:sub,marginBottom:6,whiteSpace:'pre-wrap'}}>{p.description}</div>}
+                  <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
+                    {p.marque_id && (() => {
+                      const mm = marques.find((m:any) => m.id === p.marque_id); if (!mm) return null
+                      return <span style={{background:C.blue+'22',color:C.blue,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700}}>🏷 {mm.nom}</span>
+                    })()}
+                    {p.modele && <span style={{background:sub+'22',color:sub,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700}}>📋 {p.modele}</span>}
+                    {p.annee && <span style={{background:sub+'22',color:sub,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700}}>📅 {p.annee}</span>}
+                    {p.sku && <span style={{background:sub+'22',color:sub,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700,fontFamily:'monospace'}}>#{p.sku}</span>}
+                  </div>
+                  {p.valeur != null && (
+                    <div style={{fontSize:28,fontWeight:900,color:C.red,textAlign:'center',padding:'8px 0',background:dark?'#2a1413':'#fef2f2',borderRadius:8}}>
+                      {p.type_rabais === 'pourcentage' ? `-${p.valeur}%` : p.type_rabais === 'fixe' ? `${fmt$(p.valeur)} OFF` : `${p.valeur}`}
+                    </div>
+                  )}
+                  {(p.date_debut || p.date_fin) && (
+                    <div style={{fontSize:10,color:sub,marginTop:8,textAlign:'center'}}>
+                      {p.date_debut ? `Du ${p.date_debut}` : ''} {p.date_fin ? `au ${p.date_fin}` : ''}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div style={{fontSize:14,fontWeight:800,marginBottom:10}}>📦 Packages {marqueId && marqueObj ? `— ${marqueObj.nom}` : ''} ({packagesVisibles.length})</div>
+        {packagesVisibles.length === 0 ? (
+          <div style={{background:card,border:`1px dashed ${bdr}`,borderRadius:12,padding:20,textAlign:'center',color:sub,fontSize:13}}>
+            Aucun package actif{marqueId ? ' pour cette marque' : ''}.
+          </div>
+        ) : (
+          <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(auto-fill, minmax(320px, 1fr))',gap:12}}>
+            {packagesVisibles.map((pk:any) => (
+              <div key={pk.id} style={{background:card,border:`2px solid ${C.blue}`,borderRadius:12,overflow:'hidden'}}>
+                {pk.image_url && (
+                  <a href={pk.image_url} target="_blank" rel="noreferrer">
+                    <img src={pk.image_url} alt="" style={{width:'100%',height:180,objectFit:'cover'}}/>
+                  </a>
+                )}
+                <div style={{padding:'14px 16px'}}>
+                  <div style={{fontSize:16,fontWeight:900,color:C.blue,marginBottom:4}}>{pk.titre}</div>
+                  {pk.description && <div style={{fontSize:12,color:sub,marginBottom:8,whiteSpace:'pre-wrap'}}>{pk.description}</div>}
+                  {pk.marque_id && (() => {
+                    const mm = marques.find((m:any) => m.id === pk.marque_id); if (!mm) return null
+                    return <div style={{marginBottom:8}}><span style={{background:C.blue+'22',color:C.blue,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700}}>🏷 {mm.nom}</span></div>
+                  })()}
+                  {(pk.items || []).length > 0 && (
+                    <div style={{background:dark?'#0f0f0f':'#fafbfc',border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 12px',marginBottom:10}}>
+                      <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6}}>Inclus</div>
+                      {pk.items.map((it:any) => (
+                        <div key={it.id} style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:12,padding:'4px 0',borderBottom:`1px dotted ${bdr}`}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            {it.sku && <span style={{fontFamily:'monospace',fontWeight:700,color:C.blue,marginRight:6}}>{it.sku}</span>}
+                            <span style={{color:sub}}>{it.description || ''}</span>
+                          </div>
+                          <div style={{whiteSpace:'nowrap',color:sub,fontSize:11}}>
+                            ×{Number(it.quantite || 1)} {it.prix_unitaire != null && <span style={{marginLeft:6}}>{fmt$(Number(it.prix_unitaire) * Number(it.quantite || 1))}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {pk.mo_montant != null && Number(pk.mo_montant) > 0 && (
+                    <div style={{fontSize:12,color:sub,marginBottom:8}}>👷 Main-d'œuvre : <strong>{fmt$(pk.mo_montant)}</strong></div>
+                  )}
+                  <div style={{display:'flex',alignItems:'baseline',justifyContent:'center',gap:10,padding:'12px 0',background:dark?'#0d2a18':'#e6f4ea',borderRadius:8}}>
+                    {pk.prix_avant != null && Number(pk.prix_avant) > 0 && (
+                      <span style={{fontSize:18,color:sub,textDecoration:'line-through',fontWeight:600}}>{fmt$(pk.prix_avant)}</span>
+                    )}
+                    {pk.prix_apres != null && (
+                      <span style={{fontSize:30,color:C.green,fontWeight:900}}>{fmt$(pk.prix_apres)}</span>
+                    )}
+                  </div>
+                  {(pk.date_debut || pk.date_fin) && (
+                    <div style={{fontSize:10,color:sub,marginTop:8,textAlign:'center'}}>
+                      {pk.date_debut ? `Du ${pk.date_debut}` : ''} {pk.date_fin ? `au ${pk.date_fin}` : ''}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Onglet PARAMÈTRE VENTE — admin : gère marques, paliers, promotions, packages.
+// ──────────────────────────────────────────────────────────────────────────
+function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+  const userEmail = profil?.email || profil?.nom || 'Inconnu'
+  const [sousVue, setSousVue] = useState<'marques'|'paliers'|'promotions'|'packages'>('marques')
+  const [marques, setMarques] = useState<any[]>([])
+  const [paliers, setPaliers] = useState<any[]>([])
+  const [promotions, setPromotions] = useState<any[]>([])
+  const [packages, setPackages] = useState<any[]>([])
+  const [loadingAction, setLoadingAction] = useState<string|null>(null)
+
+  async function recharger() {
+    try {
+      const [m, p, pr, pk] = await Promise.all([
+        fetch('/api/vente/marques').then(r=>r.json()).catch(()=>[]),
+        fetch('/api/vente/paliers').then(r=>r.json()).catch(()=>[]),
+        fetch('/api/vente/promotions').then(r=>r.json()).catch(()=>[]),
+        fetch('/api/vente/packages').then(r=>r.json()).catch(()=>[]),
+      ])
+      if (Array.isArray(m)) setMarques(m)
+      if (Array.isArray(p)) setPaliers(p)
+      if (Array.isArray(pr)) setPromotions(pr)
+      if (Array.isArray(pk)) setPackages(pk)
+    } catch {}
+  }
+  useEffect(() => { recharger() }, [])
+
+  const fmt$ = (n:number) => '$' + Math.round(Number(n||0)).toLocaleString('fr-CA')
+
+  const [nouvMarque, setNouvMarque] = useState('')
+  async function ajouterMarque() {
+    const nom = nouvMarque.trim()
+    if (!nom) return
+    setLoadingAction('marque_add')
+    try {
+      const r = await fetch('/api/vente/marques', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ nom }) })
+      const j = await r.json()
+      if (j.erreur) { alert(j.erreur); return }
+      setNouvMarque('')
+      await recharger()
+    } finally { setLoadingAction(null) }
+  }
+  async function toggleActifMarque(m: any) {
+    setLoadingAction(`marque_${m.id}`)
+    try {
+      await fetch('/api/vente/marques', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: m.id, actif: !m.actif }) })
+      await recharger()
+    } finally { setLoadingAction(null) }
+  }
+  async function supprimerMarque(m: any) {
+    if (!confirm(`Supprimer la marque « ${m.nom} » ? Les paliers liés seront aussi supprimés.`)) return
+    setLoadingAction(`marque_del_${m.id}`)
+    try {
+      await fetch('/api/vente/marques', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: m.id }) })
+      await recharger()
+    } finally { setLoadingAction(null) }
+  }
+
+  const [palMarque, setPalMarque] = useState<number|null>(null)
+  const [palMin, setPalMin] = useState('')
+  const [palMax, setPalMax] = useState('')
+  const [palRabais, setPalRabais] = useState('')
+  async function ajouterPalier() {
+    if (!palMarque || !palMin || !palMax || !palRabais) { alert('Tous les champs sont requis.'); return }
+    if (Number(palMax) <= Number(palMin)) { alert('Le max doit être > min.'); return }
+    setLoadingAction('palier_add')
+    try {
+      const r = await fetch('/api/vente/paliers', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ marque_id: palMarque, montant_min: Number(palMin), montant_max: Number(palMax), rabais_montant: Number(palRabais) }) })
+      const j = await r.json()
+      if (j.erreur) { alert(j.erreur); return }
+      setPalMin(''); setPalMax(''); setPalRabais('')
+      await recharger()
+    } finally { setLoadingAction(null) }
+  }
+  async function supprimerPalier(p: any) {
+    if (!confirm('Supprimer ce palier ?')) return
+    setLoadingAction(`palier_del_${p.id}`)
+    try {
+      await fetch('/api/vente/paliers', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: p.id }) })
+      await recharger()
+    } finally { setLoadingAction(null) }
+  }
+
+  const [promoEdit, setPromoEdit] = useState<any|null>(null)
+  function ouvrirNouvellePromo() {
+    setPromoEdit({ titre:'', description:'', marque_id:null, modele:'', annee:null, sku:'',
+      type_rabais:'autre', valeur:null, image_url:'', date_debut:'', date_fin:'', actif:true })
+  }
+  async function sauverPromo() {
+    if (!promoEdit?.titre?.trim()) { alert('Le titre est requis.'); return }
+    setLoadingAction('promo_save')
+    try {
+      const isUpdate = !!promoEdit.id
+      const body: any = { ...promoEdit, cree_par: userEmail }
+      const r = await fetch('/api/vente/promotions', { method: isUpdate?'PATCH':'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+      const j = await r.json()
+      if (j.erreur) { alert(j.erreur); return }
+      setPromoEdit(null)
+      await recharger()
+    } finally { setLoadingAction(null) }
+  }
+  async function supprimerPromo(p: any) {
+    if (!confirm(`Supprimer la promotion « ${p.titre} » ?`)) return
+    setLoadingAction(`promo_del_${p.id}`)
+    try {
+      await fetch('/api/vente/promotions', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: p.id }) })
+      await recharger()
+    } finally { setLoadingAction(null) }
+  }
+  async function uploadImage(file: File, kind: 'promo'|'package'): Promise<string|null> {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('kind', kind)
+    const r = await fetch('/api/vente/image', { method:'POST', body: fd })
+    const j = await r.json()
+    return j.url || null
+  }
+
+  const [pkgEdit, setPkgEdit] = useState<any|null>(null)
+  function ouvrirNouveauPackage() {
+    setPkgEdit({ titre:'', description:'', marque_id:null, prix_avant:null, prix_apres:null, mo_montant:null,
+      image_url:'', date_debut:'', date_fin:'', actif:true, items: [] })
+  }
+  function ajouterItem() {
+    setPkgEdit((p:any) => ({ ...p, items: [...(p.items||[]), { sku:'', description:'', quantite:1, prix_unitaire:null }] }))
+  }
+  function modifierItem(i: number, champ: string, valeur: any) {
+    setPkgEdit((p:any) => ({ ...p, items: p.items.map((it:any, idx:number) => idx===i ? { ...it, [champ]: valeur } : it) }))
+  }
+  function retirerItem(i: number) {
+    setPkgEdit((p:any) => ({ ...p, items: p.items.filter((_:any, idx:number) => idx !== i) }))
+  }
+  async function sauverPackage() {
+    if (!pkgEdit?.titre?.trim()) { alert('Le titre est requis.'); return }
+    setLoadingAction('pkg_save')
+    try {
+      const isUpdate = !!pkgEdit.id
+      const body: any = { ...pkgEdit, cree_par: userEmail }
+      const r = await fetch('/api/vente/packages', { method: isUpdate?'PATCH':'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+      const j = await r.json()
+      if (j.erreur) { alert(j.erreur); return }
+      setPkgEdit(null)
+      await recharger()
+    } finally { setLoadingAction(null) }
+  }
+  async function supprimerPackage(p: any) {
+    if (!confirm(`Supprimer le package « ${p.titre} » ?`)) return
+    setLoadingAction(`pkg_del_${p.id}`)
+    try {
+      await fetch('/api/vente/packages', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: p.id }) })
+      await recharger()
+    } finally { setLoadingAction(null) }
+  }
+
+  return (
+    <div>
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14,flexWrap:'wrap'}}>
+        <div>
+          <div style={{fontSize:22,fontWeight:900}}>⚙️ Paramètre Vente</div>
+          <div style={{fontSize:12,color:sub,marginTop:2}}>Configure marques, paliers de rabais, promotions et packages affichés dans l'onglet Vente.</div>
+        </div>
+      </div>
+
+      <div style={{display:'flex',gap:6,marginBottom:14,flexWrap:'wrap'}}>
+        {[
+          {id:'marques', l:`🏷 Marques (${marques.length})`, c:C.blue},
+          {id:'paliers', l:`💰 Paliers rabais (${paliers.length})`, c:C.green},
+          {id:'promotions', l:`🎯 Promotions (${promotions.length})`, c:C.yellow},
+          {id:'packages', l:`📦 Packages (${packages.length})`, c:C.red},
+        ].map(t => (
+          <button key={t.id} onClick={()=>setSousVue(t.id as any)}
+            style={{padding:'8px 14px',borderRadius:18,border:`2px solid ${sousVue===t.id?t.c:bdr}`,background:sousVue===t.id?t.c+'22':'transparent',color:sousVue===t.id?t.c:sub,fontWeight:700,cursor:'pointer',fontSize:12}}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
+      {sousVue === 'marques' && (
+        <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'14px 16px'}}>
+          <div style={{display:'flex',gap:8,marginBottom:14,flexWrap:'wrap'}}>
+            <input value={nouvMarque} onChange={e=>setNouvMarque(e.target.value)} placeholder="Nom de la marque (ex: Polaris, Indian, Sea-Doo)"
+              style={{...S,fontSize:13,padding:'8px 12px',flex:1,minWidth:200}}/>
+            <button onClick={ajouterMarque} disabled={loadingAction==='marque_add'}
+              style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontWeight:700,cursor:'pointer',fontSize:13}}>
+              ➕ Ajouter
+            </button>
+          </div>
+          {marques.length === 0 ? (
+            <div style={{color:sub,fontSize:13,fontStyle:'italic',padding:20,textAlign:'center'}}>Aucune marque. Ajoute-en une pour commencer.</div>
+          ) : (
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+              <thead><tr style={{background:thBg}}>
+                <th style={{padding:'8px 10px',textAlign:'left'}}>Nom</th>
+                <th style={{padding:'8px 10px',textAlign:'center'}}>Paliers</th>
+                <th style={{padding:'8px 10px',textAlign:'center'}}>Statut</th>
+                <th style={{padding:'8px 10px',textAlign:'right'}}></th>
+              </tr></thead>
+              <tbody>
+                {marques.map((m:any) => {
+                  const nbPaliers = paliers.filter((p:any) => p.marque_id === m.id).length
+                  return (
+                    <tr key={m.id}>
+                      <td style={{padding:'8px 10px',borderTop:`1px solid ${bdr}`,fontWeight:700}}>{m.nom}</td>
+                      <td style={{padding:'8px 10px',borderTop:`1px solid ${bdr}`,textAlign:'center',color:sub}}>{nbPaliers}</td>
+                      <td style={{padding:'8px 10px',borderTop:`1px solid ${bdr}`,textAlign:'center'}}>
+                        <button onClick={()=>toggleActifMarque(m)} disabled={loadingAction===`marque_${m.id}`}
+                          style={{background:m.actif?C.green+'22':sub+'22',color:m.actif?C.green:sub,border:'none',borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                          {m.actif ? '✓ Actif' : '✕ Inactif'}
+                        </button>
+                      </td>
+                      <td style={{padding:'8px 10px',borderTop:`1px solid ${bdr}`,textAlign:'right'}}>
+                        <button onClick={()=>supprimerMarque(m)} disabled={loadingAction===`marque_del_${m.id}`}
+                          style={{background:'transparent',border:`1px solid ${C.red}`,color:C.red,borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                          🗑
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {sousVue === 'paliers' && (
+        <div style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'14px 16px'}}>
+          {marques.length === 0 ? (
+            <div style={{color:sub,fontSize:13,padding:20,textAlign:'center'}}>Crée d'abord une marque dans l'onglet « 🏷 Marques ».</div>
+          ) : (
+            <>
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'2fr 1fr 1fr 1fr auto',gap:8,marginBottom:14}}>
+                <select value={palMarque || ''} onChange={e=>setPalMarque(e.target.value ? Number(e.target.value) : null)} style={{...S,fontSize:13,padding:'8px 12px'}}>
+                  <option value="">Marque…</option>
+                  {marques.filter((m:any) => m.actif !== false).map((m:any) => <option key={m.id} value={m.id}>{m.nom}</option>)}
+                </select>
+                <input type="number" min="0" value={palMin} onChange={e=>setPalMin(e.target.value)} placeholder="Min $" style={{...S,fontSize:13,padding:'8px 12px'}}/>
+                <input type="number" min="0" value={palMax} onChange={e=>setPalMax(e.target.value)} placeholder="Max $" style={{...S,fontSize:13,padding:'8px 12px'}}/>
+                <input type="number" min="0" value={palRabais} onChange={e=>setPalRabais(e.target.value)} placeholder="Rabais $" style={{...S,fontSize:13,padding:'8px 12px'}}/>
+                <button onClick={ajouterPalier} disabled={loadingAction==='palier_add'} style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontWeight:700,cursor:'pointer',fontSize:13}}>➕ Ajouter</button>
+              </div>
+              {paliers.length === 0 ? (
+                <div style={{color:sub,fontSize:13,fontStyle:'italic',padding:20,textAlign:'center'}}>Aucun palier. Exemple : Polaris, min 0$, max 500$, rabais 50$.</div>
+              ) : (
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                  <thead><tr style={{background:thBg}}>
+                    <th style={{padding:'8px 10px',textAlign:'left'}}>Marque</th>
+                    <th style={{padding:'8px 10px',textAlign:'right'}}>Min</th>
+                    <th style={{padding:'8px 10px',textAlign:'right'}}>Max</th>
+                    <th style={{padding:'8px 10px',textAlign:'right'}}>Rabais</th>
+                    <th></th>
+                  </tr></thead>
+                  <tbody>
+                    {paliers.map((p:any) => {
+                      const mm = marques.find((m:any) => m.id === p.marque_id)
+                      return (
+                        <tr key={p.id}>
+                          <td style={{padding:'8px 10px',borderTop:`1px solid ${bdr}`,fontWeight:700}}>{mm?.nom || '—'}</td>
+                          <td style={{padding:'8px 10px',borderTop:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(p.montant_min)}</td>
+                          <td style={{padding:'8px 10px',borderTop:`1px solid ${bdr}`,textAlign:'right'}}>{fmt$(p.montant_max)}</td>
+                          <td style={{padding:'8px 10px',borderTop:`1px solid ${bdr}`,textAlign:'right',color:C.green,fontWeight:900}}>{fmt$(p.rabais_montant)} OFF</td>
+                          <td style={{padding:'8px 10px',borderTop:`1px solid ${bdr}`,textAlign:'right'}}>
+                            <button onClick={()=>supprimerPalier(p)} disabled={loadingAction===`palier_del_${p.id}`}
+                              style={{background:'transparent',border:`1px solid ${C.red}`,color:C.red,borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:11}}>🗑</button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {sousVue === 'promotions' && (
+        <div>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+            <div style={{fontSize:12,color:sub}}>Promotions visibles aux vendeurs dans l'onglet Vente.</div>
+            <button onClick={ouvrirNouvellePromo} style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontWeight:700,cursor:'pointer',fontSize:13}}>➕ Nouvelle promo</button>
+          </div>
+          {promotions.length === 0 ? (
+            <div style={{background:card,border:`1px dashed ${bdr}`,borderRadius:10,padding:20,textAlign:'center',color:sub,fontSize:13}}>Aucune promotion. Crée-en une.</div>
+          ) : (
+            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(auto-fill, minmax(280px, 1fr))',gap:12}}>
+              {promotions.map((p:any) => {
+                const mm = marques.find((m:any) => m.id === p.marque_id)
+                return (
+                  <div key={p.id} style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',opacity:p.actif?1:0.5}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8,marginBottom:6}}>
+                      <div style={{flex:1,fontWeight:800,fontSize:14}}>{p.titre}</div>
+                      <span style={{background:(p.actif?C.green:sub)+'22',color:p.actif?C.green:sub,padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700}}>{p.actif?'Actif':'Inactif'}</span>
+                    </div>
+                    {p.description && <div style={{fontSize:11,color:sub,marginBottom:6,whiteSpace:'pre-wrap'}}>{p.description}</div>}
+                    <div style={{display:'flex',gap:4,flexWrap:'wrap',marginBottom:6}}>
+                      {mm && <span style={{background:C.blue+'22',color:C.blue,padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700}}>{mm.nom}</span>}
+                      {p.valeur != null && <span style={{background:C.red+'22',color:C.red,padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700}}>{p.type_rabais==='pourcentage'?`-${p.valeur}%`:p.type_rabais==='fixe'?`${fmt$(p.valeur)} OFF`:`${p.valeur}`}</span>}
+                    </div>
+                    <div style={{fontSize:10,color:sub,marginBottom:8}}>{p.date_debut||'—'} → {p.date_fin||'—'}</div>
+                    <div style={{display:'flex',gap:6}}>
+                      <button onClick={()=>setPromoEdit({...p})} style={{background:C.blue+'22',color:C.blue,border:`1px solid ${C.blue}`,borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:11,flex:1}}>✎ Modifier</button>
+                      <button onClick={()=>supprimerPromo(p)} disabled={loadingAction===`promo_del_${p.id}`} style={{background:'transparent',border:`1px solid ${C.red}`,color:C.red,borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:11}}>🗑</button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {promoEdit && (
+            <div onClick={()=>setPromoEdit(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}}>
+              <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,padding:'18px 22px',maxWidth:600,width:'100%',maxHeight:'90vh',overflowY:'auto',border:`2px solid ${C.green}`}}>
+                <div style={{fontSize:16,fontWeight:900,color:C.green,marginBottom:12}}>{promoEdit.id?'✎ Modifier':'➕ Nouvelle'} promotion</div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr',gap:10}}>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Titre *</div>
+                    <input value={promoEdit.titre||''} onChange={e=>setPromoEdit({...promoEdit,titre:e.target.value})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Description</div>
+                    <textarea value={promoEdit.description||''} onChange={e=>setPromoEdit({...promoEdit,description:e.target.value})} style={{...S,fontSize:12,padding:'8px 12px',width:'100%',minHeight:60}}/>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Marque</div>
+                      <select value={promoEdit.marque_id||''} onChange={e=>setPromoEdit({...promoEdit,marque_id:e.target.value?Number(e.target.value):null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}>
+                        <option value="">— Toutes —</option>
+                        {marques.map((m:any) => <option key={m.id} value={m.id}>{m.nom}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Modèle</div>
+                      <input value={promoEdit.modele||''} onChange={e=>setPromoEdit({...promoEdit,modele:e.target.value})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
+                    </div>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Année</div>
+                      <input type="number" value={promoEdit.annee||''} onChange={e=>setPromoEdit({...promoEdit,annee:e.target.value?Number(e.target.value):null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>SKU</div>
+                      <input value={promoEdit.sku||''} onChange={e=>setPromoEdit({...promoEdit,sku:e.target.value})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%',fontFamily:'monospace'}}/>
+                    </div>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Type rabais</div>
+                      <select value={promoEdit.type_rabais||'autre'} onChange={e=>setPromoEdit({...promoEdit,type_rabais:e.target.value})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}>
+                        <option value="autre">Autre</option>
+                        <option value="pourcentage">Pourcentage (%)</option>
+                        <option value="fixe">Montant fixe ($)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Valeur</div>
+                      <input type="number" value={promoEdit.valeur??''} onChange={e=>setPromoEdit({...promoEdit,valeur:e.target.value?Number(e.target.value):null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
+                    </div>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Date début</div>
+                      <input type="date" value={promoEdit.date_debut||''} onChange={e=>setPromoEdit({...promoEdit,date_debut:e.target.value||null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Date fin</div>
+                      <input type="date" value={promoEdit.date_fin||''} onChange={e=>setPromoEdit({...promoEdit,date_fin:e.target.value||null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Image (URL ou upload)</div>
+                    <input value={promoEdit.image_url||''} onChange={e=>setPromoEdit({...promoEdit,image_url:e.target.value})} placeholder="https://… ou utilise le bouton ci-dessous"
+                      style={{...S,fontSize:12,padding:'8px 12px',width:'100%',marginBottom:6}}/>
+                    <input type="file" accept="image/*" onChange={async(e:any)=>{
+                      const f = e.target.files?.[0]; if (!f) return
+                      const url = await uploadImage(f, 'promo')
+                      if (url) setPromoEdit({...promoEdit,image_url:url})
+                    }} style={{fontSize:11}}/>
+                    {promoEdit.image_url && <img src={promoEdit.image_url} style={{maxWidth:200,maxHeight:100,marginTop:6,borderRadius:6,border:`1px solid ${bdr}`}} alt=""/>}
+                  </div>
+                  <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13}}>
+                    <input type="checkbox" checked={!!promoEdit.actif} onChange={e=>setPromoEdit({...promoEdit,actif:e.target.checked})}/>
+                    Actif (visible aux vendeurs)
+                  </label>
+                  <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:6}}>
+                    <button onClick={()=>setPromoEdit(null)} style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>Annuler</button>
+                    <button onClick={sauverPromo} disabled={loadingAction==='promo_save'} style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontWeight:700,cursor:'pointer',fontSize:12}}>{loadingAction==='promo_save'?'⏳':'💾 Enregistrer'}</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {sousVue === 'packages' && (
+        <div>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+            <div style={{fontSize:12,color:sub}}>Packages produit (SKU + MO + prix barré) affichés dans l'onglet Vente.</div>
+            <button onClick={ouvrirNouveauPackage} style={{background:C.green,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontWeight:700,cursor:'pointer',fontSize:13}}>➕ Nouveau package</button>
+          </div>
+          {packages.length === 0 ? (
+            <div style={{background:card,border:`1px dashed ${bdr}`,borderRadius:10,padding:20,textAlign:'center',color:sub,fontSize:13}}>Aucun package. Crée-en un.</div>
+          ) : (
+            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'repeat(auto-fill, minmax(300px, 1fr))',gap:12}}>
+              {packages.map((pk:any) => {
+                const mm = marques.find((m:any) => m.id === pk.marque_id)
+                return (
+                  <div key={pk.id} style={{background:card,border:`1px solid ${bdr}`,borderRadius:10,padding:'12px 14px',opacity:pk.actif?1:0.5}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8,marginBottom:6}}>
+                      <div style={{flex:1,fontWeight:800,fontSize:14}}>{pk.titre}</div>
+                      <span style={{background:(pk.actif?C.green:sub)+'22',color:pk.actif?C.green:sub,padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700}}>{pk.actif?'Actif':'Inactif'}</span>
+                    </div>
+                    <div style={{display:'flex',gap:4,flexWrap:'wrap',marginBottom:6}}>
+                      {mm && <span style={{background:C.blue+'22',color:C.blue,padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700}}>{mm.nom}</span>}
+                      <span style={{background:sub+'22',color:sub,padding:'2px 6px',borderRadius:4,fontSize:10,fontWeight:700}}>{(pk.items||[]).length} items</span>
+                    </div>
+                    <div style={{display:'flex',gap:6,alignItems:'baseline',marginBottom:6}}>
+                      {pk.prix_avant != null && Number(pk.prix_avant) > 0 && <span style={{fontSize:13,color:sub,textDecoration:'line-through'}}>{fmt$(pk.prix_avant)}</span>}
+                      {pk.prix_apres != null && <span style={{fontSize:18,color:C.green,fontWeight:900}}>{fmt$(pk.prix_apres)}</span>}
+                    </div>
+                    <div style={{fontSize:10,color:sub,marginBottom:8}}>{pk.date_debut||'—'} → {pk.date_fin||'—'}</div>
+                    <div style={{display:'flex',gap:6}}>
+                      <button onClick={()=>setPkgEdit({...pk, items: pk.items || []})} style={{background:C.blue+'22',color:C.blue,border:`1px solid ${C.blue}`,borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:11,flex:1}}>✎ Modifier</button>
+                      <button onClick={()=>supprimerPackage(pk)} disabled={loadingAction===`pkg_del_${pk.id}`} style={{background:'transparent',border:`1px solid ${C.red}`,color:C.red,borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:11}}>🗑</button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {pkgEdit && (
+            <div onClick={()=>setPkgEdit(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}}>
+              <div onClick={(e:any)=>e.stopPropagation()} style={{background:card,borderRadius:12,padding:'18px 22px',maxWidth:700,width:'100%',maxHeight:'90vh',overflowY:'auto',border:`2px solid ${C.blue}`}}>
+                <div style={{fontSize:16,fontWeight:900,color:C.blue,marginBottom:12}}>{pkgEdit.id?'✎ Modifier':'➕ Nouveau'} package</div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr',gap:10}}>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Titre *</div>
+                    <input value={pkgEdit.titre||''} onChange={e=>setPkgEdit({...pkgEdit,titre:e.target.value})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Description</div>
+                    <textarea value={pkgEdit.description||''} onChange={e=>setPkgEdit({...pkgEdit,description:e.target.value})} style={{...S,fontSize:12,padding:'8px 12px',width:'100%',minHeight:60}}/>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}}>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Marque</div>
+                      <select value={pkgEdit.marque_id||''} onChange={e=>setPkgEdit({...pkgEdit,marque_id:e.target.value?Number(e.target.value):null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}>
+                        <option value="">— Toutes —</option>
+                        {marques.map((m:any) => <option key={m.id} value={m.id}>{m.nom}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Prix avant ($)</div>
+                      <input type="number" value={pkgEdit.prix_avant??''} onChange={e=>setPkgEdit({...pkgEdit,prix_avant:e.target.value?Number(e.target.value):null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Prix après ($)</div>
+                      <input type="number" value={pkgEdit.prix_apres??''} onChange={e=>setPkgEdit({...pkgEdit,prix_apres:e.target.value?Number(e.target.value):null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Main d'œuvre ($)</div>
+                    <input type="number" value={pkgEdit.mo_montant??''} onChange={e=>setPkgEdit({...pkgEdit,mo_montant:e.target.value?Number(e.target.value):null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Date début</div>
+                      <input type="date" value={pkgEdit.date_debut||''} onChange={e=>setPkgEdit({...pkgEdit,date_debut:e.target.value||null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Date fin</div>
+                      <input type="date" value={pkgEdit.date_fin||''} onChange={e=>setPkgEdit({...pkgEdit,date_fin:e.target.value||null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>Image (URL ou upload)</div>
+                    <input value={pkgEdit.image_url||''} onChange={e=>setPkgEdit({...pkgEdit,image_url:e.target.value})} placeholder="https://…"
+                      style={{...S,fontSize:12,padding:'8px 12px',width:'100%',marginBottom:6}}/>
+                    <input type="file" accept="image/*" onChange={async(e:any)=>{
+                      const f = e.target.files?.[0]; if (!f) return
+                      const url = await uploadImage(f, 'package')
+                      if (url) setPkgEdit({...pkgEdit,image_url:url})
+                    }} style={{fontSize:11}}/>
+                    {pkgEdit.image_url && <img src={pkgEdit.image_url} style={{maxWidth:200,maxHeight:100,marginTop:6,borderRadius:6,border:`1px solid ${bdr}`}} alt=""/>}
+                  </div>
+                  <div style={{background:dark?'#0f0f0f':'#fafbfc',border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 12px'}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                      <div style={{fontSize:11,fontWeight:700,color:sub,textTransform:'uppercase'}}>Items inclus ({(pkgEdit.items||[]).length})</div>
+                      <button onClick={ajouterItem} style={{background:C.blue+'22',color:C.blue,border:`1px solid ${C.blue}`,borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:11}}>➕ Item</button>
+                    </div>
+                    {(pkgEdit.items||[]).map((it:any, i:number) => (
+                      <div key={i} style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 2fr 60px 80px auto',gap:6,marginBottom:6,alignItems:'center'}}>
+                        <input value={it.sku||''} onChange={e=>modifierItem(i,'sku',e.target.value)} placeholder="SKU" style={{...S,fontSize:12,padding:'6px 10px',fontFamily:'monospace'}}/>
+                        <input value={it.description||''} onChange={e=>modifierItem(i,'description',e.target.value)} placeholder="Description" style={{...S,fontSize:12,padding:'6px 10px'}}/>
+                        <input type="number" value={it.quantite||''} onChange={e=>modifierItem(i,'quantite',Number(e.target.value)||1)} placeholder="Qté" style={{...S,fontSize:12,padding:'6px 10px',textAlign:'center'}}/>
+                        <input type="number" value={it.prix_unitaire??''} onChange={e=>modifierItem(i,'prix_unitaire',e.target.value?Number(e.target.value):null)} placeholder="Prix u." style={{...S,fontSize:12,padding:'6px 10px',textAlign:'right'}}/>
+                        <button onClick={()=>retirerItem(i)} style={{background:'transparent',border:`1px solid ${C.red}`,color:C.red,borderRadius:6,padding:'4px 8px',fontWeight:700,cursor:'pointer',fontSize:11}}>🗑</button>
+                      </div>
+                    ))}
+                  </div>
+                  <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13}}>
+                    <input type="checkbox" checked={!!pkgEdit.actif} onChange={e=>setPkgEdit({...pkgEdit,actif:e.target.checked})}/>
+                    Actif (visible aux vendeurs)
+                  </label>
+                  <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:6}}>
+                    <button onClick={()=>setPkgEdit(null)} style={{background:'transparent',border:`1px solid ${bdr}`,color:sub,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:12}}>Annuler</button>
+                    <button onClick={sauverPackage} disabled={loadingAction==='pkg_save'} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontWeight:700,cursor:'pointer',fontSize:12}}>{loadingAction==='pkg_save'?'⏳':'💾 Enregistrer'}</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
