@@ -14476,6 +14476,37 @@ function VenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [marqueId, setMarqueId] = useState<number|null>(null)
   const [sousCategorie, setSousCategorie] = useState<string|null>(null)
   const [montant, setMontant] = useState('')
+  // Cache des SKU regardés : true = en stock, false = pas en stock / inconnu
+  const [stockParSku, setStockParSku] = useState<Map<string, boolean | null>>(new Map())
+  async function lookupSku(skuRaw: string) {
+    const sku = (skuRaw || '').trim()
+    if (!sku) return
+    if (stockParSku.has(sku)) return
+    // Marquer en cours pour éviter doubles fetch
+    setStockParSku(prev => { const m = new Map(prev); m.set(sku, null); return m })
+    try {
+      const r = await fetch('/api/sku-lookup?sku=' + encodeURIComponent(sku))
+      const j = await r.json()
+      const dispo = j.found ? Number(j.stock || 0) > 0 : false
+      setStockParSku(prev => { const m = new Map(prev); m.set(sku, dispo); return m })
+    } catch {
+      setStockParSku(prev => { const m = new Map(prev); m.set(sku, false); return m })
+    }
+  }
+  function badgeDispo(skuRaw: string) {
+    const sku = (skuRaw || '').trim()
+    if (!sku) return null
+    const dispo = stockParSku.get(sku)
+    if (dispo === undefined || dispo === null) return (
+      <span style={{fontSize:10,color:sub,fontWeight:600,padding:'2px 6px'}}>…</span>
+    )
+    if (dispo) return (
+      <span style={{fontSize:10,color:C.green,fontWeight:800,background:C.green+'22',padding:'2px 8px',borderRadius:6,whiteSpace:'nowrap'}}>✅ En stock</span>
+    )
+    return (
+      <span style={{fontSize:10,color:C.red,fontWeight:800,background:C.red+'22',padding:'2px 8px',borderRadius:6,whiteSpace:'nowrap'}}>❌ Pas en stock</span>
+    )
+  }
 
   async function recharger() {
     try {
@@ -14494,6 +14525,20 @@ function VenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   useEffect(() => { recharger() }, [])
   // Quand on change de marque, réinitialiser la sous-catégorie sélectionnée
   useEffect(() => { setSousCategorie(null) }, [marqueId])
+  // Pré-charger le stock de tous les SKU visibles (promos + items de packages)
+  useEffect(() => {
+    const skus = new Set<string>()
+    for (const p of promotions) {
+      const s = (p.sku || '').trim(); if (s) skus.add(s)
+    }
+    for (const pk of packages) {
+      for (const it of (pk.items || [])) {
+        const s = (it.sku || '').trim(); if (s) skus.add(s)
+      }
+    }
+    for (const s of skus) lookupSku(s)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [promotions, packages])
 
   const rabaisPour = (mId: number|null, mt: number): { rabais: number, palier: any|null } => {
     if (!mId || !mt || mt <= 0) return { rabais: 0, palier: null }
@@ -14631,7 +14676,12 @@ function VenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     {p.sous_categorie && <span style={{background:C.yellow+'22',color:C.yellow,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700}}>🗂 {p.sous_categorie}</span>}
                     {p.modele && <span style={{background:sub+'22',color:sub,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700}}>📋 {p.modele}</span>}
                     {p.annee && <span style={{background:sub+'22',color:sub,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700}}>📅 {p.annee}</span>}
-                    {p.sku && <span style={{background:sub+'22',color:sub,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700,fontFamily:'monospace'}}>#{p.sku}</span>}
+                    {p.sku && (
+                      <span style={{display:'inline-flex',alignItems:'center',gap:4}}>
+                        <span style={{background:sub+'22',color:sub,padding:'2px 8px',borderRadius:6,fontSize:10,fontWeight:700,fontFamily:'monospace'}}>#{p.sku}</span>
+                        {badgeDispo(p.sku)}
+                      </span>
+                    )}
                   </div>
                   {(p.prix_avant != null || p.prix_apres != null) && (
                     <div style={{display:'flex',alignItems:'baseline',justifyContent:'center',gap:10,padding:'12px 0',background:dark?'#0d2a18':'#e6f4ea',borderRadius:8}}>
@@ -14686,10 +14736,11 @@ function VenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                     <div style={{background:dark?'#0f0f0f':'#fafbfc',border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 12px',marginBottom:10}}>
                       <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:6}}>Inclus</div>
                       {pk.items.map((it:any) => (
-                        <div key={it.id} style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:12,padding:'4px 0',borderBottom:`1px dotted ${bdr}`}}>
-                          <div style={{flex:1,minWidth:0}}>
-                            {it.sku && <span style={{fontFamily:'monospace',fontWeight:700,color:C.blue,marginRight:6}}>{it.sku}</span>}
+                        <div key={it.id} style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:12,padding:'4px 0',borderBottom:`1px dotted ${bdr}`,alignItems:'center'}}>
+                          <div style={{flex:1,minWidth:0,display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                            {it.sku && <span style={{fontFamily:'monospace',fontWeight:700,color:C.blue}}>{it.sku}</span>}
                             <span style={{color:sub}}>{it.description || ''}</span>
+                            {it.sku && badgeDispo(it.sku)}
                           </div>
                           <div style={{whiteSpace:'nowrap',color:sub,fontSize:11}}>×{Number(it.quantite || 1)}</div>
                         </div>
