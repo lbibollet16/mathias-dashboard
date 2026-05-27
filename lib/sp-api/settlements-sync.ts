@@ -15,6 +15,9 @@
 import 'server-only';
 import { supabaseAdmin } from '@/lib/supabase';
 import { SkuResolver } from '@/lib/amazon-sku';
+import { createAuditSnapshot } from '@/lib/amazon-audit-create';
+import { syncTractionFeed } from '@/lib/amazon-traction-sync';
+import { createTractionSnapshot } from '@/lib/amazon-traction-snapshot';
 import {
   getReports,
   getReportDocument,
@@ -124,6 +127,12 @@ export interface SettlementImportResult {
   status: 'imported' | 'skipped_existing' | 'error';
   rows_inserted?: number;
   unresolved_skus?: number;
+  /** Result du syncTractionFeed (refresh des lignes Traction depuis le feed). */
+  traction_sync?: { success?: boolean; erreur?: string };
+  /** Result du createTractionSnapshot (gel Traction pour ce settlement). */
+  traction_snapshot?: { success?: boolean; erreur?: string };
+  /** Result du createAuditSnapshot (audit auto-lié au settlement). */
+  audit?: { success?: boolean; reason?: string };
   error?: string;
 }
 
@@ -230,12 +239,58 @@ async function importSettlementFromTsv(
     }
   }
 
+  // ─── AUTO-AUDIT : mêmes side-effects que l'import manuel TSV ─────────
+  // 1. Sync feed Traction pour avoir les chiffres les plus frais
+  // 2. Snapshot Traction figé pour ce settlement (utilisé par closure/lautopak)
+  // 3. Crée un audit lié à ce settlement (skip si déjà existant)
+  let tractionSync: { success?: boolean; erreur?: string } | undefined;
+  let tractionSnapshot: { success?: boolean; erreur?: string } | undefined;
+  let auditResult: { success?: boolean; reason?: string } | undefined;
+  try {
+    const r = await syncTractionFeed();
+    tractionSync = { success: r.success };
+  } catch (e) {
+    tractionSync = { success: false, erreur: e instanceof Error ? e.message : String(e) };
+  }
+  try {
+    const r = await createTractionSnapshot(settlement_id);
+    // createTractionSnapshot retourne { inserted, skipped } — pas de
+    // champ `success`, on dérive : skipped ou inserted >= 0 = OK.
+    tractionSnapshot = { success: !!(r.skipped || r.inserted >= 0) };
+  } catch (e) {
+    tractionSnapshot = { success: false, erreur: e instanceof Error ? e.message : String(e) };
+  }
+  try {
+    // Mois = celui du deposit_date (fallback settlement_end)
+    const refDate = settlementRow.deposit_date || settlementRow.settlement_end;
+    let mois = new Date().toISOString().slice(0, 7);
+    if (refDate) {
+      const d = new Date(refDate);
+      if (!isNaN(d.getTime())) {
+        mois = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      }
+    }
+    const r = await createAuditSnapshot({
+      mois,
+      label: `Auto-créé via SP-API sync (settlement ${settlement_id})`,
+      started_by: 'sp-api-sync',
+      settlement_id,
+      audit_type: 'mensuel_ama',
+    });
+    auditResult = { success: r.success, reason: r.reason };
+  } catch (e) {
+    auditResult = { success: false, reason: e instanceof Error ? e.message : String(e) };
+  }
+
   return {
     reportId,
     settlement_id,
     status: 'imported',
     rows_inserted: txRows.length,
     unresolved_skus: unresolved,
+    traction_sync: tractionSync,
+    traction_snapshot: tractionSnapshot,
+    audit: auditResult,
   };
 }
 
