@@ -14476,35 +14476,41 @@ function VenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [marqueId, setMarqueId] = useState<number|null>(null)
   const [sousCategorie, setSousCategorie] = useState<string|null>(null)
   const [montant, setMontant] = useState('')
-  // Cache des SKU regardés : true = en stock, false = pas en stock / inconnu
-  const [stockParSku, setStockParSku] = useState<Map<string, boolean | null>>(new Map())
+  // Cache des SKU regardés. Valeur :
+  //   undefined → jamais demandé
+  //   null      → lookup en cours
+  //   number    → stock actuel (0 = pas dispo)
+  //   -1        → SKU inconnu / erreur
+  const [stockParSku, setStockParSku] = useState<Map<string, number | null>>(new Map())
   async function lookupSku(skuRaw: string) {
     const sku = (skuRaw || '').trim()
     if (!sku) return
     if (stockParSku.has(sku)) return
-    // Marquer en cours pour éviter doubles fetch
     setStockParSku(prev => { const m = new Map(prev); m.set(sku, null); return m })
     try {
       const r = await fetch('/api/sku-lookup?sku=' + encodeURIComponent(sku))
       const j = await r.json()
-      const dispo = j.found ? Number(j.stock || 0) > 0 : false
-      setStockParSku(prev => { const m = new Map(prev); m.set(sku, dispo); return m })
+      const v = j.found ? Number(j.stock || 0) : -1
+      setStockParSku(prev => { const m = new Map(prev); m.set(sku, v); return m })
     } catch {
-      setStockParSku(prev => { const m = new Map(prev); m.set(sku, false); return m })
+      setStockParSku(prev => { const m = new Map(prev); m.set(sku, -1); return m })
     }
   }
   function badgeDispo(skuRaw: string) {
     const sku = (skuRaw || '').trim()
     if (!sku) return null
-    const dispo = stockParSku.get(sku)
-    if (dispo === undefined || dispo === null) return (
+    const v = stockParSku.get(sku)
+    if (v === undefined || v === null) return (
       <span style={{fontSize:10,color:sub,fontWeight:600,padding:'2px 6px'}}>…</span>
     )
-    if (dispo) return (
-      <span style={{fontSize:10,color:C.green,fontWeight:800,background:C.green+'22',padding:'2px 8px',borderRadius:6,whiteSpace:'nowrap'}}>✅ En stock</span>
+    if (v <= 0) return (
+      <span style={{fontSize:10,color:C.red,fontWeight:800,background:C.red+'22',padding:'2px 8px',borderRadius:6,whiteSpace:'nowrap'}}>❌ Pas en stock</span>
+    )
+    if (v === 1) return (
+      <span style={{fontSize:10,color:C.yellow,fontWeight:800,background:C.yellow+'22',padding:'2px 8px',borderRadius:6,whiteSpace:'nowrap'}}>⚠️ 1 en stock</span>
     )
     return (
-      <span style={{fontSize:10,color:C.red,fontWeight:800,background:C.red+'22',padding:'2px 8px',borderRadius:6,whiteSpace:'nowrap'}}>❌ Pas en stock</span>
+      <span style={{fontSize:10,color:C.green,fontWeight:800,background:C.green+'22',padding:'2px 8px',borderRadius:6,whiteSpace:'nowrap'}}>✅ En stock</span>
     )
   }
 
