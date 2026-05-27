@@ -14752,6 +14752,39 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
 
   const [nouvMarque, setNouvMarque] = useState('')
   const [marqueEdit, setMarqueEdit] = useState<any|null>(null) // pour gérer les sous-catégories
+  // Cache des lookups SKU → stock dispo (depuis /api/sku-lookup).
+  // null = pas trouvé, 'loading' = en cours.
+  const [stockParSku, setStockParSku] = useState<Map<string, { stock: number | null, desc?: string, loading?: boolean }>>(new Map())
+  async function lookupSku(skuRaw: string) {
+    const sku = (skuRaw || '').trim()
+    if (!sku) return
+    // Si déjà en cache (pas loading), ne pas refetch
+    const cur = stockParSku.get(sku)
+    if (cur && !cur.loading) return
+    setStockParSku(prev => { const m = new Map(prev); m.set(sku, { stock: null, loading: true }); return m })
+    try {
+      const r = await fetch('/api/sku-lookup?sku=' + encodeURIComponent(sku))
+      const j = await r.json()
+      setStockParSku(prev => {
+        const m = new Map(prev)
+        if (j.found) m.set(sku, { stock: Number(j.stock || 0), desc: j.desc || '' })
+        else m.set(sku, { stock: null })
+        return m
+      })
+    } catch {
+      setStockParSku(prev => { const m = new Map(prev); m.set(sku, { stock: null }); return m })
+    }
+  }
+  function badgeStock(skuRaw: string) {
+    const sku = (skuRaw || '').trim()
+    if (!sku) return null
+    const info = stockParSku.get(sku)
+    if (!info) return <span style={{fontSize:10,color:sub,fontWeight:600}}>— ?</span>
+    if (info.loading) return <span style={{fontSize:10,color:sub,fontWeight:600}}>…</span>
+    if (info.stock === null) return <span style={{fontSize:10,color:C.red,fontWeight:700,background:C.red+'22',padding:'2px 6px',borderRadius:4}}>SKU inconnu</span>
+    const col = info.stock > 0 ? C.green : C.red
+    return <span style={{fontSize:11,color:col,fontWeight:800,background:col+'22',padding:'2px 8px',borderRadius:6,whiteSpace:'nowrap'}}>📦 {info.stock} en stock</span>
+  }
   async function sauverSousCategories() {
     if (!marqueEdit) return
     setLoadingAction(`marque_sc_${marqueEdit.id}`)
@@ -14904,6 +14937,21 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
       await recharger()
     } finally { setLoadingAction(null) }
   }
+
+  // Pré-charger les stocks pour les SKU déjà présents quand on ouvre un
+  // package ou une promotion en édition.
+  useEffect(() => {
+    if (!pkgEdit) return
+    const skus = (pkgEdit.items || []).map((it:any) => (it.sku || '').trim()).filter(Boolean)
+    for (const s of skus) lookupSku(s)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pkgEdit?.id])
+  useEffect(() => {
+    if (!promoEdit) return
+    const s = (promoEdit.sku || '').trim()
+    if (s) lookupSku(s)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [promoEdit?.id])
 
   return (
     <div>
@@ -15147,8 +15195,17 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
                       <input type="number" value={promoEdit.annee||''} onChange={e=>setPromoEdit({...promoEdit,annee:e.target.value?Number(e.target.value):null})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%'}}/>
                     </div>
                     <div>
-                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase'}}>SKU</div>
-                      <input value={promoEdit.sku||''} onChange={e=>setPromoEdit({...promoEdit,sku:e.target.value})} style={{...S,fontSize:13,padding:'8px 12px',width:'100%',fontFamily:'monospace'}}/>
+                      <div style={{fontSize:10,fontWeight:700,color:sub,marginBottom:3,textTransform:'uppercase',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                        <span>SKU</span>
+                        <span>{badgeStock(promoEdit.sku||'')}</span>
+                      </div>
+                      <input value={promoEdit.sku||''}
+                        onChange={e=>setPromoEdit({...promoEdit,sku:e.target.value})}
+                        onBlur={(e:any)=>{
+                          const v = (e.target.value || '').trim()
+                          if (v) lookupSku(v)
+                        }}
+                        style={{...S,fontSize:13,padding:'8px 12px',width:'100%',fontFamily:'monospace'}}/>
                     </div>
                   </div>
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
@@ -15303,8 +15360,20 @@ function ParametreVenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any)
                       <button onClick={ajouterItem} style={{background:C.blue+'22',color:C.blue,border:`1px solid ${C.blue}`,borderRadius:6,padding:'4px 10px',fontWeight:700,cursor:'pointer',fontSize:11}}>➕ Item</button>
                     </div>
                     {(pkgEdit.items||[]).map((it:any, i:number) => (
-                      <div key={i} style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 2fr 60px auto',gap:6,marginBottom:6,alignItems:'center'}}>
-                        <input value={it.sku||''} onChange={e=>modifierItem(i,'sku',e.target.value)} placeholder="SKU" style={{...S,fontSize:12,padding:'6px 10px',fontFamily:'monospace'}}/>
+                      <div key={i} style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 110px 2fr 60px auto',gap:6,marginBottom:6,alignItems:'center'}}>
+                        <input value={it.sku||''}
+                          onChange={e=>modifierItem(i,'sku',e.target.value)}
+                          onBlur={(e:any)=>{
+                            const v = (e.target.value || '').trim()
+                            if (!v) return
+                            lookupSku(v).then(() => {
+                              const info = stockParSku.get(v)
+                              // Auto-remplir la description si vide et SKU trouvé
+                              if (info && info.desc && !it.description) modifierItem(i,'description',info.desc)
+                            })
+                          }}
+                          placeholder="SKU" style={{...S,fontSize:12,padding:'6px 10px',fontFamily:'monospace'}}/>
+                        <div style={{textAlign:'center'}}>{badgeStock(it.sku||'')}</div>
                         <input value={it.description||''} onChange={e=>modifierItem(i,'description',e.target.value)} placeholder="Description" style={{...S,fontSize:12,padding:'6px 10px'}}/>
                         <input type="number" value={it.quantite||''} onChange={e=>modifierItem(i,'quantite',Number(e.target.value)||1)} placeholder="Qté" style={{...S,fontSize:12,padding:'6px 10px',textAlign:'center'}}/>
                         <button onClick={()=>retirerItem(i)} style={{background:'transparent',border:`1px solid ${C.red}`,color:C.red,borderRadius:6,padding:'4px 8px',fontWeight:700,cursor:'pointer',fontSize:11}}>🗑</button>
