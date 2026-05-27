@@ -368,6 +368,16 @@ export default function Dashboard() {
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           {!isMobile && data?.calcule_le && <span style={{fontSize:11,opacity:.6,background:'rgba(255,255,255,.12)',padding:'3px 10px',borderRadius:20}}>Cache: {new Date(data.calcule_le).toLocaleDateString('fr-CA')}</span>}
           {!isMobile && profil && <span style={{fontSize:12,opacity:.8}}>{profil.nom}</span>}
+          {/* Accès direct au Menu Hub — utile quand la nav onglets déborde */}
+          <a href="/menu" title="Menu Hub - toutes les sections en tuiles"
+            style={{background:'rgba(59,130,246,.5)',border:'1px solid rgba(59,130,246,.7)',borderRadius:8,padding:isMobile?'0 8px':'0 10px',height:32,fontSize:12,color:'#fff',cursor:'pointer',textDecoration:'none',display:'inline-flex',alignItems:'center',gap:4,fontWeight:700}}>
+            🚀{isMobile?'':' Menu'}
+          </a>
+          {/* Amazon SP-API Hub — page standalone pour settlements/ledger/claims */}
+          <a href="/amazon-sp-api" title="Amazon SP-API Hub - sync settlements, ledger, claims"
+            style={{background:'rgba(220,38,38,.5)',border:'1px solid rgba(220,38,38,.7)',borderRadius:8,padding:isMobile?'0 8px':'0 10px',height:32,fontSize:12,color:'#fff',cursor:'pointer',textDecoration:'none',display:'inline-flex',alignItems:'center',gap:4,fontWeight:700}}>
+            ⚙️{isMobile?'':' SP-API'}
+          </a>
           <button onClick={()=>setDark(!dark)} style={{background:'rgba(255,255,255,.15)',border:'none',borderRadius:8,width:32,height:32,cursor:'pointer',fontSize:15,color:'#fff'}}>{dark?'☀️':'🌙'}</button>
           <button onClick={async()=>{await supabaseCli.auth.signOut();window.location.href='/login'}}
             style={{background:'rgba(255,255,255,.15)',border:'none',borderRadius:8,padding:'0 10px',height:32,fontSize:12,color:'#fff',cursor:'pointer'}}>
