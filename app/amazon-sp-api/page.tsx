@@ -34,6 +34,23 @@ interface ClaimSummary {
   by_event_type: Record<string, { count: number; estimated_amount: number }>;
 }
 
+interface BackfillChunkResult {
+  chunk: number;
+  from: string;
+  to: string;
+  ok: boolean;
+  rows_inserted?: number;
+  error?: string;
+  duration_ms: number;
+}
+
+interface BackfillProgress {
+  total: number;
+  current: number;
+  chunks: BackfillChunkResult[];
+  done: boolean;
+}
+
 export default function AmazonSpApiHub() {
   const [authChecked, setAuthChecked] = useState(false);
   const [authed, setAuthed] = useState(false);
@@ -41,6 +58,7 @@ export default function AmazonSpApiHub() {
   const [result, setResult] = useState<unknown>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [backfillProgress, setBackfillProgress] = useState<BackfillProgress | null>(null);
 
   // Auth check
   useEffect(() => {
@@ -65,6 +83,105 @@ export default function AmazonSpApiHub() {
   useEffect(() => {
     if (authed) void loadSummary();
   }, [authed]);
+
+  // Backfill chunked — fait N appels HTTP séquentiels d'1 mois chacun
+  // pour contourner le timeout serverless Vercel (60-300s par fonction).
+  // Chaque chunk étant ~60s, on reste safe sur tous les plans Vercel.
+  async function runBackfillChunked(monthsBack = 8) {
+    if (busy) return;
+    setBusy('backfill');
+    setError(null);
+    setResult(null);
+
+    // Calcule les N chunks de 30 jours en remontant depuis aujourd'hui
+    const now = new Date();
+    const chunks: Array<{ from: string; to: string }> = [];
+    for (let i = 0; i < monthsBack; i++) {
+      const end = new Date(now);
+      end.setDate(end.getDate() - i * 30);
+      const start = new Date(end);
+      start.setDate(start.getDate() - 30);
+      chunks.unshift({ from: start.toISOString(), to: end.toISOString() });
+    }
+
+    setBackfillProgress({ total: chunks.length, current: 0, chunks: [], done: false });
+
+    const results: BackfillChunkResult[] = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const startedAt = Date.now();
+      try {
+        const res = await fetch('/api/amazon/sp-api/ledger-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: chunk.from,
+            to: chunk.to,
+            chunk_days: 30,
+          }),
+        });
+        const body = await res.json();
+        const duration = Date.now() - startedAt;
+        const chunkResult: BackfillChunkResult = {
+          chunk: i + 1,
+          from: chunk.from.slice(0, 10),
+          to: chunk.to.slice(0, 10),
+          ok: !!body.ok,
+          rows_inserted: body.total_rows_inserted ?? 0,
+          error: body.ok ? undefined : body.error || `HTTP ${res.status}`,
+          duration_ms: duration,
+        };
+        results.push(chunkResult);
+        setBackfillProgress({
+          total: chunks.length,
+          current: i + 1,
+          chunks: [...results],
+          done: false,
+        });
+      } catch (e) {
+        const duration = Date.now() - startedAt;
+        const chunkResult: BackfillChunkResult = {
+          chunk: i + 1,
+          from: chunk.from.slice(0, 10),
+          to: chunk.to.slice(0, 10),
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+          duration_ms: duration,
+        };
+        results.push(chunkResult);
+        setBackfillProgress({
+          total: chunks.length,
+          current: i + 1,
+          chunks: [...results],
+          done: false,
+        });
+        // On continue les autres chunks même si un échoue
+      }
+    }
+
+    // Final
+    const totalRows = results.reduce((s, r) => s + (r.rows_inserted ?? 0), 0);
+    const totalErrors = results.filter((r) => !r.ok).length;
+    setBackfillProgress({
+      total: chunks.length,
+      current: chunks.length,
+      chunks: results,
+      done: true,
+    });
+    setResult({
+      mode: 'chunked_backfill',
+      months_back: monthsBack,
+      total_chunks: chunks.length,
+      total_rows_inserted: totalRows,
+      total_errors: totalErrors,
+      chunks: results,
+    });
+    if (totalErrors > 0) {
+      setError(`${totalErrors}/${chunks.length} chunks ont échoué (voir détails ci-dessous)`);
+    }
+    await loadSummary();
+    setBusy(null);
+  }
 
   // Generic action runner
   async function run(
@@ -149,19 +266,11 @@ export default function AmazonSpApiHub() {
           }}
         >
           <ActionCard
-            title="📚 Backfill ledger 8 mois"
-            description="One-shot : télécharge l'historique complet de l'inventory ledger sur 8 mois (~10-20 min). À faire UNE FOIS après le merge initial."
+            title="📚 Backfill ledger 8 mois (chunked)"
+            description="One-shot : télécharge l'historique sur 8 mois en 8 appels séquentiels d'1 mois chacun (~1 min/chunk = 8-10 min total). Évite les timeouts serverless. À faire UNE FOIS après le merge initial."
             color="#7c3aed"
             busy={busy === 'backfill'}
-            onClick={() =>
-              run('backfill', () =>
-                fetch('/api/amazon/sp-api/ledger-sync', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ mode: 'backfill_8m' }),
-                }),
-              )
-            }
+            onClick={() => runBackfillChunked(8)}
           />
           <ActionCard
             title="🔄 Sync 4 reports manuels"
@@ -216,6 +325,11 @@ export default function AmazonSpApiHub() {
             }
           />
         </div>
+
+        {/* Backfill progress (only visible when running or done) */}
+        {backfillProgress && (
+          <BackfillProgressPanel progress={backfillProgress} />
+        )}
 
         {/* Error */}
         {error && (
@@ -491,6 +605,130 @@ function StatCell({
       <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 900, color: accent }}>{value}</div>
       <div style={{ fontSize: 11, color: '#cbd5e1', marginTop: 2 }}>{subValue}</div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// BackfillProgressPanel — barre de progression du backfill chunked
+// ────────────────────────────────────────────────────────────────────────
+
+function BackfillProgressPanel({ progress }: { progress: BackfillProgress }) {
+  const pct = Math.round((progress.current / progress.total) * 100);
+  const totalRows = progress.chunks.reduce((s, c) => s + (c.rows_inserted ?? 0), 0);
+  const errors = progress.chunks.filter((c) => !c.ok).length;
+  return (
+    <div
+      style={{
+        marginTop: 16,
+        padding: 16,
+        borderRadius: 12,
+        background: progress.done
+          ? 'rgba(16,185,129,0.1)'
+          : 'rgba(124,58,237,0.15)',
+        border: `1px solid ${progress.done ? 'rgba(16,185,129,0.4)' : 'rgba(124,58,237,0.4)'}`,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 8,
+        }}
+      >
+        <span style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>
+          {progress.done
+            ? `✅ Backfill terminé · ${totalRows.toLocaleString('fr-CA')} mouvements ledger insérés`
+            : `📚 Backfill en cours · chunk ${progress.current}/${progress.total}`}
+          {errors > 0 && (
+            <span style={{ marginLeft: 8, color: '#fbbf24' }}>
+              ⚠️ {errors} erreur(s)
+            </span>
+          )}
+        </span>
+        <span style={{ fontSize: 12, color: '#cbd5e1' }}>{pct}%</span>
+      </div>
+      {/* Barre de progression */}
+      <div
+        style={{
+          height: 8,
+          borderRadius: 4,
+          background: 'rgba(0,0,0,0.4)',
+          overflow: 'hidden',
+          marginBottom: 12,
+        }}
+      >
+        <div
+          style={{
+            height: '100%',
+            width: `${pct}%`,
+            background: progress.done
+              ? 'linear-gradient(90deg, #10b981 0%, #34d399 100%)'
+              : 'linear-gradient(90deg, #7c3aed 0%, #a855f7 100%)',
+            transition: 'width 0.3s ease',
+          }}
+        />
+      </div>
+      {/* Liste des chunks */}
+      <div style={{ display: 'grid', gap: 4 }}>
+        {progress.chunks.map((c) => (
+          <div
+            key={c.chunk}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: 11,
+              fontFamily: 'monospace',
+              padding: '4px 8px',
+              borderRadius: 6,
+              background: 'rgba(0,0,0,0.2)',
+            }}
+          >
+            <span
+              style={{
+                width: 18,
+                color: c.ok ? '#34d399' : '#fca5a5',
+                fontWeight: 700,
+              }}
+            >
+              {c.ok ? '✓' : '✗'}
+            </span>
+            <span style={{ color: '#94a3b8', minWidth: 40 }}>#{c.chunk}</span>
+            <span style={{ color: '#cbd5e1', flex: 1 }}>
+              {c.from} → {c.to}
+            </span>
+            <span style={{ color: c.ok ? '#a5f3fc' : '#fecaca' }}>
+              {c.ok
+                ? `${(c.rows_inserted ?? 0).toLocaleString('fr-CA')} lignes · ${(c.duration_ms / 1000).toFixed(1)}s`
+                : c.error?.slice(0, 60)}
+            </span>
+          </div>
+        ))}
+        {/* Placeholder pour les chunks pas encore lancés */}
+        {!progress.done &&
+          Array.from({ length: progress.total - progress.chunks.length }, (_, i) => (
+            <div
+              key={`pending-${i}`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 11,
+                fontFamily: 'monospace',
+                padding: '4px 8px',
+                borderRadius: 6,
+                background: 'rgba(0,0,0,0.1)',
+                color: '#475569',
+              }}
+            >
+              <span style={{ width: 18 }}>⏳</span>
+              <span style={{ minWidth: 40 }}>#{progress.chunks.length + i + 1}</span>
+              <span style={{ flex: 1 }}>(en attente…)</span>
+            </div>
+          ))}
+      </div>
     </div>
   );
 }
