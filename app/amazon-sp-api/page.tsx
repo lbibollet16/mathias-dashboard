@@ -1,0 +1,496 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
+
+/**
+ * Hub Amazon SP-API — page standalone pour tester et déclencher tous les
+ * syncs auto sans toucher au dashboard principal (qui a déjà trop d'onglets).
+ *
+ * URL : /amazon-sp-api
+ *
+ * Contient :
+ *   - Carte de statut "Mes claims à réclamer" (lecture seule, auto-refresh)
+ *   - 5 boutons d'action : Backfill 8 mois / Sync 4 reports / Detect claims /
+ *     Sync settlements / Sync ledger 7j
+ *   - Zone d'affichage du résultat de la dernière action
+ *
+ * Auth : redirige vers /login si pas connecté.
+ */
+
+const supabaseCli = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+);
+
+interface ClaimSummary {
+  total_candidates: number;
+  pending_eligible: { count: number; estimated_amount: number };
+  pending_not_yet_eligible: { count: number; estimated_amount: number };
+  sent: { count: number; estimated_amount: number };
+  paid: { count: number; estimated_amount: number; recovered: number };
+  rejected: { count: number; estimated_amount: number };
+  expired: { count: number; estimated_amount: number };
+  by_event_type: Record<string, { count: number; estimated_amount: number }>;
+}
+
+export default function AmazonSpApiHub() {
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authed, setAuthed] = useState(false);
+  const [summary, setSummary] = useState<ClaimSummary | null>(null);
+  const [result, setResult] = useState<unknown>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Auth check
+  useEffect(() => {
+    supabaseCli.auth.getSession().then(({ data: { session } }) => {
+      if (session) setAuthed(true);
+      else window.location.href = '/login';
+      setAuthChecked(true);
+    });
+  }, []);
+
+  // Load claims summary
+  async function loadSummary() {
+    try {
+      const r = await fetch('/api/amazon/claims');
+      const body = await r.json();
+      if (body.ok && body.summary) setSummary(body.summary);
+    } catch {
+      // silencieux
+    }
+  }
+
+  useEffect(() => {
+    if (authed) void loadSummary();
+  }, [authed]);
+
+  // Generic action runner
+  async function run(
+    label: string,
+    fetchOpts: () => Promise<Response>,
+  ) {
+    if (busy) return;
+    setBusy(label);
+    setError(null);
+    setResult(null);
+    try {
+      const startedAt = Date.now();
+      const res = await fetchOpts();
+      const body = await res.json();
+      const durationMs = Date.now() - startedAt;
+      setResult({ duration_ms: durationMs, ...body });
+      if (!res.ok || body.ok === false) {
+        setError(typeof body.error === 'string' ? body.error : `HTTP ${res.status}`);
+      } else {
+        // Refresh summary après action
+        await loadSummary();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (!authChecked) return null;
+  if (!authed) return null;
+
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%)',
+        padding: '24px',
+        fontFamily: "'DM Sans', sans-serif",
+        color: '#e2e8f0',
+      }}
+    >
+      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+        {/* Header */}
+        <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 32, fontWeight: 900 }}>
+              ⚙️ Amazon SP-API Hub
+            </h1>
+            <p style={{ margin: '6px 0 0', color: '#94a3b8', fontSize: 14 }}>
+              Sync automatique des données Amazon. Page de test et déclenchement manuel.
+            </p>
+          </div>
+          <a
+            href="/"
+            style={{
+              padding: '8px 16px',
+              borderRadius: 8,
+              background: 'rgba(255,255,255,0.1)',
+              color: '#fff',
+              textDecoration: 'none',
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            ← Retour Dashboard
+          </a>
+        </div>
+
+        {/* Summary card claims */}
+        <ClaimsSummaryCard summary={summary} onRefresh={loadSummary} />
+
+        {/* Actions grid */}
+        <h2 style={{ fontSize: 18, fontWeight: 800, margin: '24px 0 12px' }}>
+          🔧 Actions SP-API
+        </h2>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: 12,
+          }}
+        >
+          <ActionCard
+            title="📚 Backfill ledger 8 mois"
+            description="One-shot : télécharge l'historique complet de l'inventory ledger sur 8 mois (~10-20 min). À faire UNE FOIS après le merge initial."
+            color="#7c3aed"
+            busy={busy === 'backfill'}
+            onClick={() =>
+              run('backfill', () =>
+                fetch('/api/amazon/sp-api/ledger-sync', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ mode: 'backfill_8m' }),
+                }),
+              )
+            }
+          />
+          <ActionCard
+            title="🔄 Sync 4 reports manuels"
+            description="Reimbursements + FBA Inventory + Customer Returns + Removal Orders. Remplace tes anciens uploads CSV manuels. ~8 min."
+            color="#0891b2"
+            busy={busy === 'sync-all'}
+            onClick={() =>
+              run('sync-all', () =>
+                fetch('/api/amazon/sp-api/sync-all', { method: 'POST' }),
+              )
+            }
+          />
+          <ActionCard
+            title="💰 Sync settlements"
+            description="Pull les nouveaux settlements DONE chez Amazon. Le cron le fait à 8h chaque jour mais tu peux le forcer."
+            color="#059669"
+            busy={busy === 'settlements'}
+            onClick={() =>
+              run('settlements', () =>
+                fetch('/api/amazon/sp-api/settlements-sync', { method: 'POST' }),
+              )
+            }
+          />
+          <ActionCard
+            title="📒 Sync ledger 7j (incrémental)"
+            description="Re-fetche les 7 derniers jours du ledger pour capter les reconciliations tardives d'Amazon."
+            color="#0284c7"
+            busy={busy === 'ledger-recent'}
+            onClick={() =>
+              run('ledger-recent', () =>
+                fetch('/api/amazon/sp-api/ledger-sync', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ mode: 'recent', days_back: 7 }),
+                }),
+              )
+            }
+          />
+          <ActionCard
+            title="🎯 Détecter claims manqués"
+            description="Croise ledger × reimbursements × ventes pour calculer ce qu'Amazon te doit en stock perdu / cassé. À lancer après les autres syncs."
+            color="#dc2626"
+            busy={busy === 'detect'}
+            onClick={() =>
+              run('detect', () =>
+                fetch('/api/amazon/claims/detect', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({}),
+                }),
+              )
+            }
+          />
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div
+            style={{
+              marginTop: 16,
+              padding: 12,
+              borderRadius: 12,
+              background: 'rgba(220,38,38,0.2)',
+              border: '1px solid rgba(220,38,38,0.5)',
+              color: '#fecaca',
+              fontSize: 13,
+            }}
+          >
+            ✗ {error}
+          </div>
+        )}
+
+        {/* Result */}
+        {result != null && (
+          <div style={{ marginTop: 16 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 8 }}>
+              📋 Résultat dernière action
+            </h2>
+            <pre
+              style={{
+                background: 'rgba(0,0,0,0.4)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 12,
+                padding: 16,
+                fontSize: 12,
+                fontFamily: 'monospace',
+                color: '#a5f3fc',
+                overflow: 'auto',
+                maxHeight: 500,
+              }}
+            >
+              {JSON.stringify(result, null, 2)}
+            </pre>
+          </div>
+        )}
+
+        {/* Footer info */}
+        <div
+          style={{
+            marginTop: 24,
+            padding: 16,
+            borderRadius: 12,
+            background: 'rgba(255,255,255,0.05)',
+            fontSize: 11,
+            color: '#94a3b8',
+            lineHeight: 1.6,
+          }}
+        >
+          <div style={{ fontWeight: 700, color: '#cbd5e1', marginBottom: 8 }}>
+            ℹ️ Ordre recommandé pour le premier setup
+          </div>
+          <ol style={{ margin: 0, paddingLeft: 20 }}>
+            <li>📚 <strong>Backfill ledger 8 mois</strong> (une seule fois — long mais nécessaire)</li>
+            <li>🔄 <strong>Sync 4 reports manuels</strong> (pour avoir reimbursements + inventory frais)</li>
+            <li>💰 <strong>Sync settlements</strong> (si pas déjà à jour)</li>
+            <li>🎯 <strong>Détecter claims manqués</strong> (LE step qui te dit où sont les $$ à récupérer)</li>
+          </ol>
+          <div style={{ marginTop: 12 }}>
+            Ensuite les crons quotidiens (11h, 12h, 12h30, 13h UTC) maintiennent tout à jour automatiquement.
+            Tu peux bookmark cette page pour des tests ponctuels.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActionCard({
+  title,
+  description,
+  color,
+  busy,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  color: string;
+  busy: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      style={{
+        textAlign: 'left',
+        padding: 16,
+        borderRadius: 12,
+        background: busy ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.08)',
+        border: `2px solid ${busy ? color : 'rgba(255,255,255,0.1)'}`,
+        cursor: busy ? 'wait' : 'pointer',
+        color: '#fff',
+        fontFamily: 'inherit',
+        transition: 'all 0.2s',
+        opacity: busy ? 0.7 : 1,
+      }}
+      onMouseEnter={(e) => {
+        if (!busy) {
+          e.currentTarget.style.transform = 'translateY(-2px)';
+          e.currentTarget.style.border = `2px solid ${color}`;
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!busy) {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.border = '2px solid rgba(255,255,255,0.1)';
+        }
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 16, fontWeight: 800 }}>{title}</span>
+        {busy && <span style={{ marginLeft: 'auto', color: color, fontSize: 12 }}>⏳ En cours…</span>}
+      </div>
+      <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.4 }}>{description}</div>
+    </button>
+  );
+}
+
+function ClaimsSummaryCard({
+  summary,
+  onRefresh,
+}: {
+  summary: ClaimSummary | null;
+  onRefresh: () => void;
+}) {
+  const fmt = (n: number) =>
+    n.toLocaleString('fr-CA', { style: 'currency', currency: 'CAD', maximumFractionDigits: 0 });
+
+  if (!summary) {
+    return (
+      <div
+        style={{
+          padding: 24,
+          borderRadius: 16,
+          background: 'rgba(255,255,255,0.05)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          textAlign: 'center',
+          color: '#94a3b8',
+          fontSize: 14,
+        }}
+      >
+        Chargement du summary claims… (ou aucun candidate détecté encore — lance « Détecter claims manqués » après le sync initial)
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        padding: 20,
+        borderRadius: 16,
+        background: 'linear-gradient(135deg, rgba(220,38,38,0.15) 0%, rgba(245,158,11,0.1) 100%)',
+        border: '1px solid rgba(220,38,38,0.3)',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>
+          🎯 Claims à réclamer auprès d'Amazon
+        </h2>
+        <button
+          onClick={onRefresh}
+          style={{
+            padding: '6px 12px',
+            borderRadius: 8,
+            background: 'rgba(255,255,255,0.1)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            color: '#fff',
+            cursor: 'pointer',
+            fontSize: 12,
+          }}
+        >
+          🔄 Refresh
+        </button>
+      </div>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: 12,
+        }}
+      >
+        <StatCell
+          label="🔥 À récupérer maintenant"
+          value={fmt(summary.pending_eligible.estimated_amount)}
+          subValue={`${summary.pending_eligible.count} candidates éligibles`}
+          accent="#fbbf24"
+        />
+        <StatCell
+          label="⏳ Pas encore éligibles (<30j)"
+          value={fmt(summary.pending_not_yet_eligible.estimated_amount)}
+          subValue={`${summary.pending_not_yet_eligible.count} candidates`}
+          accent="#60a5fa"
+        />
+        <StatCell
+          label="📤 Envoyés à Amazon"
+          value={fmt(summary.sent.estimated_amount)}
+          subValue={`${summary.sent.count} cases ouverts`}
+          accent="#a78bfa"
+        />
+        <StatCell
+          label="✅ Récupéré"
+          value={fmt(summary.paid.recovered)}
+          subValue={`${summary.paid.count} settlements payés`}
+          accent="#10b981"
+        />
+        <StatCell
+          label="❌ Refusé"
+          value={fmt(summary.rejected.estimated_amount)}
+          subValue={`${summary.rejected.count} cases`}
+          accent="#ef4444"
+        />
+        <StatCell
+          label="🕒 Expiré (>18 mois)"
+          value={fmt(summary.expired.estimated_amount)}
+          subValue={`${summary.expired.count} cases (trop tard)`}
+          accent="#6b7280"
+        />
+      </div>
+      {Object.keys(summary.by_event_type).length > 0 && (
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+          <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>
+            Par type d'événement
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {Object.entries(summary.by_event_type).map(([type, v]) => (
+              <span
+                key={type}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 999,
+                  background: 'rgba(255,255,255,0.1)',
+                  fontSize: 12,
+                  color: '#e2e8f0',
+                }}
+              >
+                <strong>{type}</strong> · {v.count} unités · {fmt(v.estimated_amount)}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCell({
+  label,
+  value,
+  subValue,
+  accent,
+}: {
+  label: string;
+  value: string;
+  subValue: string;
+  accent: string;
+}) {
+  return (
+    <div
+      style={{
+        padding: 12,
+        borderRadius: 12,
+        background: 'rgba(0,0,0,0.2)',
+        border: '1px solid rgba(255,255,255,0.05)',
+      }}
+    >
+      <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 900, color: accent }}>{value}</div>
+      <div style={{ fontSize: 11, color: '#cbd5e1', marginTop: 2 }}>{subValue}</div>
+    </div>
+  );
+}
