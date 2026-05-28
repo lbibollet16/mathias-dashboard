@@ -23,6 +23,8 @@ export async function GET(req: NextRequest) {
       .from('amazon_transactions')
       .select('transaction_type, amount_type, amount')
       .eq('settlement_id', s.settlement_id)
+      // Exclure les drop-ship (SKU DSK-…)
+      .or('sku.is.null,sku.not.ilike.DSK-%')
       .limit(100000)
     const totaux_par_amount_type = new Map<string, { count: number; total: number }>()
     for (const t of tx || []) {
@@ -41,6 +43,8 @@ export async function GET(req: NextRequest) {
       .from('amazon_reimbursements')
       .select('*')
       .eq('settlement_id', s.settlement_id)
+      // Exclure les drop-ship (SKU DSK-…)
+      .or('sku.is.null,sku.not.ilike.DSK-%')
 
     // Ajustements Traction FBA requis (reimbursements cash = unités disparues)
     // Priorité au multi-mapping manuel, sinon auto-strip.
@@ -161,6 +165,8 @@ export async function GET(req: NextRequest) {
           .select('sku, traction_code, product_name, afn_unsellable_quantity, your_price')
           .eq('snapshot_date', snap)
           .gt('afn_unsellable_quantity', 0)
+          // Exclure les drop-ship (SKU DSK-…)
+          .or('sku.is.null,sku.not.ilike.DSK-%')
         unsellable = (us || []).map((f: any) => ({
           sku: f.sku, traction_code: f.traction_code,
           product_name: f.product_name,

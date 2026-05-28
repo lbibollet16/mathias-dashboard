@@ -152,6 +152,8 @@ export async function GET(req: NextRequest) {
       .from('amazon_reimbursements')
       .select('id, reimbursement_id, sku, fnsku, traction_code, amount_total, amount_per_unit, quantity_reimbursed_cash, quantity_reimbursed_inventory, reason, product_name, settlement_id, case_id, inventaire_ajuste_le, inventaire_ajuste_par, inventaire_pk_code')
       .eq('settlement_id', s.settlement_id)
+      // Exclure les drop-ship (SKU DSK-…)
+      .or('sku.is.null,sku.not.ilike.DSK-%')
 
     // Matching automatique case_id ↔ actions unsellable précédentes
     const caseIds = Array.from(new Set((reimbs || []).map((r: any) => r.case_id).filter(Boolean)))
@@ -170,6 +172,8 @@ export async function GET(req: NextRequest) {
       .select('sku, amount, amount_type')
       .eq('settlement_id', s.settlement_id)
       .ilike('amount_type', '%Reimbursement%')
+      // Exclure les drop-ship (SKU DSK-…)
+      .or('sku.is.null,sku.not.ilike.DSK-%')
     const txCount = (reimbTx || []).length
     const matchOk = reimbsCount > 0 ? reimbsCount === txCount : txCount === 0
     const hasCashReimb = (reimbs || []).some((r: any) => Number(r.quantity_reimbursed_cash || 0) > 0)
@@ -280,6 +284,8 @@ export async function GET(req: NextRequest) {
         .select('sku, traction_code, product_name, afn_unsellable_quantity, your_price')
         .eq('snapshot_date', snapDate)
         .gt('afn_unsellable_quantity', 0)
+        // Exclure les drop-ship (SKU DSK-…)
+        .or('sku.is.null,sku.not.ilike.DSK-%')
       // Charger les actions déjà prises sur ces SKU pour ce settlement
       const { data: actions } = await supabaseAdmin
         .from('amazon_unsellable_actions')

@@ -68,6 +68,8 @@ export async function GET(_req: NextRequest) {
         .from('amazon_fba_inventory')
         .select('*')
         .eq('snapshot_date', latestDate)
+        // Exclure les drop-ship (SKU commençant par DSK-)
+        .or('sku.is.null,sku.not.ilike.DSK-%')
         .range(from, from + 999)
       if (error) throw error
       fbaRows.push(...(data || []))

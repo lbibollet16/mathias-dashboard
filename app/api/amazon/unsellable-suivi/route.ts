@@ -70,6 +70,8 @@ export async function GET(_req: NextRequest) {
         .select('sku, afn_unsellable_quantity')
         .eq('snapshot_date', lastSnapDate)
         .gt('afn_unsellable_quantity', 0)
+        // Exclure les drop-ship (SKU DSK-…)
+        .or('sku.is.null,sku.not.ilike.DSK-%')
       for (const f of fba || []) stillUnsellableMap.set(f.sku, Number(f.afn_unsellable_quantity || 0))
     }
 

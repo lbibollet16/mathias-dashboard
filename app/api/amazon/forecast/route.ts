@@ -69,6 +69,8 @@ export async function GET(req: NextRequest) {
         .in('settlement_id', settlementIds)
         .eq('transaction_type', 'Order')
         .eq('amount_description', 'Principal')
+        // Exclure les drop-ship (SKU commençant par DSK-)
+        .or('sku.is.null,sku.not.ilike.DSK-%')
         .range(from, from + 999)
       if (error) throw error
       tx.push(...(data || []))

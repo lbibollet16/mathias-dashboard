@@ -43,6 +43,8 @@ export async function GET(req: NextRequest) {
         .from('amazon_transactions')
         .select('sku, traction_code, quantity_purchased, amount, amount_type, amount_description, transaction_type, order_item_code')
         .eq('settlement_id', id)
+        // Exclure les drop-ship (SKU commençant par DSK-) — pas de stock chez nous
+        .or('sku.is.null,sku.not.ilike.DSK-%')
         .range(from, from + 999)
       if (error) throw error
       tx.push(...(data || []))

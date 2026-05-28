@@ -78,6 +78,17 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       const fbm_ecart = c.fbm_compte != null ? Number(c.fbm_compte) - fbmRaw : null
       const compte = warehouse_compte != null || c.fbm_compte != null
 
+      // ─── Vue simplifiée "un seul champ Compté" ───
+      // Total physique attendu chez Mathias (HUB+SP nets + FBM)
+      const total_theorique_net = warehouse_theorique_net + fbmRaw
+      // Total compté : somme des 3 sous-champs si au moins un n'est pas null
+      const anyCompte = c.hub_compte != null || c.fbm_compte != null || c.sans_prefix_compte != null
+      const total_compte = anyCompte
+        ? (Number(c.hub_compte || 0) + Number(c.fbm_compte || 0) + Number(c.sans_prefix_compte || 0))
+        : null
+      const total_ecart = total_compte != null ? total_compte - total_theorique_net : null
+      const valeur_ecart_total = total_ecart != null ? total_ecart * Number(c.coutant || 0) : 0
+
       return {
         ...c,
         hub_theorique_net,
@@ -96,6 +107,12 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
         valeur_fbm_ecart: fbm_ecart != null ? fbm_ecart * Number(c.coutant || 0) : 0,
         compte,
         has_ecart: (warehouse_ecart !== null && warehouse_ecart !== 0) || (fbm_ecart !== null && fbm_ecart !== 0),
+        // ── Champs unifiés (vue simple) ──
+        total_theorique_net,
+        total_compte,
+        total_ecart,
+        valeur_ecart_total,
+        has_ecart_total: total_ecart != null && total_ecart !== 0,
       }
     })
 
@@ -111,6 +128,9 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       return String(a.base_code).localeCompare(String(b.base_code))
     })
 
+    // Lignes "à compter" = stock physique théorique > 0 chez Mathias
+    const aCompter = enriched.filter(c => Number(c.total_theorique_net || 0) > 0)
+
     const stats = {
       total: enriched.length,
       comptes: enriched.filter(c => c.compte).length,
@@ -122,6 +142,16 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       total_fbm_theorique: enriched.reduce((a, c) => a + Number(c.fbm_theorique || 0), 0),
       total_fbm_compte: enriched.reduce((a, c) => a + (c.fbm_compte != null ? Number(c.fbm_compte) : 0), 0),
       nb_oublis: enriched.filter(c => c.has_oubli).length,
+      // ── Stats vue simple ──
+      a_compter: aCompter.length,
+      a_compter_comptes: aCompter.filter(c => c.total_compte != null).length,
+      a_compter_restants: aCompter.filter(c => c.total_compte == null).length,
+      a_compter_avec_ecart: aCompter.filter(c => c.has_ecart_total).length,
+      // Manques = écarts négatifs (stock physique < théorique). Affiché en valeur absolue.
+      valeur_manques: enriched.reduce((a, c) => a + (Number(c.valeur_ecart_total) < 0 ? Math.abs(Number(c.valeur_ecart_total)) : 0), 0),
+      // Surplus = écarts positifs (stock physique > théorique).
+      valeur_surplus: enriched.reduce((a, c) => a + (Number(c.valeur_ecart_total) > 0 ? Number(c.valeur_ecart_total) : 0), 0),
+      valeur_ecart_net: enriched.reduce((a, c) => a + Number(c.valeur_ecart_total || 0), 0),
     }
 
     return NextResponse.json({ audit, counts: enriched, stats })
@@ -184,6 +214,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
           .select('sku, traction_code')
           .eq('settlement_id', audit.settlement_id)
           .eq('fulfillment_id', 'MFN')
+          // Exclure les drop-ship (SKU DSK-…)
+          .or('sku.is.null,sku.not.ilike.DSK-%')
           .range(from, from + 999)
         if (error) break
         mfnTxRows.push(...(data || []))
@@ -229,21 +261,60 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       return NextResponse.json({ success: true, deleted: toDelete.length, kept: newCount, bases_avec_mouvement: basesAvecMouvement.size })
     }
 
+    // Action : marquer toutes les lignes restantes (non comptées) à 0.
+    // Vue "compteur simple" : on ferme l'audit en disant "ce que je n'ai pas
+    // trouvé physiquement = 0". Préserve les lignes déjà saisies.
+    if (body.action === 'mark_zero_remaining') {
+      // Charger toutes les lignes non comptées
+      const { data: rows, error: errLoad } = await supabaseAdmin
+        .from('amazon_audit_counts')
+        .select('id, hub_compte, fbm_compte, sans_prefix_compte, hub_theorique, fbm_theorique, sans_prefix_theorique')
+        .eq('audit_id', auditId)
+      if (errLoad) throw errLoad
+
+      const counted_by_user = body.counted_by || null
+      const now = new Date().toISOString()
+      const aZeroter = (rows || []).filter((r: any) => {
+        const dejaCompte = r.hub_compte != null || r.fbm_compte != null || r.sans_prefix_compte != null
+        if (dejaCompte) return false
+        // Seulement si stock théorique > 0 (sinon pas pertinent)
+        const tot = Number(r.hub_theorique || 0) + Number(r.fbm_theorique || 0) + Number(r.sans_prefix_theorique || 0)
+        return tot > 0
+      })
+      let updated = 0
+      for (let i = 0; i < aZeroter.length; i += 200) {
+        const batch = aZeroter.slice(i, i + 200)
+        const { error } = await supabaseAdmin
+          .from('amazon_audit_counts')
+          .update({ hub_compte: 0, fbm_compte: null, sans_prefix_compte: null, counted_at: now, counted_by: counted_by_user })
+          .in('id', batch.map((r: any) => r.id))
+        if (error) throw error
+        updated += batch.length
+      }
+      return NextResponse.json({ success: true, updated })
+    }
+
     // Sinon, c'est un update de ligne de comptage
-    // Nouveau modèle: warehouse_compte (HUB + SP fusionnés) → stocké dans hub_compte
-    const { base_code, hub_compte, warehouse_compte, fbm_compte, counted_by, notes } = body
+    // Modèle simplifié : total_compte (HUB+FBM+SP fusionnés) → stocké dans hub_compte
+    const { base_code, hub_compte, warehouse_compte, fbm_compte, total_compte, counted_by, notes } = body
     if (!base_code) return NextResponse.json({ erreur: 'base_code requis' }, { status: 400 })
 
     const update: any = { counted_at: new Date().toISOString() }
-    // warehouse_compte est le nouveau champ unifié ; écrit dans hub_compte et
-    // clear sp_compte pour migrer le modèle
-    if (warehouse_compte !== undefined) {
+    if (total_compte !== undefined) {
+      // Vue simple unifiée : le total est stocké dans hub_compte ; les autres
+      // champs sont remis à null pour éviter la double-comptabilité.
+      update.hub_compte = total_compte === null || total_compte === '' ? null : Number(total_compte)
+      update.fbm_compte = null
+      update.sans_prefix_compte = null
+    } else if (warehouse_compte !== undefined) {
+      // warehouse_compte est l'ancien champ unifié (HUB+SP) ; écrit dans hub_compte
       update.hub_compte = warehouse_compte
       update.sans_prefix_compte = null
-    } else if (hub_compte !== undefined) {
-      update.hub_compte = hub_compte
+      if (fbm_compte !== undefined) update.fbm_compte = fbm_compte
+    } else {
+      if (hub_compte !== undefined) update.hub_compte = hub_compte
+      if (fbm_compte !== undefined) update.fbm_compte = fbm_compte
     }
-    if (fbm_compte !== undefined)         update.fbm_compte = fbm_compte
     if (counted_by !== undefined)         update.counted_by = counted_by || null
     if (notes !== undefined)              update.notes = notes || null
 
