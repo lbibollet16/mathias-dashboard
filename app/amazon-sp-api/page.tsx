@@ -389,6 +389,15 @@ export default function AmazonSpApiHub() {
             }}
           />
           <ActionCard
+            title="⏳ Aged inventory monitor"
+            description="Surveille les SKUs FBA approchant la barre des 181 jours (Aged Inventory Surcharge). Sync le report GET_FBA_INVENTORY_PLANNING_DATA + page avec tri par urgence (remove / discount / monitor). Évaluation Amazon le 15 du mois — agir avant le 14 stoppe la surcharge."
+            color="#fb923c"
+            busy={false}
+            onClick={() => {
+              window.location.href = '/amazon-sp-api/aging';
+            }}
+          />
+          <ActionCard
             title="🔍 Ping SP-API (diagnostic)"
             description="Test rapide (<5s) : vérifie env vars + LWA token + 1 appel SP-API léger. À utiliser quand un sync rate pour savoir si c'est la config ou le report."
             color="#10b981"
