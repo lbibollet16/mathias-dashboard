@@ -79,16 +79,22 @@ export async function GET(request: NextRequest) {
     const content = await downloadReportContent(doc);
     const dlMs = Date.now() - dlStart;
 
-    // Parse TSV très basique pour voir les headers
+    // Parse TSV avec strip quotes (Amazon wrappe chaque valeur de "...")
+    const stripQ = (s: string): string => {
+      if (s.length >= 2 && s[0] === '"' && s[s.length - 1] === '"') {
+        return s.slice(1, -1).replace(/""/g, '"');
+      }
+      return s;
+    };
     const lines = content.split(/\r?\n/);
     const nonEmptyLines = lines.filter((l) => l.trim().length > 0);
-    const headers = (nonEmptyLines[0] ?? '').split('\t').map((h) => h.trim());
+    const headers = (nonEmptyLines[0] ?? '').split('\t').map((h) => stripQ(h.trim()));
     const sampleRows: Array<Record<string, string>> = [];
     for (let i = 1; i < Math.min(nonEmptyLines.length, 6); i++) {
       const cells = nonEmptyLines[i].split('\t');
       const obj: Record<string, string> = {};
       for (let j = 0; j < headers.length; j++) {
-        obj[headers[j] || `_col${j}`] = (cells[j] ?? '').trim();
+        obj[headers[j] || `_col${j}`] = stripQ((cells[j] ?? '').trim());
       }
       sampleRows.push(obj);
     }

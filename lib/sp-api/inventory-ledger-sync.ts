@@ -53,15 +53,32 @@ interface LedgerRow {
 
 // ─── Parsing TSV (le report est tab-separated) ───────────────────────────
 
+/**
+ * Strip les guillemets autour d'une valeur si présents.
+ * Amazon entoure CHAQUE valeur de "..." dans GET_LEDGER_DETAIL_VIEW_DATA.
+ * Ex: `"Date"` → `Date`, `"05/27/2026"` → `05/27/2026`, `""` → `''`
+ * Gère aussi les double-guillemets internes (escape Amazon).
+ */
+function stripQuotes(s: string): string {
+  if (s.length >= 2 && s[0] === '"' && s[s.length - 1] === '"') {
+    return s.slice(1, -1).replace(/""/g, '"');
+  }
+  return s;
+}
+
 function parseTsv(text: string): Array<Record<string, string>> {
   const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
   if (lines.length < 2) return [];
-  const headers = lines[0].split('\t').map((h) => h.trim());
+  // Strip quotes des headers ET trim
+  const headers = lines[0].split('\t').map((h) => stripQuotes(h.trim()));
   const out: Array<Record<string, string>> = [];
   for (let i = 1; i < lines.length; i++) {
     const cells = lines[i].split('\t');
     const obj: Record<string, string> = {};
-    for (let j = 0; j < headers.length; j++) obj[headers[j]] = (cells[j] ?? '').trim();
+    for (let j = 0; j < headers.length; j++) {
+      // Strip quotes des values aussi
+      obj[headers[j]] = stripQuotes((cells[j] ?? '').trim());
+    }
     out.push(obj);
   }
   return out;
@@ -71,9 +88,18 @@ function parseDate(v: string | null | undefined): string | null {
   if (!v) return null;
   const s = String(v).trim();
   if (!s) return null;
-  // Amazon ledger date format : "YYYY-MM-DD"
+  // 1. ISO YYYY-MM-DD direct (préférer ce format)
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  // Fallback ISO
+  // 2. Amazon ledger format US : MM/DD/YYYY (ex: 05/27/2026)
+  const usMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (usMatch) {
+    const [, mo, d, y] = usMatch;
+    return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+  // 3. ISO timestamp avec timezone (ex: 2026-05-27T00:00:00-0700)
+  const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  // 4. Fallback parsing JS
   const d = new Date(s);
   if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   return null;
