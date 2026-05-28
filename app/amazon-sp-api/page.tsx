@@ -40,6 +40,13 @@ interface BackfillChunkResult {
   to: string;
   ok: boolean;
   rows_inserted?: number;
+  rows_seen?: number;
+  rows_mapped?: number;
+  rows_rejected?: number;
+  headers_detected?: string[];
+  sample_rejected?: Record<string, string>;
+  reportId?: string;
+  status?: string;
   error?: string;
   duration_ms: number;
 }
@@ -122,13 +129,25 @@ export default function AmazonSpApiHub() {
         });
         const body = await res.json();
         const duration = Date.now() - startedAt;
+        // body shape (depuis syncLedgerRange) :
+        // { ok, chunks: [LedgerChunkResult], total_rows_inserted, total_errors }
+        // On extrait le détail du SEUL chunk interne pour avoir
+        // rows_mapped/rejected/headers_detected/sample_rejected.
+        const innerChunk = (body.chunks ?? [])[0] ?? {};
         const chunkResult: BackfillChunkResult = {
           chunk: i + 1,
           from: chunk.from.slice(0, 10),
           to: chunk.to.slice(0, 10),
           ok: !!body.ok,
-          rows_inserted: body.total_rows_inserted ?? 0,
-          error: body.ok ? undefined : body.error || `HTTP ${res.status}`,
+          rows_inserted: body.total_rows_inserted ?? innerChunk.rows_inserted ?? 0,
+          rows_seen: innerChunk.rows_seen,
+          rows_mapped: innerChunk.rows_mapped,
+          rows_rejected: innerChunk.rows_rejected,
+          headers_detected: innerChunk.headers_detected,
+          sample_rejected: innerChunk.sample_rejected,
+          reportId: innerChunk.reportId,
+          status: innerChunk.status,
+          error: body.ok ? innerChunk.error : body.error || `HTTP ${res.status}`,
           duration_ms: duration,
         };
         results.push(chunkResult);
@@ -714,23 +733,103 @@ function BackfillProgressPanel({ progress }: { progress: BackfillProgress }) {
             <span
               style={{
                 width: 18,
-                color: c.ok ? '#34d399' : '#fca5a5',
+                color: c.ok ? (c.rows_inserted ? '#34d399' : '#fbbf24') : '#fca5a5',
                 fontWeight: 700,
               }}
             >
-              {c.ok ? '✓' : '✗'}
+              {c.ok ? (c.rows_inserted ? '✓' : '⚠') : '✗'}
             </span>
             <span style={{ color: '#94a3b8', minWidth: 40 }}>#{c.chunk}</span>
-            <span style={{ color: '#cbd5e1', flex: 1 }}>
+            <span style={{ color: '#cbd5e1', minWidth: 180 }}>
               {c.from} → {c.to}
             </span>
-            <span style={{ color: c.ok ? '#a5f3fc' : '#fecaca' }}>
-              {c.ok
-                ? `${(c.rows_inserted ?? 0).toLocaleString('fr-CA')} lignes · ${(c.duration_ms / 1000).toFixed(1)}s`
-                : c.error?.slice(0, 60)}
+            <span
+              style={{
+                color: c.ok ? (c.rows_inserted ? '#a5f3fc' : '#fde68a') : '#fecaca',
+                flex: 1,
+              }}
+            >
+              {c.ok ? (
+                <>
+                  seen=<strong>{(c.rows_seen ?? 0).toLocaleString('fr-CA')}</strong>
+                  {' · '}
+                  mapped=<strong>{(c.rows_mapped ?? 0).toLocaleString('fr-CA')}</strong>
+                  {(c.rows_rejected ?? 0) > 0 && (
+                    <>
+                      {' · '}
+                      <span style={{ color: '#fbbf24' }}>
+                        rejected={(c.rows_rejected ?? 0).toLocaleString('fr-CA')}
+                      </span>
+                    </>
+                  )}
+                  {' · '}
+                  inserted=<strong>{(c.rows_inserted ?? 0).toLocaleString('fr-CA')}</strong>
+                  {' · '}
+                  {(c.duration_ms / 1000).toFixed(1)}s
+                </>
+              ) : (
+                c.error?.slice(0, 80)
+              )}
             </span>
           </div>
         ))}
+        {/* Si chunks ont des headers détectés ou sample rejected, on les
+           affiche en details collapse pour debug */}
+        {progress.chunks.some((c) => c.headers_detected || c.sample_rejected) && (
+          <details
+            style={{
+              marginTop: 8,
+              padding: 8,
+              fontSize: 11,
+              background: 'rgba(0,0,0,0.3)',
+              borderRadius: 6,
+              cursor: 'pointer',
+            }}
+          >
+            <summary style={{ color: '#fbbf24', fontWeight: 700 }}>
+              🔍 Détails debug (headers Amazon détectés + sample rejected)
+            </summary>
+            <div style={{ marginTop: 8, fontFamily: 'monospace' }}>
+              {progress.chunks
+                .filter((c) => c.headers_detected || c.sample_rejected)
+                .slice(0, 1) // 1er suffit, ils sont identiques
+                .map((c) => (
+                  <div key={c.chunk}>
+                    {c.headers_detected && (
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ color: '#94a3b8', marginBottom: 4 }}>
+                          Headers Amazon (chunk #{c.chunk}) :
+                        </div>
+                        <div style={{ color: '#a5f3fc', wordBreak: 'break-all' }}>
+                          {c.headers_detected.map((h) => `"${h}"`).join(', ')}
+                        </div>
+                      </div>
+                    )}
+                    {c.sample_rejected && (
+                      <div>
+                        <div style={{ color: '#fbbf24', marginBottom: 4 }}>
+                          Sample rejeté (1ère ligne dont mapRow n'a pas pu extraire
+                          event_date OU event_type) :
+                        </div>
+                        <pre
+                          style={{
+                            color: '#fecaca',
+                            background: 'rgba(0,0,0,0.4)',
+                            padding: 8,
+                            borderRadius: 4,
+                            overflow: 'auto',
+                            margin: 0,
+                          }}
+                        >
+                          {JSON.stringify(c.sample_rejected, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                ))}
+            </div>
+          </details>
+        )}
         {/* Placeholder pour les chunks pas encore lancés */}
         {!progress.done &&
           Array.from({ length: progress.total - progress.chunks.length }, (_, i) => (
