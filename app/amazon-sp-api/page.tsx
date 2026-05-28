@@ -324,6 +324,31 @@ export default function AmazonSpApiHub() {
               )
             }
           />
+          <ActionCard
+            title="🔍 Ping SP-API (diagnostic)"
+            description="Test rapide (<5s) : vérifie env vars + LWA token + 1 appel SP-API léger. À utiliser quand un sync rate pour savoir si c'est la config ou le report."
+            color="#10b981"
+            busy={busy === 'ping'}
+            onClick={() =>
+              run('ping', () => fetch('/api/amazon/sp-api/ping'))
+            }
+          />
+          <ActionCard
+            title="🐛 Debug ledger (1 semaine)"
+            description="Lance un report ledger sur les 7 derniers jours et retourne les colonnes/sample (sans rien upsert). Utile pour comprendre pourquoi le backfill ramène 0 lignes."
+            color="#f59e0b"
+            busy={busy === 'ledger-debug'}
+            onClick={() => {
+              const now = new Date();
+              const weekAgo = new Date(now);
+              weekAgo.setDate(weekAgo.getDate() - 7);
+              const from = weekAgo.toISOString().slice(0, 10);
+              const to = now.toISOString().slice(0, 10);
+              return run('ledger-debug', () =>
+                fetch(`/api/amazon/sp-api/ledger-debug?from=${from}&to=${to}`),
+              );
+            }}
+          />
         </div>
 
         {/* Backfill progress (only visible when running or done) */}

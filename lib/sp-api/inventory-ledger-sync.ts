@@ -84,26 +84,47 @@ function num(v: unknown): number {
   return isNaN(n) ? 0 : n;
 }
 
+/**
+ * Lookup tolérant aux variantes de noms de colonnes Amazon (snake_case,
+ * camelCase, Title Case, lowercase, avec ou sans espaces). Le ledger
+ * change parfois de format selon la version du report.
+ */
+function pick(o: Record<string, string>, ...keys: string[]): string | null {
+  // Match exact d'abord (rapide)
+  for (const k of keys) {
+    const v = o[k];
+    if (v !== undefined && v !== '') return v;
+  }
+  // Match case-insensitive + normalisé (espaces/underscores/dashes ignorés)
+  const norm = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, '');
+  const normTargets = keys.map(norm);
+  for (const [actualKey, value] of Object.entries(o)) {
+    if (value === undefined || value === '') continue;
+    if (normTargets.includes(norm(actualKey))) return value;
+  }
+  return null;
+}
+
 function mapRow(o: Record<string, string>): LedgerRow | null {
-  const event_date = parseDate(o['Date'] || o['date']);
+  const event_date = parseDate(pick(o, 'Date', 'date', 'EventDate', 'event_date'));
   if (!event_date) return null;
-  const event_type = (o['Event Type'] || o['event_type'] || '').trim();
+  const event_type = (pick(o, 'Event Type', 'event_type', 'EventType') || '').trim();
   if (!event_type) return null;
   return {
     event_date,
-    fnsku: o['FNSKU'] || o['fnsku'] || null,
-    asin: o['ASIN'] || o['asin'] || null,
-    sku: o['MSKU'] || o['Merchant SKU'] || o['msku'] || o['sku'] || null,
-    product_name: o['Title'] || o['title'] || null,
+    fnsku: pick(o, 'FNSKU', 'fnsku', 'Fnsku'),
+    asin: pick(o, 'ASIN', 'asin', 'Asin'),
+    sku: pick(o, 'MSKU', 'Merchant SKU', 'msku', 'sku', 'Sku', 'merchant_sku', 'SellerSKU'),
+    product_name: pick(o, 'Title', 'title', 'product_name', 'ProductName', 'product-name'),
     event_type,
-    disposition: o['Disposition'] || o['disposition'] || null,
-    quantity: num(o['Quantity'] || o['quantity']),
-    reason: o['Reason'] || o['reason'] || null,
-    fulfillment_center: o['Fulfillment Center'] || o['fulfillment_center'] || null,
-    reference_id: o['Reference ID'] || o['reference_id'] || null,
-    country: o['Country'] || o['country'] || null,
-    reconciled_date: parseDate(o['Reconciled Date'] || o['reconciled_date']),
-    reconcile_reason: o['Reconcile Reason'] || o['reconcile_reason'] || null,
+    disposition: pick(o, 'Disposition', 'disposition'),
+    quantity: num(pick(o, 'Quantity', 'quantity', 'Qty', 'qty')),
+    reason: pick(o, 'Reason', 'reason'),
+    fulfillment_center: pick(o, 'Fulfillment Center', 'fulfillment_center', 'FulfillmentCenter', 'FC', 'fc'),
+    reference_id: pick(o, 'Reference ID', 'reference_id', 'ReferenceID', 'reference-id'),
+    country: pick(o, 'Country', 'country'),
+    reconciled_date: parseDate(pick(o, 'Reconciled Date', 'reconciled_date', 'ReconciledDate')),
+    reconcile_reason: pick(o, 'Reconcile Reason', 'reconcile_reason', 'ReconcileReason'),
     raw: o,
   };
 }
@@ -115,8 +136,12 @@ export interface LedgerChunkResult {
   dataEndTime: string;
   reportId?: string;
   status: 'ok' | 'error' | 'empty';
-  rows_seen?: number;
-  rows_inserted?: number;
+  rows_seen?: number;          // total lignes parsées du TSV
+  rows_mapped?: number;        // lignes mappées avec succès (event_date + event_type non null)
+  rows_rejected?: number;      // lignes filtrées par mapRow (date ou type absent)
+  rows_inserted?: number;      // effectivement upserts (= rows_mapped si pas d'erreur)
+  headers_detected?: string[]; // colonnes du TSV (utile pour debug)
+  sample_rejected?: Record<string, string>; // premier obj rejeté pour debug
   error?: string;
 }
 
@@ -168,6 +193,9 @@ export async function syncLedgerChunk(
     const tsv = await downloadReportContent(doc);
     const objs = parseTsv(tsv);
 
+    // Extract headers for debug (toujours dans la réponse)
+    const headers = objs.length > 0 ? Object.keys(objs[0]) : [];
+
     if (objs.length === 0) {
       return {
         dataStartTime,
@@ -175,11 +203,22 @@ export async function syncLedgerChunk(
         reportId,
         status: 'empty',
         rows_seen: 0,
+        rows_mapped: 0,
+        rows_rejected: 0,
+        headers_detected: headers,
       };
     }
 
     // 4. Map + upsert par batch
-    const rows = objs.map(mapRow).filter((r): r is LedgerRow => r !== null);
+    const mapped: LedgerRow[] = [];
+    let firstRejected: Record<string, string> | undefined;
+    for (const o of objs) {
+      const m = mapRow(o);
+      if (m) mapped.push(m);
+      else if (!firstRejected) firstRejected = o;
+    }
+    const rows = mapped;
+    const rejected = objs.length - mapped.length;
 
     let inserted = 0;
     for (let i = 0; i < rows.length; i += 500) {
@@ -196,8 +235,12 @@ export async function syncLedgerChunk(
           dataEndTime,
           reportId,
           status: 'error',
-          rows_seen: rows.length,
+          rows_seen: objs.length,
+          rows_mapped: rows.length,
+          rows_rejected: rejected,
           rows_inserted: inserted,
+          headers_detected: headers,
+          sample_rejected: firstRejected,
           error: `upsert batch ${i}: ${error.message}`,
         };
       }
@@ -210,7 +253,11 @@ export async function syncLedgerChunk(
       reportId,
       status: 'ok',
       rows_seen: objs.length,
-      rows_inserted: rows.length,
+      rows_mapped: rows.length,
+      rows_rejected: rejected,
+      rows_inserted: inserted,
+      headers_detected: headers,
+      ...(rejected > 0 && firstRejected ? { sample_rejected: firstRejected } : {}),
     };
   } catch (e) {
     return {
