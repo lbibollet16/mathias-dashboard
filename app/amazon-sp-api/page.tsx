@@ -398,6 +398,15 @@ export default function AmazonSpApiHub() {
             }}
           />
           <ActionCard
+            title="📐 Dimensions audit (Cubiscan dispute)"
+            description="Compare ce qu'Amazon mesure (via Catalog API) à nos dimensions réelles. Discrepancy >+10% volume = candidat à un Cubiscan remeasure request. Récupère les fees overcharged des 90 derniers jours."
+            color="#ec4899"
+            busy={false}
+            onClick={() => {
+              window.location.href = '/amazon-sp-api/dimensions';
+            }}
+          />
+          <ActionCard
             title="🔍 Ping SP-API (diagnostic)"
             description="Test rapide (<5s) : vérifie env vars + LWA token + 1 appel SP-API léger. À utiliser quand un sync rate pour savoir si c'est la config ou le report."
             color="#10b981"
