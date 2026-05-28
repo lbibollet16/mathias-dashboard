@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { syncSettlementsFromSpApi } from '@/lib/sp-api/settlements-sync';
+import { spApiErrorResponse } from '@/lib/sp-api/client';
 
 /**
  * POST /api/amazon/sp-api/settlements-sync
@@ -39,10 +40,8 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
-    );
+    const { body: errBody, status } = spApiErrorResponse(e);
+    return NextResponse.json(errBody, { status });
   }
 }
 
@@ -61,9 +60,7 @@ export async function GET(request: NextRequest) {
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
-    );
+    const { body: errBody, status } = spApiErrorResponse(e);
+    return NextResponse.json(errBody, { status });
   }
 }

@@ -4,6 +4,7 @@ import {
   syncLedgerRecent,
   backfillLedger8Months,
 } from '@/lib/sp-api/inventory-ledger-sync';
+import { spApiErrorResponse } from '@/lib/sp-api/client';
 
 /**
  * POST /api/amazon/sp-api/ledger-sync
@@ -45,10 +46,8 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
-    );
+    const { body: errBody, status } = spApiErrorResponse(e);
+    return NextResponse.json(errBody, { status });
   }
 }
 
@@ -65,9 +64,7 @@ export async function GET(request: Request) {
     const result = await syncLedgerRecent(7);
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
-    );
+    const { body: errBody, status } = spApiErrorResponse(e);
+    return NextResponse.json(errBody, { status });
   }
 }

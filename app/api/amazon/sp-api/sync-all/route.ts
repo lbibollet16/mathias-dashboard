@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { syncAllAmazonReports } from '@/lib/sp-api/all-reports-sync';
+import { spApiErrorResponse } from '@/lib/sp-api/client';
 
 /**
  * POST /api/amazon/sp-api/sync-all
@@ -21,10 +22,8 @@ export async function POST() {
     const result = await syncAllAmazonReports();
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
-    );
+    const { body: errBody, status } = spApiErrorResponse(e);
+    return NextResponse.json(errBody, { status });
   }
 }
 
@@ -40,9 +39,7 @@ export async function GET(request: Request) {
     const result = await syncAllAmazonReports();
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
-    );
+    const { body: errBody, status } = spApiErrorResponse(e);
+    return NextResponse.json(errBody, { status });
   }
 }

@@ -5,6 +5,7 @@ import {
   getReportDocument,
   downloadReportContent,
 } from '@/lib/sp-api/reports';
+import { spApiErrorResponse } from '@/lib/sp-api/client';
 
 /**
  * GET /api/amazon/sp-api/ledger-debug?from=2026-04-01&to=2026-04-08
@@ -124,9 +125,7 @@ export async function GET(request: NextRequest) {
       sample_rows: sampleRows,
     });
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
-      { status: 502 },
-    );
+    const { body: errBody, status } = spApiErrorResponse(e);
+    return NextResponse.json(errBody, { status });
   }
 }

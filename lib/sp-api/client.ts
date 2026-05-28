@@ -77,10 +77,67 @@ export class SPAPIError extends Error {
     public code: string | undefined,
     message: string,
     public body: unknown,
+    /**
+     * Seconds to wait before retrying. Only populated for 429 — derived
+     * from `x-amzn-ratelimit-limit` (Amazon publishes the per-endpoint
+     * refill rate in req/sec; reciprocal = seconds per token). When
+     * the header is absent we default to 60s for `POST /reports/...`
+     * which is the strictest documented limit (0.0167 req/s).
+     */
+    public retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = 'SPAPIError';
   }
+
+  /** True for 429 — useful for route handlers to surface a friendly response. */
+  get isRateLimited(): boolean {
+    return this.status === 429;
+  }
+}
+
+/**
+ * Builds a structured JSON body + HTTP status for a route catching an
+ * SP-API error. Surfaces 429s with `rate_limited: true` and a wait time,
+ * so the frontend can show "réessayer dans X min" with a countdown
+ * instead of the raw `"POST /reports/... -> 429"` string.
+ */
+export function spApiErrorResponse(err: unknown): {
+  body: {
+    ok: false;
+    error: string;
+    rate_limited?: true;
+    retry_after_seconds?: number;
+    retry_at?: string;
+    endpoint?: string;
+  };
+  status: number;
+} {
+  if (err instanceof SPAPIError && err.isRateLimited) {
+    const seconds = err.retryAfterSeconds ?? 60;
+    const retryAt = new Date(Date.now() + seconds * 1000).toISOString();
+    return {
+      body: {
+        ok: false,
+        error: `Amazon SP-API t'a rate-limité sur ${err.message.replace(/ -> 429$/, '')}. Réessaye dans ${seconds}s (vers ${new Date(retryAt).toLocaleTimeString('fr-CA')}). C'est normal après plusieurs tirs rapprochés — le bucket Amazon se remplit lentement.`,
+        rate_limited: true,
+        retry_after_seconds: seconds,
+        retry_at: retryAt,
+        endpoint: err.message,
+      },
+      status: 429,
+    };
+  }
+  if (err instanceof SPAPIError) {
+    return {
+      body: { ok: false, error: err.message, endpoint: err.message },
+      status: err.status >= 400 && err.status < 600 ? err.status : 502,
+    };
+  }
+  return {
+    body: { ok: false, error: err instanceof Error ? err.message : String(err) },
+    status: 500,
+  };
 }
 
 export interface SPAPIRequest {
@@ -150,9 +207,9 @@ export async function spApiCall<T = unknown>(req: SPAPIRequest): Promise<T> {
     }
 
     const retriable = res.status === 429 || (res.status >= 500 && res.status < 600);
+    const rlHeader = res.headers.get('x-amzn-ratelimit-limit');
+    const rl = rlHeader ? Number.parseFloat(rlHeader) : NaN;
     if (retriable && attempt < retries) {
-      const rlHeader = res.headers.get('x-amzn-ratelimit-limit');
-      const rl = rlHeader ? Number.parseFloat(rlHeader) : NaN;
       const baseDelay = Number.isFinite(rl) && rl > 0 ? 1000 / rl : 500 * 2 ** attempt;
       const delay = Math.min(baseDelay + Math.random() * 250, 10_000);
       await new Promise((r) => setTimeout(r, delay));
@@ -164,6 +221,25 @@ export async function spApiCall<T = unknown>(req: SPAPIRequest): Promise<T> {
       typeof parsed === 'object' && parsed !== null && 'errors' in parsed
         ? (parsed as { errors?: Array<{ code?: string }> }).errors?.[0]?.code
         : undefined;
-    throw new SPAPIError(res.status, code, `${method} ${req.path} -> ${res.status}`, parsed);
+
+    // For 429 we compute how long the caller should wait before retrying.
+    // Amazon publishes the refill rate (tokens/sec) in `x-amzn-ratelimit-limit`.
+    // The reciprocal is the seconds-per-token; if we burned the burst, we
+    // need at minimum that many seconds for a single token to come back.
+    // Round UP and add 5s jitter so the user never retries at the exact
+    // boundary. Fallback to 60s — the documented worst case for
+    // `POST /reports/2021-06-30/reports`.
+    let retryAfter: number | undefined;
+    if (res.status === 429) {
+      const secondsPerToken = Number.isFinite(rl) && rl > 0 ? 1 / rl : 60;
+      retryAfter = Math.ceil(secondsPerToken) + 5;
+    }
+    throw new SPAPIError(
+      res.status,
+      code,
+      `${method} ${req.path} -> ${res.status}`,
+      parsed,
+      retryAfter,
+    );
   }
 }
