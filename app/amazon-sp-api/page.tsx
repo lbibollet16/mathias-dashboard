@@ -66,6 +66,9 @@ export default function AmazonSpApiHub() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [backfillProgress, setBackfillProgress] = useState<BackfillProgress | null>(null);
+  // Set whenever Amazon returns 429. The banner counts down to this
+  // timestamp and disables the action buttons in the meantime.
+  const [rateLimitedUntil, setRateLimitedUntil] = useState<Date | null>(null);
 
   // Auth check
   useEffect(() => {
@@ -129,6 +132,26 @@ export default function AmazonSpApiHub() {
         });
         const body = await res.json();
         const duration = Date.now() - startedAt;
+        // 429 inside the chunked loop : raise the rate-limit banner with the
+        // server's retry_at, stop firing more chunks, mark the rest skipped.
+        if (res.status === 429 && body.rate_limited && body.retry_at) {
+          setRateLimitedUntil(new Date(body.retry_at));
+          results.push({
+            chunk: i + 1,
+            from: chunk.from.slice(0, 10),
+            to: chunk.to.slice(0, 10),
+            ok: false,
+            error: `429 rate-limited — chunks suivants annulés. ${body.error}`,
+            duration_ms: duration,
+          });
+          setBackfillProgress({
+            total: chunks.length,
+            current: i + 1,
+            chunks: [...results],
+            done: true,
+          });
+          break;
+        }
         // body shape (depuis syncLedgerRange) :
         // { ok, chunks: [LedgerChunkResult], total_rows_inserted, total_errors }
         // On extrait le détail du SEUL chunk interne pour avoir
@@ -208,6 +231,9 @@ export default function AmazonSpApiHub() {
     fetchOpts: () => Promise<Response>,
   ) {
     if (busy) return;
+    // Block actions while rate-limited — Amazon refill is per-token,
+    // hammering it just resets the wait.
+    if (rateLimitedUntil && rateLimitedUntil.getTime() > Date.now()) return;
     setBusy(label);
     setError(null);
     setResult(null);
@@ -217,10 +243,20 @@ export default function AmazonSpApiHub() {
       const body = await res.json();
       const durationMs = Date.now() - startedAt;
       setResult({ duration_ms: durationMs, ...body });
+      // 429 path — surface a friendly banner + countdown via state.
+      if (res.status === 429 && body.rate_limited && body.retry_at) {
+        setRateLimitedUntil(new Date(body.retry_at));
+        setError(typeof body.error === 'string' ? body.error : 'Amazon SP-API rate limit');
+        return;
+      }
       if (!res.ok || body.ok === false) {
         setError(typeof body.error === 'string' ? body.error : `HTTP ${res.status}`);
       } else {
-        // Refresh summary après action
+        // Une action OK efface aussi le rate-limit s'il était périmé
+        // (cas où on a juste continué à attendre puis cliqué).
+        if (rateLimitedUntil && rateLimitedUntil.getTime() <= Date.now()) {
+          setRateLimitedUntil(null);
+        }
         await loadSummary();
       }
     } catch (e) {
@@ -375,8 +411,17 @@ export default function AmazonSpApiHub() {
           <BackfillProgressPanel progress={backfillProgress} />
         )}
 
-        {/* Error */}
-        {error && (
+        {/* Rate-limit banner with live countdown — takes priority over the
+            generic error display because the resolution is just "wait". */}
+        {rateLimitedUntil && (
+          <RateLimitBanner
+            until={rateLimitedUntil}
+            onExpire={() => setRateLimitedUntil(null)}
+          />
+        )}
+
+        {/* Error (only when no rate-limit countdown active) */}
+        {error && !rateLimitedUntil && (
           <div
             style={{
               marginTop: 16,
@@ -852,6 +897,67 @@ function BackfillProgressPanel({ progress }: { progress: BackfillProgress }) {
               <span style={{ flex: 1 }}>(en attente…)</span>
             </div>
           ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Banner showing the live countdown until Amazon SP-API is ready to accept
+ * another `POST /reports/2021-06-30/reports` call. Renders nothing when the
+ * deadline has passed — fires `onExpire` so the parent can clear its state
+ * and re-enable the action buttons.
+ */
+function RateLimitBanner({ until, onExpire }: { until: Date; onExpire: () => void }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const remainingMs = until.getTime() - now;
+  useEffect(() => {
+    if (remainingMs <= 0) onExpire();
+  }, [remainingMs, onExpire]);
+
+  if (remainingMs <= 0) return null;
+
+  const totalSecs = Math.ceil(remainingMs / 1000);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  const countdown = mins > 0 ? `${mins} min ${String(secs).padStart(2, '0')}s` : `${secs}s`;
+  const retryAt = until.toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  return (
+    <div
+      style={{
+        marginTop: 16,
+        padding: 14,
+        borderRadius: 12,
+        background: 'rgba(245, 158, 11, 0.15)',
+        border: '1px solid rgba(245, 158, 11, 0.5)',
+        color: '#fde68a',
+        fontSize: 13,
+        lineHeight: 1.5,
+      }}
+    >
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>
+        ⏳ Amazon SP-API t&apos;a rate-limité
+      </div>
+      <div>
+        Le bucket Amazon se remplit à <strong>1 jeton par minute</strong> sur
+        ce endpoint. Aucun bouton ne va déclencher d&apos;appel tant que le
+        compteur ci-dessous n&apos;est pas écoulé — réessayer maintenant
+        remet le compteur à zéro.
+      </div>
+      <div style={{ marginTop: 10, display: 'flex', alignItems: 'baseline', gap: 12 }}>
+        <span style={{ fontSize: 22, fontWeight: 800, fontFamily: 'monospace', color: '#fcd34d' }}>
+          {countdown}
+        </span>
+        <span style={{ fontSize: 12, color: '#fde68a', opacity: 0.85 }}>
+          (déblocage vers {retryAt})
+        </span>
       </div>
     </div>
   );
