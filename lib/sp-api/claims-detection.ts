@@ -4,9 +4,18 @@
  * Pour chaque event Lost/Damaged dans amazon_inventory_ledger :
  *   1. Cherche un reimbursement matché par (sku, date proche, quantité)
  *   2. Si pas de match → c'est un claim candidate
- *   3. Calcule l'estimated_amount via le prix de vente moyen 90j du SKU
+ *   3. Calcule l'estimated_amount via le **coût de revient** du SKU
+ *      (politique Amazon mars 2025 : ils remboursent au cost, plus au
+ *      prix de vente — voir amazon-sku-costs.sql)
  *   4. Détermine si éligible (30j min, 540j max = 18 mois)
  *   5. Upsert dans amazon_claim_candidates
+ *
+ * Notes politique 2025 :
+ *   - Avant mars 2025 : Amazon remboursait au prix de vente moyen.
+ *   - Depuis mars 2025 : Amazon rembourse au coût de sourcing/fabrication.
+ *   - Si le coût est inconnu pour un SKU, estimated_amount=null
+ *     (préférer pas de chiffre à un chiffre faux qui survend ce qu'on
+ *     va vraiment récupérer).
  *
  * Lance en cron quotidien après le ledger sync.
  *
@@ -98,64 +107,62 @@ function matchLedgerToReimbursement(
   return candidates[0];
 }
 
-// ─── Etape 2 : estimation du prix de vente moyen 90j ────────────────────
+// ─── Etape 2 : récup des coûts de revient par SKU ──────────────────────
+//
+// Depuis la politique Amazon de mars 2025, les remboursements FBA pour
+// inventaire perdu/endommagé sont calculés sur le **coût de sourcing**
+// (achat fournisseur + shipping inbound), plus sur le prix de vente.
+// Source canonique : amazon_sku_costs (alimentée depuis MPP via le bridge
+// ou par import manuel). Si un SKU n'a pas de cost connu, on retourne
+// undefined → estimated_amount=null côté caller, pour éviter de fournir
+// un chiffre erroné qui survende ce qu'on va vraiment toucher.
 
-interface PriceCache {
+interface CostCache {
   bySku: Map<string, number>;
   byFnsku: Map<string, number>;
+  missingSkus: Set<string>;
 }
 
-async function loadAvgPricesLast90Days(): Promise<PriceCache> {
-  const cutoff = new Date(Date.now() - 90 * 86_400_000).toISOString();
+async function loadSkuCosts(): Promise<CostCache> {
+  const bySku = new Map<string, number>();
+  const byFnsku = new Map<string, number>();
 
-  // Source primaire : amazon_transactions où amount_type='ItemPrice' et
-  // amount_description='Principal'. amount/quantity_purchased = prix unitaire.
-  const { data: tx } = await supabaseAdmin
-    .from('amazon_transactions')
-    .select('sku, amount, quantity_purchased, posted_date')
-    .eq('amount_type', 'ItemPrice')
-    .eq('amount_description', 'Principal')
-    .gte('posted_date', cutoff)
-    .gt('quantity_purchased', 0);
-
-  const bySku = new Map<string, { sum: number; n: number }>();
-  for (const r of (tx ?? []) as Array<{
-    sku: string | null;
-    amount: number | null;
-    quantity_purchased: number | null;
-  }>) {
-    if (!r.sku || !r.amount || !r.quantity_purchased) continue;
-    const unit = Number(r.amount) / Number(r.quantity_purchased);
-    if (unit <= 0) continue;
-    const ex = bySku.get(r.sku) || { sum: 0, n: 0 };
-    ex.sum += unit;
-    ex.n++;
-    bySku.set(r.sku, ex);
-  }
-  const skuAvg = new Map<string, number>();
-  for (const [sku, v] of bySku) skuAvg.set(sku, v.sum / v.n);
-
-  // Source secondaire : amazon_fba_inventory `your_price` (snapshot le plus récent)
-  // pour les SKUs sans historique de ventes.
-  const { data: snap } = await supabaseAdmin
-    .from('amazon_fba_inventory')
-    .select('sku, fnsku, your_price, snapshot_date')
-    .gt('your_price', 0)
-    .order('snapshot_date', { ascending: false })
-    .limit(2000);
-
-  const fnskuAvg = new Map<string, number>();
-  for (const r of (snap ?? []) as Array<{
-    sku: string | null;
-    fnsku: string | null;
-    your_price: number | null;
-  }>) {
-    if (r.sku && !skuAvg.has(r.sku) && r.your_price) skuAvg.set(r.sku, Number(r.your_price));
-    if (r.fnsku && r.your_price && !fnskuAvg.has(r.fnsku))
-      fnskuAvg.set(r.fnsku, Number(r.your_price));
+  // On lit en pages pour gérer >1000 rows si jamais le référentiel grandit.
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabaseAdmin
+      .from('amazon_sku_costs')
+      .select('sku, fnsku, cost_amount, cost_currency')
+      .range(from, from + 999);
+    if (error) {
+      // Si la table n'existe pas encore (migration pas appliquée), on
+      // retourne un cache vide — claims-detection.ts traitera tout en
+      // estimated_amount=null.
+      if (/relation .* does not exist/i.test(error.message)) break;
+      throw new Error('amazon_sku_costs fetch: ' + error.message);
+    }
+    if (!data || data.length === 0) break;
+    for (const r of data as Array<{
+      sku: string | null;
+      fnsku: string | null;
+      cost_amount: number | string | null;
+      cost_currency: string | null;
+    }>) {
+      const cost = Number(r.cost_amount);
+      if (!Number.isFinite(cost) || cost <= 0) continue;
+      // /!\ on stocke et on rembourse en CAD. Si un import a laissé un
+      // SKU en USD, on ne le convertit pas tacitement — on le saute et
+      // l'utilisateur devra le compléter en CAD. Mieux que multiplier
+      // discrètement.
+      if (r.cost_currency && r.cost_currency !== 'CAD') continue;
+      if (r.sku) bySku.set(r.sku, cost);
+      if (r.fnsku) byFnsku.set(r.fnsku, cost);
+    }
+    if (data.length < 1000) break;
+    from += 1000;
   }
 
-  return { bySku: skuAvg, byFnsku: fnskuAvg };
+  return { bySku, byFnsku, missingSkus: new Set() };
 }
 
 // ─── Etape 3 : génération du template de claim ──────────────────────────
@@ -265,8 +272,9 @@ export async function detectMissingClaims(opts: {
     reimbBySku.set(key, arr);
   }
 
-  // 3. Cache des prix
-  const priceCache = await loadAvgPricesLast90Days();
+  // 3. Cache des coûts de revient (politique Amazon mars 2025 : remboursé
+  //    au coût, pas au prix de vente).
+  const costCache = await loadSkuCosts();
 
   // 4. Pour chaque event : match ou candidate
   const result: DetectionResult = {
@@ -298,18 +306,23 @@ export async function detectMissingClaims(opts: {
       continue;
     }
 
-    // Pas matché → candidat à un claim
-    const unitPrice =
-      (ev.sku && priceCache.bySku.get(ev.sku)) ||
-      (ev.fnsku && priceCache.byFnsku.get(ev.fnsku)) ||
-      0;
-    const estimatedAmount = unitPrice * qty;
+    // Pas matché → candidat à un claim.
+    //
+    // Si on connaît le coût de revient du SKU, on calcule l'estimation
+    // au cost basis Amazon mars 2025. Sinon estimated_amount=null —
+    // le user verra "coût inconnu" dans l'UI et saura qu'il faut
+    // peupler amazon_sku_costs pour ce SKU avant de chiffrer le case.
+    const unitCost =
+      (ev.sku && costCache.bySku.get(ev.sku)) ??
+      (ev.fnsku && costCache.byFnsku.get(ev.fnsku)) ??
+      null;
+    const estimatedAmount = unitCost != null ? unitCost * qty : null;
 
     const evDate = new Date(ev.event_date);
     const daysSince = Math.floor((now.getTime() - evDate.getTime()) / 86_400_000);
     const eligible = daysSince >= MIN_DAYS_TO_CLAIM && daysSince <= MAX_DAYS_TO_CLAIM;
 
-    const payload = buildClaimPayload(ev, qty, estimatedAmount);
+    const payload = buildClaimPayload(ev, qty, estimatedAmount ?? 0);
 
     candidatesToUpsert.push({
       ledger_event_id: ev.id,
@@ -321,19 +334,21 @@ export async function detectMissingClaims(opts: {
       quantity: qty,
       fulfillment_center: ev.fulfillment_center,
       reference_id: ev.reference_id,
-      estimated_unit_price: unitPrice > 0 ? Math.round(unitPrice * 100) / 100 : null,
-      estimated_amount: estimatedAmount > 0 ? Math.round(estimatedAmount * 100) / 100 : null,
+      estimated_unit_price: unitCost != null ? Math.round(unitCost * 100) / 100 : null,
+      estimated_amount: estimatedAmount != null ? Math.round(estimatedAmount * 100) / 100 : null,
       days_since_event: daysSince,
       eligible_to_claim: eligible,
       claim_payload: payload,
       updated_at: new Date().toISOString(),
     });
 
-    result.total_estimated_amount += estimatedAmount;
+    if (estimatedAmount != null) {
+      result.total_estimated_amount += estimatedAmount;
+    }
     const bucket =
       result.by_event_type[ev.event_type] || { count: 0, estimated_amount: 0 };
     bucket.count += qty;
-    bucket.estimated_amount += estimatedAmount;
+    if (estimatedAmount != null) bucket.estimated_amount += estimatedAmount;
     result.by_event_type[ev.event_type] = bucket;
   }
 
