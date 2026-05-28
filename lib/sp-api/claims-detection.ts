@@ -32,6 +32,18 @@ const MAX_DAYS_TO_CLAIM = 18 * 30; // 18 mois après l'event = expiré
 // Tolérance temporelle pour matcher un event ledger avec un reimbursement
 const REIMBURSEMENT_MATCH_WINDOW_DAYS = 90;
 
+// Dispositions Amazon qui matérialisent une perte/dommage chiffrable :
+// inventaire que Amazon a abîmé en entrepôt, que le client a renvoyé en
+// mauvais état, ou que Amazon a marqué défectueux. Toutes éligibles à un
+// claim de remboursement.
+const CLAIMABLE_DISPOSITIONS = [
+  'WAREHOUSE_DAMAGED',
+  'CUSTOMER_DAMAGED',
+  'DEFECTIVE',
+  'DISTRIBUTOR_DAMAGED',
+  'CARRIER_DAMAGED',
+] as const;
+
 interface LedgerEvent {
   id: number;
   event_date: string;
@@ -39,6 +51,7 @@ interface LedgerEvent {
   fnsku: string | null;
   asin: string | null;
   event_type: string;
+  disposition: string | null;
   quantity: number;
   fulfillment_center: string | null;
   reference_id: string | null;
@@ -120,19 +133,21 @@ function matchLedgerToReimbursement(
 interface CostCache {
   bySku: Map<string, number>;
   byFnsku: Map<string, number>;
+  byAsin: Map<string, number>;
   missingSkus: Set<string>;
 }
 
 async function loadSkuCosts(): Promise<CostCache> {
   const bySku = new Map<string, number>();
   const byFnsku = new Map<string, number>();
+  const byAsin = new Map<string, number>();
 
   // On lit en pages pour gérer >1000 rows si jamais le référentiel grandit.
   let from = 0;
   while (true) {
     const { data, error } = await supabaseAdmin
       .from('amazon_sku_costs')
-      .select('sku, fnsku, cost_amount, cost_currency')
+      .select('sku, fnsku, asin, cost_amount, cost_currency')
       .range(from, from + 999);
     if (error) {
       // Si la table n'existe pas encore (migration pas appliquée), on
@@ -145,6 +160,7 @@ async function loadSkuCosts(): Promise<CostCache> {
     for (const r of data as Array<{
       sku: string | null;
       fnsku: string | null;
+      asin: string | null;
       cost_amount: number | string | null;
       cost_currency: string | null;
     }>) {
@@ -157,12 +173,13 @@ async function loadSkuCosts(): Promise<CostCache> {
       if (r.cost_currency && r.cost_currency !== 'CAD') continue;
       if (r.sku) bySku.set(r.sku, cost);
       if (r.fnsku) byFnsku.set(r.fnsku, cost);
+      if (r.asin) byAsin.set(r.asin, cost);
     }
     if (data.length < 1000) break;
     from += 1000;
   }
 
-  return { bySku, byFnsku, missingSkus: new Set() };
+  return { bySku, byFnsku, byAsin, missingSkus: new Set() };
 }
 
 // ─── Etape 3 : génération du template de claim ──────────────────────────
@@ -218,23 +235,32 @@ export interface DetectionResult {
 export async function detectMissingClaims(opts: {
   /** Si fourni, ne scan que les events depuis cette date (default: 18 mois). */
   fromDate?: string;
-  /** Si true, ne traite QUE les events Lost (skip Damaged). Default false. */
+  /**
+   * @deprecated — laissé pour rétrocompat mais ignoré. Le filtrage des
+   * events claimables se fait maintenant sur la `disposition` Amazon
+   * (WAREHOUSE_DAMAGED, CUSTOMER_DAMAGED, DEFECTIVE, etc.), pas sur un
+   * event_type abstrait. Amazon ne publie jamais d'event_type "Lost"
+   * — les pertes sont des Shipments à quantity négative non balancés.
+   */
   lostOnly?: boolean;
 } = {}): Promise<DetectionResult> {
   const cutoff =
     opts.fromDate ??
     new Date(Date.now() - MAX_DAYS_TO_CLAIM * 86_400_000).toISOString().slice(0, 10);
 
-  const eventTypes = opts.lostOnly ? ['Lost'] : ['Lost', 'Damaged'];
-
-  // 1. Charge tous les events Lost/Damaged dans la fenêtre
+  // 1. Charge tous les events Adjustments avec une disposition claimable
+  //    (= dégâts en entrepôt / chez le client / défectueux). C'est le
+  //    bon signal Amazon vs l'ancien filtre event_type IN ('Lost',
+  //    'Damaged') qui ne retournait jamais rien (Amazon n'utilise pas
+  //    ces noms-là dans le ledger réel).
   const ledgerEvents: LedgerEvent[] = [];
   let from = 0;
   while (true) {
     const { data, error } = await supabaseAdmin
       .from('amazon_inventory_ledger')
-      .select('id, event_date, sku, fnsku, asin, event_type, quantity, fulfillment_center, reference_id')
-      .in('event_type', eventTypes)
+      .select('id, event_date, sku, fnsku, asin, event_type, disposition, quantity, fulfillment_center, reference_id')
+      .eq('event_type', 'Adjustments')
+      .in('disposition', CLAIMABLE_DISPOSITIONS as unknown as string[])
       .gte('event_date', cutoff)
       .range(from, from + 999);
     if (error) throw new Error('ledger fetch: ' + error.message);
@@ -312,9 +338,16 @@ export async function detectMissingClaims(opts: {
     // au cost basis Amazon mars 2025. Sinon estimated_amount=null —
     // le user verra "coût inconnu" dans l'UI et saura qu'il faut
     // peupler amazon_sku_costs pour ce SKU avant de chiffrer le case.
+    //
+    // Ordre de fallback : SKU → FNSKU → ASIN. Le bridge MPP peuple les
+    // 3 colonnes pour chaque listing, donc l'ASIN sauve les SKUs legacy
+    // qui changent de format entre le ledger Amazon (`A260621-FBA`) et
+    // amazon_listings (`FBA-260621`) — l'ASIN est le seul identifiant
+    // stable pour le même article entre les deux côtés.
     const unitCost =
       (ev.sku && costCache.bySku.get(ev.sku)) ??
       (ev.fnsku && costCache.byFnsku.get(ev.fnsku)) ??
+      (ev.asin && costCache.byAsin.get(ev.asin)) ??
       null;
     const estimatedAmount = unitCost != null ? unitCost * qty : null;
 
@@ -324,13 +357,19 @@ export async function detectMissingClaims(opts: {
 
     const payload = buildClaimPayload(ev, qty, estimatedAmount ?? 0);
 
+    // event_type stocké = la disposition réelle (WAREHOUSE_DAMAGED,
+    // CUSTOMER_DAMAGED, etc.) plutôt que l'event_type Amazon générique
+    // "Adjustments" — c'est cette info qui dit pourquoi on réclame, et
+    // qui guide le texte du case dans Seller Central.
+    const claimReason = ev.disposition ?? ev.event_type;
+
     candidatesToUpsert.push({
       ledger_event_id: ev.id,
       sku: ev.sku,
       fnsku: ev.fnsku,
       asin: ev.asin,
       event_date: ev.event_date,
-      event_type: ev.event_type,
+      event_type: claimReason,
       quantity: qty,
       fulfillment_center: ev.fulfillment_center,
       reference_id: ev.reference_id,
@@ -346,10 +385,10 @@ export async function detectMissingClaims(opts: {
       result.total_estimated_amount += estimatedAmount;
     }
     const bucket =
-      result.by_event_type[ev.event_type] || { count: 0, estimated_amount: 0 };
+      result.by_event_type[claimReason] || { count: 0, estimated_amount: 0 };
     bucket.count += qty;
     if (estimatedAmount != null) bucket.estimated_amount += estimatedAmount;
-    result.by_event_type[ev.event_type] = bucket;
+    result.by_event_type[claimReason] = bucket;
   }
 
   // 5. Bulk upsert des candidates (idempotent par ledger_event_id)
