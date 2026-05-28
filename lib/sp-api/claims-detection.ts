@@ -189,25 +189,49 @@ function buildClaimPayload(
   qty: number,
   estimatedAmount: number,
 ): Record<string, unknown> {
-  const eventTypeLabel = event.event_type;
+  // Use the actual Amazon disposition (WAREHOUSE_DAMAGED etc.) in the
+  // subject — Seller Central agents route faster when they see the
+  // exact ledger label.
+  const disposition = event.disposition ?? event.event_type;
+
+  // Lien vers le formulaire Contact Us du Seller Central CA. Le seller
+  // arrive directement sur le widget de création de case ; il choisit
+  // "Fulfillment by Amazon" → "FBA issue" → "Damaged or lost inventory"
+  // puis colle subject + body.
   const sellerCentralUrl =
-    'https://sellercentral.amazon.ca/help/hub/reference/200213130'; // FBA Reimbursement page
-  const caseSubject = `Reimbursement request - ${eventTypeLabel} - SKU ${event.sku} - ${qty} unit(s)`;
+    'https://sellercentral.amazon.ca/help/center/contactus';
+
+  // Reimbursement page officielle (mars 2025) pour citer la politique.
+  const policyUrl =
+    'https://sellercentral.amazon.com/gp/help/external/G200213130';
+
+  const caseSubject = `Reimbursement request — ${disposition} — ASIN ${event.asin ?? event.sku} — ${qty} unit(s)`;
+
+  // Texte cost-basis aligné sur la politique Amazon mars 2025
+  // (reimbursement at sourcing/manufacturing cost, not selling price).
+  // Mentionne explicitement que les invoices fournisseur sont
+  // disponibles sur demande — Amazon les exige fréquemment.
+  const valueLine =
+    estimatedAmount > 0
+      ? `- Estimated sourcing cost (per the March 2025 FBA reimbursement policy): ${estimatedAmount.toFixed(2)} CAD (${(estimatedAmount / qty).toFixed(2)} CAD × ${qty} units)`
+      : `- Sourcing cost: TBD (supplier invoice available on request)`;
+
   const caseBody = `Hello Amazon Support,
 
-I am requesting an inventory reimbursement for the following event recorded in my Inventory Ledger Detail report:
+I am requesting an inventory reimbursement for the following Adjustments event recorded in my Inventory Ledger Detail report. Per the FBA inventory reimbursement policy updated March 10, 2025 (${policyUrl}), reimbursement should reflect the product sourcing/manufacturing cost.
 
 - Event Date: ${event.event_date}
-- Event Type: ${eventTypeLabel}
-- SKU: ${event.sku || '(unknown)'}
-- FNSKU: ${event.fnsku || '(unknown)'}
-- ASIN: ${event.asin || '(unknown)'}
+- Disposition: ${disposition}
+- Amazon Event Type: ${event.event_type}
+- SKU (seller): ${event.sku ?? '(unknown)'}
+- FNSKU: ${event.fnsku ?? '(unknown)'}
+- ASIN: ${event.asin ?? '(unknown)'}
 - Quantity affected: ${qty}
-- Fulfillment Center: ${event.fulfillment_center || '(unknown)'}
-- Reference ID: ${event.reference_id || '(none)'}
-- Estimated value: ${estimatedAmount.toFixed(2)} CAD (based on 90-day average selling price)
+- Fulfillment Center: ${event.fulfillment_center ?? '(unknown)'}
+- Reference ID: ${event.reference_id ?? '(none)'}
+${valueLine}
 
-I do not see a corresponding reimbursement in my reimbursement history. Could you please investigate and process the reimbursement?
+I do not see a corresponding reimbursement in my reimbursement history. Supplier invoice and sourcing cost documentation are available upon request. Could you please investigate this event and process the reimbursement?
 
 Thank you,
 Mathias Power Parts`;
@@ -216,7 +240,12 @@ Mathias Power Parts`;
     case_subject: caseSubject,
     case_body: caseBody,
     seller_central_url: sellerCentralUrl,
-    suggested_email_to: 'fba-claim@amazon.ca', // ou via Help → Contact Us in Seller Central
+    policy_url: policyUrl,
+    // Suggested navigation in Seller Central :
+    //   Help → Contact us → Selling on Amazon → Fulfillment by Amazon (FBA)
+    //   → FBA issue → "Damaged or lost inventory"
+    suggested_navigation:
+      'Seller Central → Help → Contact us → Selling on Amazon → FBA → FBA issue → "Damaged or lost inventory"',
   };
 }
 

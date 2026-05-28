@@ -380,6 +380,15 @@ export default function AmazonSpApiHub() {
             }
           />
           <ActionCard
+            title="💸 Page Claims (workflow batch)"
+            description="Ouvre la page de gestion des claims FBA : liste les candidats Damaged/Defective non remboursés, génère subject + body prêts à coller dans Seller Central, marque envoyé en DB. Vérifie d'abord avoir lancé Detect claims pour peupler la liste."
+            color="#f59e0b"
+            busy={false}
+            onClick={() => {
+              window.location.href = '/amazon-sp-api/claims';
+            }}
+          />
+          <ActionCard
             title="🔍 Ping SP-API (diagnostic)"
             description="Test rapide (<5s) : vérifie env vars + LWA token + 1 appel SP-API léger. À utiliser quand un sync rate pour savoir si c'est la config ou le report."
             color="#10b981"
