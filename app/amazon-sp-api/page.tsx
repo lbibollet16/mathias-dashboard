@@ -407,6 +407,15 @@ export default function AmazonSpApiHub() {
             }}
           />
           <ActionCard
+            title="💰 Sourcing Cost Bulk Enricher"
+            description="Drop le XLSX Amazon 'Bulk Manage Sourcing Cost' téléchargé depuis le IDR Portal, on remplit automatiquement la colonne Seller New Cost avec nos vrais costs MPP. Te download le fichier enrichi prêt à uploader. Levier #1 pour récupérer les sous-payments d'auto-reimbursements (~25-35 K CAD potentiel sur 18m)."
+            color="#ec4899"
+            busy={false}
+            onClick={() => {
+              window.location.href = '/amazon-sp-api/sourcing-cost';
+            }}
+          />
+          <ActionCard
             title="🔍 Ping SP-API (diagnostic)"
             description="Test rapide (<5s) : vérifie env vars + LWA token + 1 appel SP-API léger. À utiliser quand un sync rate pour savoir si c'est la config ou le report."
             color="#10b981"
