@@ -210,8 +210,16 @@ export async function spApiCall<T = unknown>(req: SPAPIRequest): Promise<T> {
     const rlHeader = res.headers.get('x-amzn-ratelimit-limit');
     const rl = rlHeader ? Number.parseFloat(rlHeader) : NaN;
     if (retriable && attempt < retries) {
+      // baseDelay = seconds-per-token (réciproque du refill rate).
+      // Pour POST /reports : rl=0.0167 → baseDelay = 60s.
+      // Pour endpoints classiques : rl=1-10 → baseDelay = 100-1000ms.
+      //
+      // Cap historique à 10s = bug : tuait le retry sur POST /reports
+      // (re-tirait avant que le bucket ne se remplisse). Cap à 120s
+      // pour respecter le vrai rate limit Amazon sans bloquer trop
+      // longtemps en cas de bug rate-header.
       const baseDelay = Number.isFinite(rl) && rl > 0 ? 1000 / rl : 500 * 2 ** attempt;
-      const delay = Math.min(baseDelay + Math.random() * 250, 10_000);
+      const delay = Math.min(baseDelay + Math.random() * 250, 120_000);
       await new Promise((r) => setTimeout(r, delay));
       attempt++;
       continue;
