@@ -37,6 +37,7 @@ export default function SourcingCostPage() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [importSummary, setImportSummary] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -47,11 +48,37 @@ export default function SourcingCostPage() {
     });
   }, []);
 
+  async function runImport() {
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    setImportSummary(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/amazon/sourcing-cost/import-from-xlsx', {
+        method: 'POST',
+        body: fd,
+      });
+      const body = await res.json();
+      if (!res.ok || !body.ok) {
+        setError(body.error || `HTTP ${res.status}`);
+        return;
+      }
+      setImportSummary(body);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runEnrich() {
     if (!file) return;
     setBusy(true);
     setError(null);
     setSummary(null);
+    setImportSummary(null);
     try {
       const fd = new FormData();
       fd.append('file', file);
@@ -202,24 +229,51 @@ export default function SourcingCostPage() {
           )}
         </div>
 
-        <button
-          onClick={runEnrich}
-          disabled={!file || busy}
-          style={{
-            background: 'rgba(245, 158, 11, 0.85)',
-            border: 'none',
-            color: '#0f172a',
-            padding: '10px 20px',
-            borderRadius: 8,
-            fontSize: 14,
-            fontWeight: 700,
-            cursor: file && !busy ? 'pointer' : 'not-allowed',
-            opacity: file && !busy ? 1 : 0.5,
-            width: '100%',
-          }}
-        >
-          {busy ? '⏳ Enrichissement en cours…' : '✨ Enrichir + télécharger'}
-        </button>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+          <button
+            onClick={runEnrich}
+            disabled={!file || busy}
+            style={{
+              background: 'rgba(245, 158, 11, 0.85)',
+              border: 'none',
+              color: '#0f172a',
+              padding: '10px 20px',
+              borderRadius: 8,
+              fontSize: 14,
+              fontWeight: 700,
+              cursor: file && !busy ? 'pointer' : 'not-allowed',
+              opacity: file && !busy ? 1 : 0.5,
+              flex: 2,
+            }}
+          >
+            {busy ? '⏳ En cours…' : '✨ Enrichir + télécharger'}
+          </button>
+          <button
+            onClick={runImport}
+            disabled={!file || busy}
+            title="Importe dans amazon_sku_costs les rows où Source=SELLER (= costs déjà soumis à Amazon dans le passé qu'on a perdus côté MPP). Élargit le référentiel pour les prochaines vagues d'enrichissement."
+            style={{
+              background: 'rgba(99, 102, 241, 0.85)',
+              border: 'none',
+              color: '#e2e8f0',
+              padding: '10px 16px',
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: file && !busy ? 'pointer' : 'not-allowed',
+              opacity: file && !busy ? 1 : 0.5,
+              flex: 1,
+            }}
+          >
+            📥 Import-back vers MPP
+          </button>
+        </div>
+        <p style={{ fontSize: 10, color: '#64748b', margin: '0 0 12px 0', lineHeight: 1.5 }}>
+          <strong>Enrichir</strong> = fill Seller New Cost depuis MPP, te download le file enrichi.{' '}
+          <strong>Import-back</strong> = scanne le file pour les costs déjà
+          soumis à Amazon (src=SELLER) et les rajoute dans notre DB MPP.
+          À faire 1× pour récupérer les ~225 ASINs hors-MPP.
+        </p>
 
         {error && (
           <div
@@ -325,6 +379,56 @@ export default function SourcingCostPage() {
               vient d&apos;être téléchargé dans Downloads. Retourne sur
               Seller Central, click <strong>Upload file</strong>, choisis
               ce fichier, puis <strong>Submit for review</strong>.
+            </p>
+          </div>
+        )}
+
+        {importSummary && (
+          <div
+            style={{
+              marginTop: 20,
+              padding: 16,
+              background: 'rgba(99, 102, 241, 0.12)',
+              border: '1px solid rgba(99, 102, 241, 0.4)',
+              borderRadius: 12,
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#a5b4fc', marginBottom: 10 }}>
+              📥 Import-back terminé
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: 10,
+                fontSize: 13,
+              }}
+            >
+              <div>
+                <div style={{ color: '#94a3b8', fontSize: 11 }}>✨ Importés dans MPP</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: '#a5b4fc' }}>
+                  {String(importSummary.inserted ?? '?')}
+                </div>
+              </div>
+              <div>
+                <div style={{ color: '#94a3b8', fontSize: 11 }}>Skip : déjà en DB</div>
+                <div style={{ fontSize: 18 }}>{String(importSummary.skipped_existing_in_db ?? '?')}</div>
+              </div>
+              <div>
+                <div style={{ color: '#94a3b8', fontSize: 11 }}>Skip : src=AMAZON (non SELLER)</div>
+                <div style={{ fontSize: 18 }}>{String(importSummary.skipped_not_seller_source ?? '?')}</div>
+              </div>
+              <div>
+                <div style={{ color: '#94a3b8', fontSize: 11 }}>Skip : cost invalide</div>
+                <div style={{ fontSize: 18 }}>{String(importSummary.skipped_zero_or_invalid ?? '?')}</div>
+              </div>
+            </div>
+            <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 12 }}>
+              ✅ Notre référentiel <code>amazon_sku_costs</code> a été enrichi.
+              Maintenant tu peux click <strong>✨ Enrichir + télécharger</strong> sur
+              le même fichier (ou re-download depuis Amazon pour avoir un
+              snapshot frais) — le prochain enrichissement aura accès à
+              beaucoup plus de costs.
             </p>
           </div>
         )}
