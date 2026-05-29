@@ -83,11 +83,21 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // /!\ Le XLSX Amazon contient parfois plusieurs rows pour le même
+  // ASIN (variants, FNSKU différents pour la même ASIN principale).
+  // Postgres refuse "ON CONFLICT DO UPDATE command cannot affect row a
+  // second time" si on upsert 2 fois la même PK dans un seul batch.
+  // On dédoublonne au moment du push en gardant la 1re occurrence
+  // valide rencontrée par ASIN — c'est OK car les variants partagent
+  // le même cost approved par Amazon dans 99% des cas.
+  const seenSkus = new Set<string>();
+
   const toUpsert: Array<Record<string, unknown>> = [];
   let skippedNotSeller = 0;
   let skippedZero = 0;
   let skippedExisting = 0;
   let skippedNonCAD = 0;
+  let skippedDuplicateInFile = 0;
   const now = new Date().toISOString();
 
   for (let i = 1; i < rows.length; i++) {
@@ -118,6 +128,14 @@ export async function POST(request: NextRequest) {
       skippedNonCAD++;
       continue;
     }
+    // Dédup par sku (= asin). Si on a déjà collecté cette ASIN dans
+    // le batch, on skip — l'upsert plante sinon.
+    if (seenSkus.has(asin)) {
+      skippedDuplicateInFile++;
+      continue;
+    }
+    seenSkus.add(asin);
+
     const fnsku = fnskuIdx >= 0 && row[fnskuIdx] ? String(row[fnskuIdx]).trim() : null;
     // sku PK : on n'a pas de seller_sku ici, donc on utilise l'ASIN
     // comme primary key (cohérent avec le format des autres rows où
@@ -150,11 +168,15 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     ok: errors.length === 0,
+    // `error` (singulier) pour que l'UI affiche le 1er message au lieu
+    // d'un générique "HTTP 200" quand errors[] est rempli.
+    error: errors[0] ?? undefined,
     inserted,
     skipped_existing_in_db: skippedExisting,
     skipped_not_seller_source: skippedNotSeller,
     skipped_zero_or_invalid: skippedZero,
     skipped_non_cad: skippedNonCAD,
+    skipped_duplicate_in_file: skippedDuplicateInFile,
     total_rows: rows.length - 1,
     errors,
   });
