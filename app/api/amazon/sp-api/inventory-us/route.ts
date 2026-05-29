@@ -19,7 +19,9 @@ import { supabaseAdmin } from '@/lib/supabase';
  */
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300;
+// 800s pour absorber jusqu'à 3 retries de 60s sur POST /reports + le
+// polling du report + le téléchargement (Fluid Compute supporte 800s).
+export const maxDuration = 800;
 
 const MARKETPLACE_US = 'ATVPDKIKX0DER';
 const FBA_INVENTORY_REPORT_TYPE = 'GET_FBA_MYI_ALL_INVENTORY_DATA';
