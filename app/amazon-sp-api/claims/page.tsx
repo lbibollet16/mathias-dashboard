@@ -33,6 +33,12 @@ interface ClaimCandidate {
   eligible_to_claim: boolean;
   status: string;
   claim_payload: {
+    // Amazon "My issue is not listed" form a 4 fields ; on en pré-remplit
+    // 3 (le 4e étant Upload Files qu'on laisse vide pour la 1re vague).
+    amazon_field1_what_help?: string;
+    amazon_field2_steps_taken?: string;
+    amazon_field3_references?: string;
+    // Legacy — utilisé seulement pour identifier le case dans la liste.
     case_subject?: string;
     case_body?: string;
     seller_central_url?: string;
@@ -501,8 +507,23 @@ function WorkflowCard({
   alreadySubmitted: boolean;
   onClose: () => void;
 }) {
-  const subject = candidate.claim_payload?.case_subject ?? '';
-  const body = candidate.claim_payload?.case_body ?? '';
+  // Les 3 champs alignés sur le formulaire "My issue is not listed"
+  // d'Amazon Seller Central. Fallback sur le body legacy si l'event a
+  // été détecté avant que ces champs existent (rétrocompat).
+  const field1 =
+    candidate.claim_payload?.amazon_field1_what_help ??
+    candidate.claim_payload?.case_body ??
+    '';
+  const field2 =
+    candidate.claim_payload?.amazon_field2_steps_taken ??
+    'I reviewed my Inventory Ledger Detail report (GET_LEDGER_DETAIL_VIEW_DATA) for this event and verified that no corresponding reimbursement appears in my Reimbursements report. The 30-day claim waiting period has elapsed. Supplier invoice for the affected SKU is available on request.';
+  // Si le payload n'a pas le champ 3 pré-calculé, on assemble depuis les
+  // identifiants disponibles du candidate row.
+  const field3 =
+    candidate.claim_payload?.amazon_field3_references ??
+    [candidate.asin, candidate.fnsku, candidate.sku, candidate.reference_id]
+      .filter((s): s is string => typeof s === 'string' && s.length > 0)
+      .join(', ');
   const url =
     candidate.claim_payload?.seller_central_url ??
     'https://sellercentral.amazon.ca/help/center/contactus';
@@ -566,17 +587,48 @@ function WorkflowCard({
         </strong>
       </div>
 
+      {/* Bandeau d'instruction Seller Central pour rappeler le bon chemin */}
+      <div
+        style={{
+          padding: 10,
+          marginBottom: 14,
+          background: 'rgba(245, 158, 11, 0.12)',
+          border: '1px solid rgba(245, 158, 11, 0.35)',
+          borderRadius: 8,
+          fontSize: 11,
+          color: '#fde68a',
+          lineHeight: 1.5,
+        }}
+      >
+        📍 <strong>Dans Seller Central</strong> : Help → Contact us →
+        Selling on Amazon → <em>Manage support cases</em> → cherche dans la
+        liste en bas et clique le bouton sombre <strong>&laquo; My issue is
+        not listed &raquo;</strong>. Le formulaire ouvre 4 champs — colle
+        chacun ci-dessous au champ correspondant.
+      </div>
+
       <Section
-        label="📋 Subject Seller Central"
-        text={subject}
-        onCopy={() => copy(subject, 'Subject')}
-      />
-      <Section
-        label="📝 Body (à coller dans le case)"
-        text={body}
-        onCopy={() => copy(body, 'Body')}
+        label="📋 Champ 1 — What do you need help with?"
+        text={field1}
+        onCopy={() => copy(field1, 'Champ 1 (What need help)')}
         multiline
       />
+      <Section
+        label="📋 Champ 2 — What steps have you taken already?"
+        text={field2}
+        onCopy={() => copy(field2, 'Champ 2 (Steps taken)')}
+        multiline
+      />
+      <Section
+        label="📋 Champ 3 — Reference numbers (Optional)"
+        text={field3}
+        onCopy={() => copy(field3, 'Champ 3 (References)')}
+      />
+      <div style={{ fontSize: 10, color: '#64748b', marginTop: -8, marginBottom: 12 }}>
+        📎 <strong>Champ 4 (Upload files)</strong> : laisse vide pour la 1ʳᵉ
+        soumission. Si Amazon demande la facture supplier en réponse au
+        case, tu pourras l&apos;uploader à ce moment-là.
+      </div>
 
       <div
         style={{

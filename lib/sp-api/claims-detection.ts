@@ -194,10 +194,6 @@ function buildClaimPayload(
   // exact ledger label.
   const disposition = event.disposition ?? event.event_type;
 
-  // Lien vers le formulaire Contact Us du Seller Central CA. Le seller
-  // arrive directement sur le widget de création de case ; il choisit
-  // "Fulfillment by Amazon" → "FBA issue" → "Damaged or lost inventory"
-  // puis colle subject + body.
   const sellerCentralUrl =
     'https://sellercentral.amazon.ca/help/center/contactus';
 
@@ -205,20 +201,25 @@ function buildClaimPayload(
   const policyUrl =
     'https://sellercentral.amazon.com/gp/help/external/G200213130';
 
-  const caseSubject = `Reimbursement request — ${disposition} — ASIN ${event.asin ?? event.sku} — ${qty} unit(s)`;
+  // ─────────────────────────────────────────────────────────────────────
+  // Amazon Seller Central "My issue is not listed" form a 4 separate
+  // fields. We pre-generate one copy-pasteable string per field so the
+  // operator can paste each into the matching textbox without manual
+  // reshuffling. Order : champ 1 (problème), champ 2 (étapes déjà
+  // prises), champ 3 (références CSV), champ 4 (uploads — laissé vide,
+  // facture supplier sur demande Amazon).
+  // ─────────────────────────────────────────────────────────────────────
 
-  // Texte cost-basis aligné sur la politique Amazon mars 2025
-  // (reimbursement at sourcing/manufacturing cost, not selling price).
-  // Mentionne explicitement que les invoices fournisseur sont
-  // disponibles sur demande — Amazon les exige fréquemment.
   const valueLine =
     estimatedAmount > 0
       ? `- Estimated sourcing cost (per the March 2025 FBA reimbursement policy): ${estimatedAmount.toFixed(2)} CAD (${(estimatedAmount / qty).toFixed(2)} CAD × ${qty} units)`
       : `- Sourcing cost: TBD (supplier invoice available on request)`;
 
-  const caseBody = `Hello Amazon Support,
+  // Champ 1 : "What do you need help with?" — la description du problème
+  // sans en-tête ni signature, le formulaire encadre déjà la requête.
+  const amazonField1 = `Reimbursement request for an Adjustments event recorded in my Inventory Ledger Detail report, with no matching entry in my Reimbursements report.
 
-I am requesting an inventory reimbursement for the following Adjustments event recorded in my Inventory Ledger Detail report. Per the FBA inventory reimbursement policy updated March 10, 2025 (${policyUrl}), reimbursement should reflect the product sourcing/manufacturing cost.
+Per the FBA inventory reimbursement policy updated March 10, 2025 (${policyUrl}), reimbursement should reflect the product sourcing/manufacturing cost.
 
 - Event Date: ${event.event_date}
 - Disposition: ${disposition}
@@ -231,21 +232,54 @@ I am requesting an inventory reimbursement for the following Adjustments event r
 - Reference ID: ${event.reference_id ?? '(none)'}
 ${valueLine}
 
-I do not see a corresponding reimbursement in my reimbursement history. Supplier invoice and sourcing cost documentation are available upon request. Could you please investigate this event and process the reimbursement?
+Could you please investigate this event and process the reimbursement under the cost-basis policy?`;
+
+  // Champ 2 : "What steps have you taken already?" — résume notre due
+  // diligence avant d'ouvrir le case, pour montrer qu'on a vérifié les
+  // reports officiels.
+  const amazonField2 =
+    'I reviewed my Inventory Ledger Detail report (GET_LEDGER_DETAIL_VIEW_DATA) for this event and verified that no corresponding reimbursement appears in my Reimbursements report (GET_FBA_REIMBURSEMENTS_DATA). The 30-day claim waiting period has elapsed. Supplier invoice for the affected SKU is available on request.';
+
+  // Champ 3 : "Reference numbers (Optional)" — Amazon attend du
+  // virgule-séparé (cf. example "B01234567X, FBA1234567X,
+  // 123-1234567-1234567"). On donne ASIN + FNSKU + SKU + reference_id
+  // dans cet ordre.
+  const refs = [
+    event.asin,
+    event.fnsku,
+    event.sku,
+    event.reference_id,
+  ].filter((s): s is string => typeof s === 'string' && s.length > 0);
+  const amazonField3 = refs.join(', ');
+
+  // Subject + body legacy gardés pour rétrocompat de toute UI ou
+  // intégration externe qui les consommait. Le subject est aussi utile
+  // côté UI pour identifier le case dans la liste avant de l'ouvrir.
+  const caseSubject = `Reimbursement request — ${disposition} — ASIN ${event.asin ?? event.sku} — ${qty} unit(s)`;
+  const caseBody = `Hello Amazon Support,
+
+${amazonField1}
+
+${amazonField2}
 
 Thank you,
 Mathias Power Parts`;
 
   return {
+    // Nouveaux champs alignés sur le formulaire "My issue is not listed"
+    amazon_field1_what_help: amazonField1,
+    amazon_field2_steps_taken: amazonField2,
+    amazon_field3_references: amazonField3,
+    // Subject + body composites (legacy) gardés en sortie pour ne
+    // pas casser de consommateur existant.
     case_subject: caseSubject,
     case_body: caseBody,
     seller_central_url: sellerCentralUrl,
     policy_url: policyUrl,
-    // Suggested navigation in Seller Central :
-    //   Help → Contact us → Selling on Amazon → Fulfillment by Amazon (FBA)
-    //   → FBA issue → "Damaged or lost inventory"
+    // Le chemin réel à suivre dans Seller Central — découvert pendant
+    // les premiers tests utilisateur 2026-05-28.
     suggested_navigation:
-      'Seller Central → Help → Contact us → Selling on Amazon → FBA → FBA issue → "Damaged or lost inventory"',
+      'Seller Central → Help → Contact us → Selling on Amazon (Canada) → "Submit a reimbursement claim dispute"? NON — utiliser le bouton "My issue is not listed" en bas de la liste des catégories pour avoir le formulaire libre 4-champs.',
   };
 }
 
