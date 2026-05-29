@@ -44,12 +44,16 @@ interface ClaimCandidate {
     seller_central_url?: string;
     policy_url?: string;
     suggested_navigation?: string;
+    // Métadonnées de scoring (depuis l'extension VendorReturns/CustomerReturns)
+    confidence?: 'high' | 'medium' | 'low';
+    source_event_type?: string;
   } | null;
   sent_at: string | null;
   amazon_case_id: string | null;
 }
 
 type FilterStatus = 'pending' | 'sent' | 'paid' | 'all';
+type FilterConfidence = 'high' | 'high+medium' | 'all';
 
 export default function ClaimsPage() {
   const [authChecked, setAuthChecked] = useState(false);
@@ -60,6 +64,7 @@ export default function ClaimsPage() {
   const [totalCAD, setTotalCAD] = useState(0);
 
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('pending');
+  const [filterConfidence, setFilterConfidence] = useState<FilterConfidence>('high+medium');
   const [filterHasCost, setFilterHasCost] = useState(true);
   const [filterMinAmount, setFilterMinAmount] = useState(10);
   const [filterEligibleOnly, setFilterEligibleOnly] = useState(true);
@@ -91,6 +96,7 @@ export default function ClaimsPage() {
         eligible: filterEligibleOnly ? 'true' : 'all',
         has_cost: filterHasCost ? 'true' : 'false',
         min_amount: String(filterMinAmount),
+        confidence: filterConfidence,
         limit: '500',
       });
       const res = await fetch('/api/amazon/claims/list?' + qs.toString());
@@ -113,7 +119,7 @@ export default function ClaimsPage() {
     if (!authed) return;
     void loadCandidates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authed, filterStatus, filterHasCost, filterMinAmount, filterEligibleOnly]);
+  }, [authed, filterStatus, filterHasCost, filterMinAmount, filterEligibleOnly, filterConfidence]);
 
   async function markBatchSent() {
     const idsToMark = Array.from(submittedIds);
@@ -182,6 +188,8 @@ export default function ClaimsPage() {
             onMinAmount={setFilterMinAmount}
             eligibleOnly={filterEligibleOnly}
             onEligibleOnly={setFilterEligibleOnly}
+            confidence={filterConfidence}
+            onConfidence={setFilterConfidence}
             loading={loading}
           />
         )}
@@ -309,6 +317,8 @@ function FilterBar({
   onMinAmount,
   eligibleOnly,
   onEligibleOnly,
+  confidence,
+  onConfidence,
   loading,
 }: {
   status: FilterStatus;
@@ -319,6 +329,8 @@ function FilterBar({
   onMinAmount: (n: number) => void;
   eligibleOnly: boolean;
   onEligibleOnly: (b: boolean) => void;
+  confidence: FilterConfidence;
+  onConfidence: (c: FilterConfidence) => void;
   loading: boolean;
 }) {
   return (
@@ -348,6 +360,21 @@ function FilterBar({
           <option value="sent">sent</option>
           <option value="paid">paid</option>
           <option value="all">tous</option>
+        </select>
+      </label>
+      <label
+        title="High = Adjustments (paiement quasi-systématique). Medium = CustomerReturns damaged (souvent payé). Low = VendorReturns damaged (paiement moins fréquent — Amazon nous renvoie l'unité). High+medium = sweet spot."
+      >
+        Confidence :{' '}
+        <select
+          value={confidence}
+          onChange={(e) => onConfidence(e.target.value as FilterConfidence)}
+          style={selectStyle}
+          disabled={loading}
+        >
+          <option value="high">🟢 high seulement (Adjustments)</option>
+          <option value="high+medium">🟢🟡 high + medium (recommandé)</option>
+          <option value="all">tous (incluant low 🟠)</option>
         </select>
       </label>
       <label>
@@ -471,6 +498,7 @@ function CandidateRow({
       <span style={{ width: 24 }}>{submitted ? '✅' : '📋'}</span>
       <span style={{ fontFamily: 'monospace', minWidth: 140 }}>{c.sku ?? c.asin ?? '?'}</span>
       <span style={{ minWidth: 130, color: '#94a3b8' }}>{c.event_type}</span>
+      <ConfidenceBadge confidence={c.claim_payload?.confidence} />
       <span style={{ minWidth: 90, color: '#94a3b8' }}>{c.event_date}</span>
       <span style={{ minWidth: 50, color: '#94a3b8' }}>×{c.quantity}</span>
       <span
@@ -577,12 +605,20 @@ function WorkflowCard({
           fontSize: 12,
           fontFamily: 'monospace',
           color: '#a5f3fc',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          flexWrap: 'wrap',
         }}
       >
-        SKU: {candidate.sku ?? '?'} · FNSKU: {candidate.fnsku ?? '?'} · ASIN:{' '}
-        {candidate.asin ?? '?'} · {candidate.event_type} ×{candidate.quantity} ·{' '}
-        {candidate.event_date} · {candidate.days_since_event} jours depuis ·{' '}
-        <strong style={{ color: '#fcd34d' }}>
+        <ConfidenceBadge confidence={candidate.claim_payload?.confidence} />
+        <span>SKU: {candidate.sku ?? '?'}</span>
+        <span>FNSKU: {candidate.fnsku ?? '?'}</span>
+        <span>ASIN: {candidate.asin ?? '?'}</span>
+        <span>{candidate.event_type} ×{candidate.quantity}</span>
+        <span>{candidate.event_date}</span>
+        <span>{candidate.days_since_event} j</span>
+        <strong style={{ color: '#fcd34d', marginLeft: 'auto' }}>
           {candidate.estimated_amount?.toFixed(2) ?? '?'} CAD
         </strong>
       </div>
@@ -664,6 +700,47 @@ function WorkflowCard({
           'Seller Central → Help → Contact us → FBA → FBA issue → Damaged or lost inventory'}
       </p>
     </div>
+  );
+}
+
+/**
+ * Petit badge coloré indiquant la probabilité de succès du claim.
+ * Dérivé de l'event_type Amazon source dans claim_payload.confidence.
+ *   - high   → Adjustments (paiement quasi-systématique)
+ *   - medium → CustomerReturns + damaged (Amazon paye souvent)
+ *   - low    → VendorReturns + damaged (Amazon rembourse moins
+ *              fréquemment parce qu'ils nous renvoient l'unité)
+ */
+function ConfidenceBadge({
+  confidence,
+}: {
+  confidence: 'high' | 'medium' | 'low' | undefined;
+}) {
+  if (!confidence) {
+    return <span style={{ minWidth: 70 }} />;
+  }
+  const config: Record<string, { color: string; label: string; bg: string }> = {
+    high: { color: '#86efac', label: '✓ high', bg: 'rgba(34,197,94,0.15)' },
+    medium: { color: '#fcd34d', label: '~ med', bg: 'rgba(245,158,11,0.15)' },
+    low: { color: '#fca5a5', label: '⚠ low', bg: 'rgba(248,113,113,0.15)' },
+  };
+  const cfg = config[confidence];
+  return (
+    <span
+      style={{
+        minWidth: 70,
+        padding: '2px 8px',
+        background: cfg.bg,
+        color: cfg.color,
+        borderRadius: 6,
+        fontSize: 10,
+        fontWeight: 700,
+        textAlign: 'center',
+      }}
+      title={`Confidence ${confidence} — basé sur l'event_type Amazon source. High = Adjustments (~quasi-systématique). Medium = CustomerReturns damaged (souvent payé). Low = VendorReturns damaged (Amazon renvoie l'unité, paiement moins fréquent).`}
+    >
+      {cfg.label}
+    </span>
   );
 }
 

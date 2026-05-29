@@ -29,6 +29,10 @@ export async function GET(request: NextRequest) {
   const minAmountRaw = url.searchParams.get('min_amount');
   const minAmount = minAmountRaw != null ? Number(minAmountRaw) : null;
   const hasCost = url.searchParams.get('has_cost') === 'true';
+  // Confidence : 'high' | 'medium' | 'low' | 'high+medium' | 'all'
+  // Default 'high+medium' parce que les VendorReturns Low Confidence
+  // peuvent flooder la liste (500+ vs 192 Adjustments).
+  const confidence = url.searchParams.get('confidence') ?? 'high+medium';
   const order = url.searchParams.get('order') ?? 'amount_desc';
   const limit = Math.max(1, Math.min(500, Number(url.searchParams.get('limit') ?? 200)));
 
@@ -44,6 +48,20 @@ export async function GET(request: NextRequest) {
     q = q.gte('estimated_amount', minAmount);
   }
   if (hasCost) q = q.not('estimated_amount', 'is', null);
+
+  // Confidence filter — utilise le champ claim_payload->confidence
+  // (JSONB) au lieu d'une colonne dédiée pour éviter une migration.
+  // Postgres : claim_payload->>'confidence' renvoie le texte.
+  if (confidence === 'high') {
+    q = q.eq('claim_payload->>confidence', 'high');
+  } else if (confidence === 'medium') {
+    q = q.eq('claim_payload->>confidence', 'medium');
+  } else if (confidence === 'low') {
+    q = q.eq('claim_payload->>confidence', 'low');
+  } else if (confidence === 'high+medium') {
+    q = q.in('claim_payload->>confidence', ['high', 'medium']);
+  }
+  // 'all' = pas de filtre confidence
 
   switch (order) {
     case 'date_asc':

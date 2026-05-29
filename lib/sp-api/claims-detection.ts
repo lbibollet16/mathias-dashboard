@@ -44,6 +44,34 @@ const CLAIMABLE_DISPOSITIONS = [
   'CARRIER_DAMAGED',
 ] as const;
 
+// Event types qui peuvent matérialiser un claim selon Amazon. Élargi
+// après le debug ledger 28 mai 2026 qui révèle que les VendorReturns
+// et CustomerReturns avec disposition damagée ne sortent pas dans le
+// bucket "Adjustments" — Amazon route les retours abimés vers ces
+// catégories. Sur 18 mois, ça représente ~150-200 events additionnels.
+//
+// Confidence par type (sert à scorer la UI) :
+//   - 'Adjustments' : 🟢 high — pure perte d'inventaire en entrepôt
+//     Amazon. Quasi-acceptation systématique des claims.
+//   - 'CustomerReturns' + damaged disposition : 🟡 medium — Amazon a
+//     reçu un retour client cassé. Notre stock final est diminué.
+//     Amazon paie souvent mais pas systématiquement.
+//   - 'VendorReturns' + damaged disposition : 🟠 lower — Amazon nous
+//     renvoie l'unité abîmée (au lieu de la disposer). Amazon
+//     considère parfois que le retour physique est le "paiement". À
+//     soumettre si l'unité n'a jamais été reçue OU est inutilisable.
+const CLAIMABLE_EVENT_TYPES = [
+  'Adjustments',
+  'CustomerReturns',
+  'VendorReturns',
+] as const;
+
+const CONFIDENCE_BY_EVENT_TYPE: Record<string, 'high' | 'medium' | 'low'> = {
+  Adjustments: 'high',
+  CustomerReturns: 'medium',
+  VendorReturns: 'low',
+};
+
 interface LedgerEvent {
   id: number;
   event_date: string;
@@ -265,6 +293,12 @@ ${amazonField2}
 Thank you,
 Mathias Power Parts`;
 
+  // Confidence score : indique la probabilité de succès du claim selon
+  // le type d'event Amazon. Adjustments = paiement quasi-systématique,
+  // VendorReturns = Amazon nous renvoie l'unité donc paiement plus rare.
+  const confidence: 'high' | 'medium' | 'low' =
+    CONFIDENCE_BY_EVENT_TYPE[event.event_type] ?? 'medium';
+
   return {
     // Nouveaux champs alignés sur le formulaire "My issue is not listed"
     amazon_field1_what_help: amazonField1,
@@ -276,6 +310,11 @@ Mathias Power Parts`;
     case_body: caseBody,
     seller_central_url: sellerCentralUrl,
     policy_url: policyUrl,
+    // Métadonnées de scoring pour la UI : confidence dérivée de
+    // l'event_type Amazon, + l'event_type original pour différencier
+    // Adjustments / CustomerReturns / VendorReturns dans la liste.
+    confidence,
+    source_event_type: event.event_type,
     // Le chemin réel à suivre dans Seller Central — découvert pendant
     // les premiers tests utilisateur 2026-05-28.
     suggested_navigation:
@@ -322,7 +361,7 @@ export async function detectMissingClaims(opts: {
     const { data, error } = await supabaseAdmin
       .from('amazon_inventory_ledger')
       .select('id, event_date, sku, fnsku, asin, event_type, disposition, quantity, fulfillment_center, reference_id')
-      .eq('event_type', 'Adjustments')
+      .in('event_type', CLAIMABLE_EVENT_TYPES as unknown as string[])
       .in('disposition', CLAIMABLE_DISPOSITIONS as unknown as string[])
       .gte('event_date', cutoff)
       .range(from, from + 999);
