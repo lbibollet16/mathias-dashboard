@@ -97,7 +97,14 @@ export default function AmazonSpApiHub() {
   // Backfill chunked — fait N appels HTTP séquentiels d'1 mois chacun
   // pour contourner le timeout serverless Vercel (60-300s par fonction).
   // Chaque chunk étant ~60s, on reste safe sur tous les plans Vercel.
-  async function runBackfillChunked(monthsBack = 8) {
+  //
+  // smart : si true, on précharge la couverture via
+  // /api/amazon/ledger/coverage et on skip les mois ayant déjà ≥100
+  // events en DB. Indispensable pour ne pas brûler le rate-limit
+  // Amazon sur des mois déjà rattrapés (rate = 1 token/min, burst 15
+  // — chaque chunk consomme 1 token, et si on re-fetche Oct + Nov qui
+  // sont déjà OK on perd 2 tokens avant d'atteindre les vrais trous).
+  async function runBackfillChunked(monthsBack = 8, smart = false) {
     if (busy) return;
     setBusy('backfill');
     setError(null);
@@ -112,6 +119,48 @@ export default function AmazonSpApiHub() {
       const start = new Date(end);
       start.setDate(start.getDate() - 30);
       chunks.unshift({ from: start.toISOString(), to: end.toISOString() });
+    }
+
+    // Smart mode : skip chunks dont la fenêtre est déjà couverte en DB.
+    // On query la couverture par mois et on filtre les chunks qui
+    // chevauchent un mois ayant >= 100 events.
+    if (smart) {
+      try {
+        const covRes = await fetch('/api/amazon/ledger/coverage?months=12');
+        const cov = await covRes.json();
+        if (cov.ok && Array.isArray(cov.months)) {
+          const coveredMonths = new Set(
+            cov.months
+              .filter(
+                (m: { status: string; year_month: string }) => m.status === 'covered',
+              )
+              .map((m: { year_month: string }) => m.year_month),
+          );
+          const kept: typeof chunks = [];
+          for (const c of chunks) {
+            // year-month at chunk midpoint — proxy for "which month does
+            // this 30-day window mostly belong to".
+            const mid = new Date((new Date(c.from).getTime() + new Date(c.to).getTime()) / 2);
+            const ym = mid.toISOString().slice(0, 7);
+            if (!coveredMonths.has(ym)) kept.push(c);
+          }
+          // If smart mode prunes everything → display message and stop.
+          if (kept.length === 0) {
+            setBusy(null);
+            setResult({
+              mode: 'smart_backfill',
+              message: 'Tous les mois sont déjà couverts (≥100 events chacun). Rien à rattraper.',
+              coverage: cov.summary,
+            });
+            return;
+          }
+          chunks.length = 0;
+          chunks.push(...kept);
+        }
+      } catch {
+        // Coverage check failed — on continue avec tous les chunks plutôt
+        // que de bloquer le user.
+      }
     }
 
     setBackfillProgress({ total: chunks.length, current: 0, chunks: [], done: false });
@@ -321,11 +370,18 @@ export default function AmazonSpApiHub() {
           }}
         >
           <ActionCard
-            title="📚 Backfill ledger 8 mois (chunked)"
-            description="One-shot : télécharge l'historique sur 8 mois en 8 appels séquentiels d'1 mois chacun (~1 min/chunk = 8-10 min total). Évite les timeouts serverless. À faire UNE FOIS après le merge initial."
+            title="🧠 Smart backfill (mois manquants seulement)"
+            description="Check d'abord la couverture par mois en DB, puis ne fire les chunks SP-API QUE pour les mois avec <100 events. Économise tokens rate-limit Amazon (1/min) en sautant les mois déjà rattrapés. À utiliser après un 1er backfill partiel pour combler les trous."
+            color="#16a34a"
+            busy={busy === 'backfill'}
+            onClick={() => runBackfillChunked(8, true)}
+          />
+          <ActionCard
+            title="📚 Backfill ledger 8 mois (brut)"
+            description="One-shot : télécharge l'historique sur 8 mois en 8 appels séquentiels d'1 mois chacun (~1 min/chunk = 8-10 min total). Évite les timeouts serverless. À faire UNE FOIS au tout premier setup. Préférer le Smart backfill ensuite."
             color="#7c3aed"
             busy={busy === 'backfill'}
-            onClick={() => runBackfillChunked(8)}
+            onClick={() => runBackfillChunked(8, false)}
           />
           <ActionCard
             title="🔄 Sync 4 reports manuels"
