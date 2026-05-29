@@ -7127,6 +7127,9 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   const [mappingInput, setMappingInput] = useState<Record<string,string>>({})
   // ─ State Phase 2 : settlements ─
   const [settlementsList, setSettlementsList] = useState<any[]>([])
+  // Settlement en cours d'accumulation (live via SP-API Finances)
+  const [inProgress, setInProgress] = useState<any>(null)
+  const [loadingInProgress, setLoadingInProgress] = useState(false)
   const [filtLautopak, setFiltLautopak] = useState<'tous'|'pending'|'facture'>('tous')
   // Inclure les mini-ajustements Amazon sporadiques (< 500 CAD ou
   // période ≠ 14j). Désactivé par défaut pour matcher la vue Seller
@@ -7159,6 +7162,16 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
       await chargerAudits()
     } catch {}
     setLoading(false)
+  }
+
+  async function chargerInProgress() {
+    setLoadingInProgress(true)
+    try {
+      const r = await fetch('/api/amazon/settlements/in-progress')
+      const j = await r.json()
+      if (j.ok) setInProgress(j)
+    } catch {}
+    setLoadingInProgress(false)
   }
 
   async function chargerDetail(settlement_id: string) {
@@ -11490,6 +11503,69 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
             <div><span style={{color:sub}}>Net en attente : </span><strong style={{color:C.red}}>{fmt$(sommePending)}</strong></div>
           </div>
 
+          {/* ─── Settlement en cours (SP-API Finances) ─── */}
+          <div style={{background:card,borderRadius:10,border:`2px solid ${C.blue}`,padding:'14px 16px',marginBottom:10}}>
+            <div style={{display:'flex',gap:14,flexWrap:'wrap',alignItems:'center',justifyContent:'space-between',marginBottom:inProgress?10:0}}>
+              <div style={{fontWeight:900,color:C.blue,fontSize:14}}>
+                🔄 Settlement en cours / prochain dépôt
+                <span style={{fontSize:10,color:sub,fontWeight:600,marginLeft:8}}>(live SP-API Finances)</span>
+              </div>
+              <button onClick={chargerInProgress} disabled={loadingInProgress}
+                style={{padding:'6px 12px',borderRadius:14,border:`1px solid ${C.blue}`,background:C.blue+'22',color:C.blue,fontWeight:700,cursor:loadingInProgress?'wait':'pointer',fontSize:11}}>
+                {loadingInProgress ? '⏳ Chargement...' : (inProgress ? '🔁 Rafraîchir' : '⚡ Récupérer depuis Amazon')}
+              </button>
+            </div>
+            {inProgress?.open ? (
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:10}}>
+                <div>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Période</div>
+                  <div style={{fontSize:12,fontWeight:800,marginTop:2}}>
+                    {inProgress.open.period_start ? new Date(inProgress.open.period_start).toLocaleDateString('fr-CA',{month:'short',day:'numeric'}) : '—'}
+                    {' → '}
+                    {inProgress.open.period_end ? new Date(inProgress.open.period_end).toLocaleDateString('fr-CA',{month:'short',day:'numeric'}) : 'en cours'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Dépôt projeté</div>
+                  <div style={{fontSize:12,fontWeight:800,marginTop:2,color:C.blue}}>
+                    {inProgress.open.fund_transfer_date
+                      ? `🏦 ${new Date(inProgress.open.fund_transfer_date).toLocaleDateString('fr-CA',{month:'long',day:'numeric'})}`
+                      : inProgress.open.projected_deposit_date
+                        ? `~${new Date(inProgress.open.projected_deposit_date).toLocaleDateString('fr-CA',{month:'long',day:'numeric'})}`
+                        : '—'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Total estimé</div>
+                  <div style={{fontSize:14,fontWeight:900,marginTop:2,color:C.green}}>
+                    {inProgress.open.original_total != null
+                      ? `${Number(inProgress.open.original_total).toFixed(2)} ${inProgress.open.currency||''}`
+                      : 'En accumulation'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub}}>Statut</div>
+                  <div style={{fontSize:12,fontWeight:800,marginTop:2}}>
+                    <span style={{background:C.yellow+'22',color:C.yellow,padding:'2px 8px',borderRadius:10,fontSize:11}}>
+                      {inProgress.open.processing_status === 'Open' ? '⏳ Ouvert' : inProgress.open.processing_status}
+                    </span>
+                  </div>
+                </div>
+                <div style={{gridColumn:'1 / -1',fontSize:10,color:sub,fontFamily:'monospace',marginTop:2}}>
+                  Group ID : {inProgress.open.financial_event_group_id}
+                </div>
+              </div>
+            ) : inProgress && !inProgress.open ? (
+              <div style={{fontSize:11,color:sub,padding:'4px 0'}}>
+                ℹ️ Aucun cycle Open détecté. Amazon n'a pas encore ouvert le prochain cycle bi-hebdomadaire.
+              </div>
+            ) : (
+              <div style={{fontSize:11,color:sub,padding:'4px 0'}}>
+                Clique « Récupérer » pour interroger Amazon SP-API Finances et voir le cycle en cours d'accumulation.
+              </div>
+            )}
+          </div>
+
           {/* Filtres */}
           <div style={{background:card,borderRadius:10,border:`1px solid ${bdr}`,padding:'10px 14px',marginBottom:10,display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
             <input value={searchSettlement} onChange={e=>setSearchSettlement(e.target.value)} placeholder="🔍 N° settlement ou facture LAUTOPAK..."
@@ -11568,6 +11644,14 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                               : <span style={{background:C.yellow+'22',color:C.yellow,padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:700}}>⏳ En attente</span>
                             }
                           </div>
+                          <a
+                            href={`/api/amazon/settlements/bundle?id=${encodeURIComponent(s.settlement_id)}`}
+                            onClick={(e)=>e.stopPropagation()}
+                            download
+                            title="Télécharger le bundle XLSX 5 onglets (compta-ready)"
+                            style={{background:C.blue,color:'#fff',textDecoration:'none',padding:'6px 12px',borderRadius:10,fontSize:11,fontWeight:700,whiteSpace:'nowrap'}}>
+                            📥 Bundle XLSX
+                          </a>
                         </div>
 
                         {/* Détail déplié */}
