@@ -40,6 +40,11 @@ function isFbm(fulfillment_id: string | null): boolean { return fulfillment_id =
 export async function GET(req: NextRequest) {
   try {
     const id = req.nextUrl.searchParams.get('id')
+    // ?adjustments=included pour voir les mini-paiements Amazon (ajustements
+    // sporadiques < 500 CAD ou périodes ≠ 14j). Par défaut on les cache pour
+    // matcher la vue Seller Central manuelle de l'opérateur (1 settlement
+    // principal aux 14 jours).
+    const includeAdjustments = req.nextUrl.searchParams.get('adjustments') === 'included'
 
     if (!id) {
       // Liste: on enrichit chaque settlement avec total_net et nb_orders agrégés
@@ -54,12 +59,13 @@ export async function GET(req: NextRequest) {
       for (const s of settlements || []) {
         const { data: tx } = await supabaseAdmin
           .from('amazon_transactions')
-          .select('amount, fulfillment_id, order_id')
+          .select('amount, fulfillment_id, order_id, sku')
           .eq('settlement_id', s.settlement_id)
 
         let total_net = 0
         let fba_net = 0
         let fbm_net = 0
+        let dropship_kimpex_total = 0
         const orders = new Set<string>()
         for (const t of tx || []) {
           const a = Number(t.amount || 0)
@@ -67,17 +73,37 @@ export async function GET(req: NextRequest) {
           if (isFba(t.fulfillment_id))      fba_net += a
           else if (isFbm(t.fulfillment_id)) fbm_net += a
           if (t.order_id) orders.add(t.order_id)
+          if (typeof t.sku === 'string' && /^DSK-/i.test(t.sku)) {
+            dropship_kimpex_total += a
+          }
         }
+
+        // Heuristique "settlement principal" : période de 14 jours et
+        // montant ≥ 500 CAD. Les ajustements sporadiques d'Amazon ont des
+        // montants < 100 CAD ou des fenêtres aberrantes (140 jours, 42 jours).
+        const startMs = s.settlement_start ? new Date(s.settlement_start).getTime() : null
+        const endMs = s.settlement_end ? new Date(s.settlement_end).getTime() : null
+        const periodDays = startMs && endMs ? Math.round((endMs - startMs) / 86_400_000) : null
+        const isAdjustment =
+          Number(s.total_amount || 0) < 500 ||
+          (periodDays !== null && (periodDays < 12 || periodDays > 16))
+
         result.push({
           ...s,
           computed_net: total_net,
           computed_fba_net: fba_net,
           computed_fbm_net: fbm_net,
+          dropship_kimpex_total: Math.round(dropship_kimpex_total * 100) / 100,
+          period_days: periodDays,
+          is_adjustment: isAdjustment,
           nb_orders: orders.size,
           nb_transactions: (tx || []).length,
         })
       }
-      return NextResponse.json(result)
+      const filtered = includeAdjustments
+        ? result
+        : result.filter((s) => !s.is_adjustment)
+      return NextResponse.json(filtered)
     }
 
     // Détail d'un settlement
@@ -448,9 +474,34 @@ export async function GET(req: NextRequest) {
       sku_sans_prix: allLostMouvs.filter(m => m.lost_method === 'assume_1_par_ligne').length,
     }
 
+    // Total des ventes dropship Kimpex (DSK-*) pour balance compta :
+    // l'opérateur reçoit ce $ d'Amazon mais doit le reverser à Kimpex,
+    // donc c'est un revenu "passant" à isoler du net Mathias. On ne
+    // touche pas aux totals globaux (ils doivent matcher le dépôt
+    // bancaire Amazon) — juste un agrégat informatif.
+    let dropshipKimpexTotal = 0
+    let dropshipKimpexCount = 0
+    const dropshipKimpexSkus = new Set<string>()
+    for (const t of allTx) {
+      if (typeof t.sku === 'string' && /^DSK-/i.test(t.sku)) {
+        dropshipKimpexTotal += Number(t.amount || 0)
+        dropshipKimpexCount++
+        dropshipKimpexSkus.add(t.sku)
+      }
+    }
+
     return NextResponse.json({
       settlement,
-      totals: { brut: total_brut, fba: total_fba, fbm: total_fbm, nb_orders: orders.size, nb_transactions: allTx.length },
+      totals: {
+        brut: total_brut,
+        fba: total_fba,
+        fbm: total_fbm,
+        nb_orders: orders.size,
+        nb_transactions: allTx.length,
+        dropship_kimpex_total: Math.round(dropshipKimpexTotal * 100) / 100,
+        dropship_kimpex_count: dropshipKimpexCount,
+        dropship_kimpex_skus: [...dropshipKimpexSkus],
+      },
       breakdown: breakdownArr,
       top_skus: topSkus,
       orders: ordersArr,

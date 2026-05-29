@@ -7128,6 +7128,10 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   // ─ State Phase 2 : settlements ─
   const [settlementsList, setSettlementsList] = useState<any[]>([])
   const [filtLautopak, setFiltLautopak] = useState<'tous'|'pending'|'facture'>('tous')
+  // Inclure les mini-ajustements Amazon sporadiques (< 500 CAD ou
+  // période ≠ 14j). Désactivé par défaut pour matcher la vue Seller
+  // Central manuelle (1 settlement principal aux 14 jours).
+  const [showAdjustments, setShowAdjustments] = useState(false)
   const [searchSettlement, setSearchSettlement] = useState('')
   const [expandedSettlement, setExpandedSettlement] = useState<string|null>(null)
   const [detailCache, setDetailCache] = useState<Record<string, any>>({})
@@ -7142,7 +7146,7 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
         fetch('/api/amazon/data').then(r=>r.json()),
         fetch('/api/amazon/sku-mapping?mode=unresolved').then(r=>r.json()),
         fetch('/api/amazon/sku-mapping?mode=mappings').then(r=>r.json()),
-        fetch('/api/amazon/settlements').then(r=>r.json()),
+        fetch('/api/amazon/settlements' + (showAdjustments ? '?adjustments=included' : '')).then(r=>r.json()),
         fetch('/api/amazon/inventory-gaps').then(r=>r.json()),
         fetch('/api/amazon/inventory-consolidated').then(r=>r.json()),
       ])
@@ -8358,6 +8362,17 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
   }
 
   useEffect(() => { charger(); chargerClosureList(); chargerAudits() }, [])
+  // Re-fetch settlements list when the user toggles "show adjustments"
+  // to switch between filtered (default) and full views.
+  useEffect(() => {
+    if (vue === 'settlements') {
+      fetch('/api/amazon/settlements' + (showAdjustments ? '?adjustments=included' : ''))
+        .then((r) => r.json())
+        .then((s) => { if (Array.isArray(s)) setSettlementsList(s) })
+        .catch(() => {})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAdjustments])
   // Lance l'auto-résolution dès qu'on ouvre la vue mapping (silencieux si rien à faire)
   useEffect(() => {
     if (vue === 'mapping' && unresolved.length > 0) autoResolve(true)
@@ -11491,6 +11506,17 @@ function AmazonTab({dark, card, bdr, sub, thBg, S, C, hvr, profil}: any) {
                 </button>
               ))}
             </div>
+            <label
+              title="Inclure les mini-paiements Amazon (montants < 500 CAD ou périodes ≠ 14j). Par défaut on les cache pour matcher la vue Seller Central manuelle."
+              style={{display:'flex',gap:6,alignItems:'center',fontSize:11,color:sub,marginLeft:'auto',cursor:'pointer'}}
+            >
+              <input
+                type="checkbox"
+                checked={showAdjustments}
+                onChange={e=>setShowAdjustments(e.target.checked)}
+              />
+              Voir mini-ajustements Amazon
+            </label>
           </div>
 
           {/* Liste compacte */}
