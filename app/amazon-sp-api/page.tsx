@@ -416,6 +416,15 @@ export default function AmazonSpApiHub() {
             }}
           />
           <ActionCard
+            title="♻️ Dispute reimbursements sous-payés"
+            description="Reimbursements Amazon où le montant payé < (notre cost × quantité). Génère un template 'Submit a reimbursement claim dispute' avec le Reimbursement ID + différentiel à réclamer. Window 90j = fenêtre fraîche (~60% succès). Récupération rétroactive estimée ~6 K CAD sur 90j."
+            color="#22d3ee"
+            busy={false}
+            onClick={() => {
+              window.location.href = '/amazon-sp-api/dispute-reimbursements';
+            }}
+          />
+          <ActionCard
             title="🔍 Ping SP-API (diagnostic)"
             description="Test rapide (<5s) : vérifie env vars + LWA token + 1 appel SP-API léger. À utiliser quand un sync rate pour savoir si c'est la config ou le report."
             color="#10b981"
