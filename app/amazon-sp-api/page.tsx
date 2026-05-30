@@ -505,6 +505,13 @@ export default function AmazonSpApiHub() {
               );
             }}
           />
+          <ActionCard
+            title="🇺🇸 Snapshot stock US (Amazon.com)"
+            description="Tire un snapshot LIVE du stock FBA US (marketplace ATVPDKIKX0DER). Retourne nb SKUs, units, valeur USD, top 20. Inséré dans amazon_fba_inventory avec préfixe SKU 'US:' pour cohabiter avec CA. Peut prendre 60-180s à cause du rate limit Amazon sur POST /reports (1 req/min)."
+            color="#3b82f6"
+            busy={busy === 'inventory-us'}
+            onClick={() => run('inventory-us', () => fetch('/api/amazon/sp-api/inventory-us'))}
+          />
         </div>
 
         {/* Backfill progress (only visible when running or done) */}
