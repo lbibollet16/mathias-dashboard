@@ -104,7 +104,7 @@ export default function AmazonSpApiHub() {
   // Amazon sur des mois déjà rattrapés (rate = 1 token/min, burst 15
   // — chaque chunk consomme 1 token, et si on re-fetche Oct + Nov qui
   // sont déjà OK on perd 2 tokens avant d'atteindre les vrais trous).
-  async function runBackfillChunked(monthsBack = 8, smart = false) {
+  async function runBackfillChunked(monthsBack = 8, smart = false, marketplace: 'CA' | 'US' = 'CA') {
     if (busy) return;
     setBusy('backfill');
     setError(null);
@@ -126,7 +126,10 @@ export default function AmazonSpApiHub() {
     // chevauchent un mois ayant >= 100 events.
     if (smart) {
       try {
-        const covRes = await fetch('/api/amazon/ledger/coverage?months=12');
+        // Coverage par pays (US vs CA) — sinon un mois CA déjà rempli
+        // ferait croire que la fenêtre US est OK alors qu'elle est vide.
+        const covUrl = '/api/amazon/ledger/coverage?months=' + Math.min(24, monthsBack) + (marketplace === 'US' ? '&country=US' : '&country=CA');
+        const covRes = await fetch(covUrl);
         const cov = await covRes.json();
         if (cov.ok && Array.isArray(cov.months)) {
           const coveredMonths = new Set(
@@ -177,6 +180,7 @@ export default function AmazonSpApiHub() {
             from: chunk.from,
             to: chunk.to,
             chunk_days: 30,
+            marketplace,
           }),
         });
         const body = await res.json();
@@ -261,6 +265,7 @@ export default function AmazonSpApiHub() {
     });
     setResult({
       mode: 'chunked_backfill',
+      marketplace,
       months_back: monthsBack,
       total_chunks: chunks.length,
       total_rows_inserted: totalRows,
@@ -511,6 +516,20 @@ export default function AmazonSpApiHub() {
             color="#3b82f6"
             busy={busy === 'inventory-us'}
             onClick={() => run('inventory-us', () => fetch('/api/amazon/sp-api/inventory-us'))}
+          />
+          <ActionCard
+            title="🇺🇸 Smart backfill ledger US 18 mois"
+            description="Backfill historique du ledger d'inventaire US (avant sept 2025). Check d'abord la couverture par mois côté US uniquement, puis fire les chunks SP-API seulement pour les mois manquants. Idéal pour éclairer les 73 SKUs à 0 sans historique visible. ~15-30 min selon la couverture déjà en place."
+            color="#3b82f6"
+            busy={busy === 'backfill'}
+            onClick={() => runBackfillChunked(18, true, 'US')}
+          />
+          <ActionCard
+            title="🇺🇸 Backfill ledger US 12 mois (brut)"
+            description="Backfill brut : 12 chunks de 30 jours en remontant depuis aujourd'hui, sans skip. À utiliser si tu veux re-télécharger les mois déjà couverts (forcer un refresh)."
+            color="#1e40af"
+            busy={busy === 'backfill'}
+            onClick={() => runBackfillChunked(12, false, 'US')}
           />
         </div>
 

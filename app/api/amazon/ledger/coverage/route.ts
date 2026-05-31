@@ -29,6 +29,10 @@ export async function GET(request: NextRequest) {
     0,
     Number(url.searchParams.get('sparse_threshold') ?? 100),
   );
+  // Optionnel : filtre par pays (CA / US). Indispensable pour que le
+  // smart backfill US ne considère pas comme « couvert » un mois où on
+  // a 65k events CA mais 0 event US.
+  const country = url.searchParams.get('country');
 
   const results: Array<{
     year_month: string;
@@ -50,11 +54,13 @@ export async function GET(request: NextRequest) {
     const startStr = start.toISOString().slice(0, 10);
     const endStr = end.toISOString().slice(0, 10);
 
-    const { count, error } = await supabaseAdmin
+    let q = supabaseAdmin
       .from('amazon_inventory_ledger')
       .select('*', { count: 'exact', head: true })
       .gte('event_date', startStr)
       .lt('event_date', endStr);
+    if (country) q = q.eq('country', country);
+    const { count, error } = await q;
 
     if (error) {
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
@@ -81,5 +87,5 @@ export async function GET(request: NextRequest) {
     total_events: results.reduce((s, r) => s + r.event_count, 0),
   };
 
-  return NextResponse.json({ ok: true, summary, months: results });
+  return NextResponse.json({ ok: true, country: country ?? null, summary, months: results });
 }

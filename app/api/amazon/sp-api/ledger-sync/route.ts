@@ -30,21 +30,31 @@ interface Body {
   from?: string;
   to?: string;
   chunk_days?: number;
+  /** 'CA' (par défaut) ou 'US'. Sélectionne le marketplace SP-API. */
+  marketplace?: 'CA' | 'US';
+}
+
+const MARKETPLACE_CA = 'A2EUQ1WTGCTBG2';
+const MARKETPLACE_US = 'ATVPDKIKX0DER';
+
+function resolveMarketplaceId(m: Body['marketplace']): string {
+  return m === 'US' ? MARKETPLACE_US : MARKETPLACE_CA;
 }
 
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as Body;
+  const marketplaceId = resolveMarketplaceId(body.marketplace);
 
   try {
     let result;
     if (body.from && body.to) {
-      result = await syncLedgerRange(body.from, body.to, body.chunk_days ?? 30);
+      result = await syncLedgerRange(body.from, body.to, body.chunk_days ?? 30, marketplaceId);
     } else if (body.mode === 'backfill_8m') {
       result = await backfillLedger8Months();
     } else {
       result = await syncLedgerRecent(body.days_back ?? 7);
     }
-    return NextResponse.json({ ok: true, ...result });
+    return NextResponse.json({ ok: true, marketplace: body.marketplace ?? 'CA', ...result });
   } catch (e) {
     const { body: errBody, status } = spApiErrorResponse(e);
     return NextResponse.json(errBody, { status });
