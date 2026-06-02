@@ -63,12 +63,21 @@ export default function AmazonSpApiHub() {
   const [authed, setAuthed] = useState(false);
   const [summary, setSummary] = useState<ClaimSummary | null>(null);
   const [result, setResult] = useState<unknown>(null);
+  // Label de la dernière action lancée — sert au SmartResultCard pour
+  // choisir la bonne vue (snapshot US, sync-all, detect-claims, etc.).
+  const [lastAction, setLastAction] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [backfillProgress, setBackfillProgress] = useState<BackfillProgress | null>(null);
   // Set whenever Amazon returns 429. The banner counts down to this
   // timestamp and disables the action buttons in the meantime.
   const [rateLimitedUntil, setRateLimitedUntil] = useState<Date | null>(null);
+  // Toggle pour la section « Avancé » (cachée par défaut pour ne pas
+  // distraire — diagnostic, backfills brut, debug).
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  // Date du dernier settlement importé — sert à la bannière « Prochaine
+  // étape » pour suggérer d'importer si > 14 jours.
+  const [lastSettlementDate, setLastSettlementDate] = useState<string | null>(null);
 
   // Auth check
   useEffect(() => {
@@ -90,8 +99,25 @@ export default function AmazonSpApiHub() {
     }
   }
 
+  // Charge la date du dernier settlement pour la bannière Prochaine étape
+  async function loadLastSettlement() {
+    try {
+      const r = await fetch('/api/amazon/settlements');
+      const list = await r.json();
+      if (Array.isArray(list) && list.length > 0) {
+        const dep = list[0]?.deposit_date;
+        if (dep) setLastSettlementDate(String(dep).slice(0, 10));
+      }
+    } catch {
+      // silencieux
+    }
+  }
+
   useEffect(() => {
-    if (authed) void loadSummary();
+    if (authed) {
+      void loadSummary();
+      void loadLastSettlement();
+    }
   }, [authed]);
 
   // Backfill chunked — fait N appels HTTP séquentiels d'1 mois chacun
@@ -289,6 +315,7 @@ export default function AmazonSpApiHub() {
     // hammering it just resets the wait.
     if (rateLimitedUntil && rateLimitedUntil.getTime() > Date.now()) return;
     setBusy(label);
+    setLastAction(label);
     setError(null);
     setResult(null);
     try {
@@ -363,10 +390,14 @@ export default function AmazonSpApiHub() {
         {/* Summary card claims */}
         <ClaimsSummaryCard summary={summary} onRefresh={loadSummary} />
 
-        {/* Actions grid */}
-        <h2 style={{ fontSize: 18, fontWeight: 800, margin: '24px 0 12px' }}>
-          🔧 Actions SP-API
-        </h2>
+        {/* Bannière intelligente "Prochaine étape" */}
+        <NextStepBanner
+          summary={summary}
+          lastSettlementDate={lastSettlementDate}
+        />
+
+        {/* ─── SECTION 1 : ESSENTIEL (quotidien) ─────────────────── */}
+        <SectionHeader emoji="🧭" title="Essentiel — à faire régulièrement" />
         <div
           style={{
             display: 'grid',
@@ -375,48 +406,23 @@ export default function AmazonSpApiHub() {
           }}
         >
           <ActionCard
-            title="🧠 Smart backfill (mois manquants seulement)"
-            description="Check d'abord la couverture par mois en DB, puis ne fire les chunks SP-API QUE pour les mois avec <100 events. Économise tokens rate-limit Amazon (1/min) en sautant les mois déjà rattrapés. À utiliser après un 1er backfill partiel pour combler les trous."
+            title="📥 Importer les nouveaux règlements"
+            description="Va chercher chez Amazon les derniers règlements bi-hebdomadaires (settlements) et les ajoute à ta compta. À faire quand Amazon publie un nouveau dépôt (~tous les 14 jours)."
             color="#16a34a"
-            busy={busy === 'backfill'}
-            onClick={() => runBackfillChunked(8, true)}
-          />
-          <ActionCard
-            title="📚 Backfill ledger 8 mois (brut)"
-            description="One-shot : télécharge l'historique sur 8 mois en 8 appels séquentiels d'1 mois chacun (~1 min/chunk = 8-10 min total). Évite les timeouts serverless. À faire UNE FOIS au tout premier setup. Préférer le Smart backfill ensuite."
-            color="#7c3aed"
-            busy={busy === 'backfill'}
-            onClick={() => runBackfillChunked(8, false)}
-          />
-          <ActionCard
-            title="🔄 Sync 4 reports manuels"
-            description="Reimbursements + FBA Inventory + Customer Returns + Removal Orders. Remplace tes anciens uploads CSV manuels. ~8 min."
-            color="#0891b2"
-            busy={busy === 'sync-all'}
+            busy={busy === 'sync-settlements'}
             onClick={() =>
-              run('sync-all', () =>
-                fetch('/api/amazon/sp-api/sync-all', { method: 'POST' }),
-              )
-            }
-          />
-          <ActionCard
-            title="💰 Sync settlements"
-            description="Pull les nouveaux settlements DONE chez Amazon. Le cron le fait à 8h chaque jour mais tu peux le forcer."
-            color="#059669"
-            busy={busy === 'settlements'}
-            onClick={() =>
-              run('settlements', () =>
+              run('sync-settlements', () =>
                 fetch('/api/amazon/sp-api/settlements-sync', { method: 'POST' }),
               )
             }
           />
           <ActionCard
-            title="📒 Sync ledger 7j (incrémental)"
-            description="Re-fetche les 7 derniers jours du ledger pour capter les reconciliations tardives d'Amazon."
-            color="#0284c7"
-            busy={busy === 'ledger-recent'}
+            title="📦 Mettre à jour les mouvements de stock"
+            description="Re-télécharge les 7 derniers jours du ledger d'inventaire FBA (entrées, sorties, pertes, retours). À lancer si tu vois un trou dans tes mouvements récents."
+            color="#0891b2"
+            busy={busy === 'ledger-sync'}
             onClick={() =>
-              run('ledger-recent', () =>
+              run('ledger-sync', () =>
                 fetch('/api/amazon/sp-api/ledger-sync', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -426,8 +432,8 @@ export default function AmazonSpApiHub() {
             }
           />
           <ActionCard
-            title="🎯 Détecter claims manqués"
-            description="Croise ledger × reimbursements × ventes pour calculer ce qu'Amazon te doit en stock perdu / cassé. À lancer après les autres syncs."
+            title="🔍 Chercher de l'argent oublié chez Amazon"
+            description="Croise tes mouvements de stock avec les remboursements Amazon pour trouver les unités perdues/cassées non encore remboursées. À lancer après les 2 boutons ci-dessus."
             color="#dc2626"
             busy={busy === 'detect'}
             onClick={() =>
@@ -440,9 +446,20 @@ export default function AmazonSpApiHub() {
               )
             }
           />
+        </div>
+
+        {/* ─── SECTION 2 : RÉCUPÉRER DE L'ARGENT ────────────────── */}
+        <SectionHeader emoji="💰" title="Récupérer de l'argent chez Amazon" />
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: 12,
+          }}
+        >
           <ActionCard
-            title="💸 Page Claims (workflow batch)"
-            description="Ouvre la page de gestion des claims FBA : liste les candidats Damaged/Defective non remboursés, génère subject + body prêts à coller dans Seller Central, marque envoyé en DB. Vérifie d'abord avoir lancé Detect claims pour peupler la liste."
+            title="💸 Mes réclamations à envoyer à Amazon"
+            description="Liste les unités perdues/cassées à réclamer manuellement. Génère le texte prêt à coller dans Seller Central + marque envoyé. Lance « Chercher de l'argent » d'abord pour peupler la liste."
             color="#f59e0b"
             busy={false}
             onClick={() => {
@@ -450,35 +467,8 @@ export default function AmazonSpApiHub() {
             }}
           />
           <ActionCard
-            title="⏳ Aged inventory monitor"
-            description="Surveille les SKUs FBA approchant la barre des 181 jours (Aged Inventory Surcharge). Sync le report GET_FBA_INVENTORY_PLANNING_DATA + page avec tri par urgence (remove / discount / monitor). Évaluation Amazon le 15 du mois — agir avant le 14 stoppe la surcharge."
-            color="#fb923c"
-            busy={false}
-            onClick={() => {
-              window.location.href = '/amazon-sp-api/aging';
-            }}
-          />
-          <ActionCard
-            title="📐 Dimensions audit (Cubiscan dispute)"
-            description="Compare ce qu'Amazon mesure (via Catalog API) à nos dimensions réelles. Discrepancy >+10% volume = candidat à un Cubiscan remeasure request. Récupère les fees overcharged des 90 derniers jours."
-            color="#ec4899"
-            busy={false}
-            onClick={() => {
-              window.location.href = '/amazon-sp-api/dimensions';
-            }}
-          />
-          <ActionCard
-            title="💰 Sourcing Cost Bulk Enricher"
-            description="Drop le XLSX Amazon 'Bulk Manage Sourcing Cost' téléchargé depuis le IDR Portal, on remplit automatiquement la colonne Seller New Cost avec nos vrais costs MPP. Te download le fichier enrichi prêt à uploader. Levier #1 pour récupérer les sous-payments d'auto-reimbursements (~25-35 K CAD potentiel sur 18m)."
-            color="#ec4899"
-            busy={false}
-            onClick={() => {
-              window.location.href = '/amazon-sp-api/sourcing-cost';
-            }}
-          />
-          <ActionCard
-            title="♻️ Dispute reimbursements sous-payés"
-            description="Reimbursements Amazon où le montant payé < (notre cost × quantité). Génère un template 'Submit a reimbursement claim dispute' avec le Reimbursement ID + différentiel à réclamer. Window 90j = fenêtre fraîche (~60% succès). Récupération rétroactive estimée ~6 K CAD sur 90j."
+            title="♻️ Remboursements sous-payés à disputer"
+            description="Amazon t'a remboursé mais à un prix inférieur à ton coût réel. Liste les cas avec le différentiel + template de dispute pré-rempli. Fenêtre 90 jours = ~60 % de succès."
             color="#22d3ee"
             busy={false}
             onClick={() => {
@@ -486,51 +476,162 @@ export default function AmazonSpApiHub() {
             }}
           />
           <ActionCard
-            title="🔍 Ping SP-API (diagnostic)"
-            description="Test rapide (<5s) : vérifie env vars + LWA token + 1 appel SP-API léger. À utiliser quand un sync rate pour savoir si c'est la config ou le report."
-            color="#10b981"
-            busy={busy === 'ping'}
-            onClick={() =>
-              run('ping', () => fetch('/api/amazon/sp-api/ping'))
-            }
-          />
-          <ActionCard
-            title="🐛 Debug ledger (1 semaine)"
-            description="Lance un report ledger sur les 7 derniers jours et retourne les colonnes/sample (sans rien upsert). Utile pour comprendre pourquoi le backfill ramène 0 lignes."
-            color="#f59e0b"
-            busy={busy === 'ledger-debug'}
+            title="💰 Mettre à jour mes coûts d'achat Amazon"
+            description="Drop le XLSX Amazon « Bulk Manage Sourcing Cost », on remplit auto la colonne Seller New Cost avec tes vrais coûts MPP. Levier #1 pour récupérer les auto-reimbursements sous-payés (~25-35 K CAD sur 18 mois)."
+            color="#ec4899"
+            busy={false}
             onClick={() => {
-              const now = new Date();
-              const weekAgo = new Date(now);
-              weekAgo.setDate(weekAgo.getDate() - 7);
-              const from = weekAgo.toISOString().slice(0, 10);
-              const to = now.toISOString().slice(0, 10);
-              return run('ledger-debug', () =>
-                fetch(`/api/amazon/sp-api/ledger-debug?from=${from}&to=${to}`),
-              );
+              window.location.href = '/amazon-sp-api/sourcing-cost';
             }}
           />
           <ActionCard
-            title="🇺🇸 Snapshot stock US (Amazon.com)"
-            description="Tire un snapshot LIVE du stock FBA US (marketplace ATVPDKIKX0DER). Retourne nb SKUs, units, valeur USD, top 20. Inséré dans amazon_fba_inventory avec préfixe SKU 'US:' pour cohabiter avec CA. Peut prendre 60-180s à cause du rate limit Amazon sur POST /reports (1 req/min)."
+            title="📐 Erreurs de dimensions à contester"
+            description="Compare les dimensions qu'Amazon mesure (et te facture) à tes dimensions réelles. Volume surestimé > 10 % = candidat à un Cubiscan remeasure pour récupérer les fees overcharged sur 90 jours."
+            color="#ec4899"
+            busy={false}
+            onClick={() => {
+              window.location.href = '/amazon-sp-api/dimensions';
+            }}
+          />
+        </div>
+
+        {/* ─── SECTION 3 : INVENTAIRE & MONITORING ──────────────── */}
+        <SectionHeader emoji="📦" title="Surveiller mon inventaire" />
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: 12,
+          }}
+        >
+          <ActionCard
+            title="⏳ Stock qui dort (frais bientôt)"
+            description="Surveille les SKUs FBA approchant 181 jours de stockage (= Aged Inventory Surcharge). Agir avant le 14 du mois stoppe la surcharge du mois suivant."
+            color="#fb923c"
+            busy={false}
+            onClick={() => {
+              window.location.href = '/amazon-sp-api/aging';
+            }}
+          />
+          <ActionCard
+            title="🔄 Re-télécharger tous les fichiers manuels"
+            description="Reimbursements + FBA Inventory + Customer Returns + Removal Orders en une seule action. Remplace tes anciens uploads CSV manuels. ~8 min."
+            color="#0891b2"
+            busy={busy === 'sync-all'}
+            onClick={() =>
+              run('sync-all', () =>
+                fetch('/api/amazon/sp-api/sync-all', { method: 'POST' }),
+              )
+            }
+          />
+        </div>
+
+        {/* ─── SECTION 4 : MARKETPLACE US ────────────────────────── */}
+        <SectionHeader emoji="🇺🇸" title="Marketplace États-Unis (Amazon.com)" />
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: 12,
+          }}
+        >
+          <ActionCard
+            title="📷 Photo du stock US maintenant"
+            description="Combien d'unités tu as encore en warehouse US, par SKU, en USD. Idéal après une période sans activité US pour voir ce qu'Amazon a déplacé/perdu/retrouvé. Prend 60-180s (rate limit Amazon 1/min)."
             color="#3b82f6"
             busy={busy === 'inventory-us'}
             onClick={() => run('inventory-us', () => fetch('/api/amazon/sp-api/inventory-us'))}
           />
           <ActionCard
-            title="🇺🇸 Smart backfill ledger US 18 mois"
-            description="Backfill historique du ledger d'inventaire US (avant sept 2025). Check d'abord la couverture par mois côté US uniquement, puis fire les chunks SP-API seulement pour les mois manquants. Idéal pour éclairer les 73 SKUs à 0 sans historique visible. ~15-30 min selon la couverture déjà en place."
+            title="📚 Charger 18 mois d'historique US"
+            description="Va chercher chez Amazon les mouvements de stock US des 18 derniers mois (manquants seulement). Permet d'identifier les pertes Amazon historiques à réclamer. ~15-30 min selon ce qui est déjà en base."
             color="#3b82f6"
             busy={busy === 'backfill'}
             onClick={() => runBackfillChunked(18, true, 'US')}
           />
-          <ActionCard
-            title="🇺🇸 Backfill ledger US 12 mois (brut)"
-            description="Backfill brut : 12 chunks de 30 jours en remontant depuis aujourd'hui, sans skip. À utiliser si tu veux re-télécharger les mois déjà couverts (forcer un refresh)."
-            color="#1e40af"
-            busy={busy === 'backfill'}
-            onClick={() => runBackfillChunked(12, false, 'US')}
-          />
+        </div>
+
+        {/* ─── SECTION 5 : AVANCÉ (collapsible) ─────────────────── */}
+        <div style={{ marginTop: 24 }}>
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#94a3b8',
+              cursor: 'pointer',
+              fontSize: 14,
+              fontWeight: 700,
+              padding: '8px 0',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            <span>{showAdvanced ? '▼' : '▶'}</span>
+            <span>⚙️ Avancé (diagnostic + backfills brut)</span>
+            <span style={{ color: '#64748b', fontWeight: 400, fontSize: 12 }}>
+              {showAdvanced ? '— cacher' : '— afficher 5 actions techniques'}
+            </span>
+          </button>
+          {showAdvanced && (
+            <div
+              style={{
+                marginTop: 12,
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                gap: 12,
+              }}
+            >
+              <ActionCard
+                title="🧠 Combler mois manquants (CA, 8 mois)"
+                description="Check d'abord la couverture CA par mois, puis fire les chunks SP-API uniquement pour les mois avec < 100 events. Économise tokens rate limit. À utiliser après un 1er backfill partiel pour combler les trous."
+                color="#16a34a"
+                busy={busy === 'backfill'}
+                onClick={() => runBackfillChunked(8, true)}
+              />
+              <ActionCard
+                title="📚 Backfill brut CA (8 mois)"
+                description="One-shot brut : télécharge l'historique CA des 8 derniers mois en 8 appels séquentiels. À faire UNE FOIS au tout premier setup. Préférer le « Combler mois manquants » ensuite."
+                color="#7c3aed"
+                busy={busy === 'backfill'}
+                onClick={() => runBackfillChunked(8, false)}
+              />
+              <ActionCard
+                title="🇺🇸 Backfill brut US (12 mois)"
+                description="Force re-fetch tous les chunks US sans skip, même les mois déjà couverts. À utiliser pour un refresh complet."
+                color="#1e40af"
+                busy={busy === 'backfill'}
+                onClick={() => runBackfillChunked(12, false, 'US')}
+              />
+              <ActionCard
+                title="🔍 Test connexion Amazon"
+                description="Vérifie en < 5s les credentials SP-API + LWA token + 1 appel léger. À utiliser quand un sync rate pour savoir si c'est la config ou le report."
+                color="#10b981"
+                busy={busy === 'ping'}
+                onClick={() =>
+                  run('ping', () => fetch('/api/amazon/sp-api/ping'))
+                }
+              />
+              <ActionCard
+                title="🐛 Examiner les données ledger brutes"
+                description="Lance un report ledger sur les 7 derniers jours et retourne les colonnes/sample (sans rien upsert). Utile pour comprendre pourquoi le backfill ramène 0 lignes."
+                color="#f59e0b"
+                busy={busy === 'ledger-debug'}
+                onClick={() => {
+                  const now = new Date();
+                  const weekAgo = new Date(now);
+                  weekAgo.setDate(weekAgo.getDate() - 7);
+                  const from = weekAgo.toISOString().slice(0, 10);
+                  const to = now.toISOString().slice(0, 10);
+                  return run('ledger-debug', () =>
+                    fetch(`/api/amazon/sp-api/ledger-debug?from=${from}&to=${to}`),
+                  );
+                }}
+              />
+            </div>
+          )}
         </div>
 
         {/* Backfill progress (only visible when running or done) */}
@@ -564,57 +665,285 @@ export default function AmazonSpApiHub() {
           </div>
         )}
 
-        {/* Result */}
+        {/* Result lisible (vue intelligente + JSON brut en repliable) */}
         {result != null && (
-          <div style={{ marginTop: 16 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 8 }}>
-              📋 Résultat dernière action
-            </h2>
-            <pre
-              style={{
-                background: 'rgba(0,0,0,0.4)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 12,
-                padding: 16,
-                fontSize: 12,
-                fontFamily: 'monospace',
-                color: '#a5f3fc',
-                overflow: 'auto',
-                maxHeight: 500,
-              }}
-            >
-              {JSON.stringify(result, null, 2)}
-            </pre>
-          </div>
+          <SmartResultCard action={lastAction} result={result} />
         )}
 
-        {/* Footer info */}
+        {/* Footer minimal — tout passe en automatique via les crons */}
         <div
           style={{
-            marginTop: 24,
-            padding: 16,
-            borderRadius: 12,
-            background: 'rgba(255,255,255,0.05)',
+            marginTop: 32,
+            padding: 12,
             fontSize: 11,
-            color: '#94a3b8',
-            lineHeight: 1.6,
+            color: '#64748b',
+            textAlign: 'center',
+            lineHeight: 1.5,
           }}
         >
-          <div style={{ fontWeight: 700, color: '#cbd5e1', marginBottom: 8 }}>
-            ℹ️ Ordre recommandé pour le premier setup
-          </div>
-          <ol style={{ margin: 0, paddingLeft: 20 }}>
-            <li>📚 <strong>Backfill ledger 8 mois</strong> (une seule fois — long mais nécessaire)</li>
-            <li>🔄 <strong>Sync 4 reports manuels</strong> (pour avoir reimbursements + inventory frais)</li>
-            <li>💰 <strong>Sync settlements</strong> (si pas déjà à jour)</li>
-            <li>🎯 <strong>Détecter claims manqués</strong> (LE step qui te dit où sont les $$ à récupérer)</li>
-          </ol>
-          <div style={{ marginTop: 12 }}>
-            Ensuite les crons quotidiens (11h, 12h, 12h30, 13h UTC) maintiennent tout à jour automatiquement.
-            Tu peux bookmark cette page pour des tests ponctuels.
-          </div>
+          🤖 Tout tourne en auto via les crons quotidiens (11h-13h UTC).
+          Cette page sert pour les actions ponctuelles ou pour creuser un problème.
         </div>
       </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Composants UI
+// ────────────────────────────────────────────────────────────────────
+
+function SectionHeader({ emoji, title }: { emoji: string; title: string }) {
+  return (
+    <h2
+      style={{
+        fontSize: 18,
+        fontWeight: 800,
+        margin: '28px 0 12px',
+        color: '#e2e8f0',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+      }}
+    >
+      <span style={{ fontSize: 22 }}>{emoji}</span>
+      <span>{title}</span>
+    </h2>
+  );
+}
+
+function NextStepBanner({
+  summary,
+  lastSettlementDate,
+}: {
+  summary: ClaimSummary | null;
+  lastSettlementDate: string | null;
+}) {
+  const fmt = (n: number) =>
+    n.toLocaleString('fr-CA', { style: 'currency', currency: 'CAD', maximumFractionDigits: 0 });
+
+  // Détermine la recommandation prioritaire
+  let icon = '✓';
+  let title = 'Tout est à jour';
+  let detail = 'Aucune action urgente détectée. Les crons quotidiens maintiennent la base à jour.';
+  let cta: { label: string; href?: string } | null = null;
+  let color = '#10b981';
+
+  // P1 : argent éligible à réclamer
+  if (summary && summary.pending_eligible.estimated_amount > 0) {
+    icon = '🔥';
+    title = `${fmt(summary.pending_eligible.estimated_amount)} à réclamer chez Amazon maintenant`;
+    detail = `${summary.pending_eligible.count} réclamation(s) éligible(s) prête(s) à envoyer. Window de 60-90 jours — agis maintenant pour ne pas les perdre.`;
+    cta = { label: 'Ouvrir le workflow Claims →', href: '/amazon-sp-api/claims' };
+    color = '#dc2626';
+  }
+  // P2 : settlements en retard
+  else if (lastSettlementDate) {
+    const daysSince = Math.floor(
+      (Date.now() - new Date(lastSettlementDate).getTime()) / 86_400_000,
+    );
+    if (daysSince > 16) {
+      icon = '📥';
+      title = `Pas de nouveau règlement depuis ${daysSince} jours`;
+      detail =
+        'Amazon publie un règlement tous les ~14 jours. Tu devrais cliquer « Importer les nouveaux règlements » pour récupérer celui qui devrait être déjà disponible.';
+      color = '#f59e0b';
+    }
+  }
+  // P3 : claims non détectés depuis longtemps
+  else if (!summary) {
+    icon = '🎯';
+    title = 'Premier setup : lance les 3 étapes ci-dessous';
+    detail =
+      'Aucune réclamation détectée encore. Cliques sur « Importer règlements » → « Mettre à jour mouvements » → « Chercher de l\'argent » dans la section Essentiel.';
+    color = '#3b82f6';
+  }
+
+  return (
+    <div
+      style={{
+        marginTop: 16,
+        padding: '16px 20px',
+        borderRadius: 16,
+        background: `linear-gradient(135deg, ${color}22 0%, ${color}11 100%)`,
+        border: `2px solid ${color}`,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 32 }}>{icon}</div>
+        <div style={{ flex: '1 1 300px' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+            Prochaine étape recommandée
+          </div>
+          <div style={{ fontSize: 17, fontWeight: 800, color: '#fff', marginBottom: 4 }}>
+            {title}
+          </div>
+          <div style={{ fontSize: 13, color: '#cbd5e1', lineHeight: 1.5 }}>{detail}</div>
+        </div>
+        {cta && (
+          <a
+            href={cta.href}
+            style={{
+              alignSelf: 'center',
+              padding: '10px 16px',
+              borderRadius: 10,
+              background: color,
+              color: '#fff',
+              textDecoration: 'none',
+              fontWeight: 700,
+              fontSize: 13,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {cta.label}
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SmartResultCard({ action, result }: { action: string | null; result: unknown }) {
+  const r = result as Record<string, unknown>;
+  const ok = r?.ok !== false;
+  const fmtN = (n: number) => n.toLocaleString('fr-CA');
+  const fmt$ = (n: number, currency = 'CAD') =>
+    n.toLocaleString('fr-CA', { style: 'currency', currency, maximumFractionDigits: 0 });
+
+  // Rendu par type d'action
+  let body: React.ReactNode = null;
+
+  if (action === 'inventory-us') {
+    const total = Number(r.nb_skus_total ?? 0);
+    const stock = Number(r.nb_skus_with_stock ?? 0);
+    const units = Number(r.total_units ?? 0);
+    const valueUsd = Number(r.total_value_usd ?? 0);
+    const top = (r.top_skus as Array<Record<string, unknown>>) || [];
+    const found = top.filter((t) => String(t.sku ?? '').includes('Amazon.Found'));
+    body = (
+      <>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 12 }}>
+          <StatBlock label="SKUs total" value={fmtN(total)} />
+          <StatBlock label="Avec stock > 0" value={fmtN(stock)} accent={stock < 10 ? '#f59e0b' : '#10b981'} />
+          <StatBlock label="Unités en warehouse" value={fmtN(units)} />
+          <StatBlock label="Valeur estimée" value={fmt$(valueUsd, 'USD')} accent="#3b82f6" />
+        </div>
+        {found.length > 0 && (
+          <div style={{ padding: 10, borderRadius: 10, background: '#dc262633', border: '1px solid #dc2626', marginBottom: 10 }}>
+            🔥 <strong>{found.length} SKU « Amazon.Found »</strong> détecté(s) — Amazon a retrouvé du stock sans le ré-attacher à tes SKUs originaux. C'est de l'argent retenu qui peut être récupéré.
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12 }}>
+              {found.map((f, i) => (
+                <li key={i}>
+                  {String(f.sku)} — {fmtN(Number(f.qty))} × {fmt$(Number(f.price), 'USD')} = <strong>{fmt$(Number(f.value), 'USD')}</strong>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {top.length > 0 && (
+          <div style={{ fontSize: 12, color: '#94a3b8' }}>
+            Top 5 SKUs en stock :
+            <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+              {top.slice(0, 5).map((t, i) => (
+                <li key={i}>
+                  {String(t.sku)} — {fmtN(Number(t.qty))} × {fmt$(Number(t.price), 'USD')}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </>
+    );
+  } else if (action === 'sync-all') {
+    const reports = (r.reports as Record<string, Record<string, unknown>>) || {};
+    body = (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+        {Object.entries(reports).map(([name, val]) => (
+          <StatBlock
+            key={name}
+            label={name}
+            value={String(val.rows_upserted ?? val.rows_inserted ?? val.status ?? '—')}
+            accent={val.status === 'ok' ? '#10b981' : '#f59e0b'}
+          />
+        ))}
+      </div>
+    );
+  } else if (action === 'detect') {
+    const total = Number(r.total_candidates ?? 0);
+    const eligible = Number(r.pending_eligible?.['count'] ?? 0);
+    const amount = Number(r.pending_eligible?.['estimated_amount'] ?? 0);
+    body = (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+        <StatBlock label="Candidats détectés" value={fmtN(total)} />
+        <StatBlock label="Éligibles maintenant" value={fmtN(eligible)} accent="#dc2626" />
+        <StatBlock label="$ à récupérer" value={fmt$(amount)} accent="#dc2626" />
+      </div>
+    );
+  } else if (action === 'sync-settlements' || action === 'settlements') {
+    const imported = Number(r.imported ?? 0);
+    const skipped = Number(r.skipped ?? 0);
+    body = (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+        <StatBlock label="Nouveaux importés" value={fmtN(imported)} accent={imported > 0 ? '#10b981' : '#94a3b8'} />
+        <StatBlock label="Déjà en base (skip)" value={fmtN(skipped)} />
+      </div>
+    );
+  } else if (action === 'ledger-sync' || action === 'ledger-recent') {
+    const inserted = Number(r.total_rows_inserted ?? 0);
+    body = <StatBlock label="Events insérés" value={fmtN(inserted)} accent="#10b981" />;
+  } else if (action === 'ping') {
+    body = <div style={{ fontSize: 14 }}>{ok ? '✅ Connexion Amazon OK' : '❌ Connexion échouée — voir détails ci-dessous'}</div>;
+  }
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 8 }}>
+        {ok ? '✅' : '❌'} Résultat de la dernière action
+      </h2>
+      <div
+        style={{
+          background: 'rgba(255,255,255,0.05)',
+          border: `1px solid ${ok ? 'rgba(16,185,129,0.3)' : 'rgba(220,38,38,0.4)'}`,
+          borderRadius: 12,
+          padding: 16,
+        }}
+      >
+        {body ?? (
+          <div style={{ fontSize: 13, color: '#94a3b8' }}>
+            Action complétée. Voir le JSON brut ci-dessous pour les détails.
+          </div>
+        )}
+        <details style={{ marginTop: 12 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 11, color: '#64748b', userSelect: 'none' }}>
+            Voir le JSON brut (debug)
+          </summary>
+          <pre
+            style={{
+              marginTop: 8,
+              background: 'rgba(0,0,0,0.4)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 8,
+              padding: 12,
+              fontSize: 11,
+              fontFamily: 'monospace',
+              color: '#a5f3fc',
+              overflow: 'auto',
+              maxHeight: 400,
+            }}
+          >
+            {JSON.stringify(result, null, 2)}
+          </pre>
+        </details>
+      </div>
+    </div>
+  );
+}
+
+function StatBlock({ label, value, accent = '#cbd5e1' }: { label: string; value: string; accent?: string }) {
+  return (
+    <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: `1px solid ${accent}33` }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 900, color: accent, marginTop: 2 }}>{value}</div>
     </div>
   );
 }
