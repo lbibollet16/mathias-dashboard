@@ -880,9 +880,9 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, for
   const [diagOutput, setDiagOutput] = useState<any|null>(null)
   const [historique, setHistorique] = useState<{commandeId: number, items: any[]}|null>(null)
   const [notifVu, setNotifVu] = useState(false)
+  // Un seul fichier sélectionné, réutilisable pour Import / Mode IA / Diagnostic
+  const [pdfFile, setPdfFile] = useState<File|null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const fileRefIa = useRef<HTMLInputElement>(null)
-  const fileRefDiag = useRef<HTMLInputElement>(null)
   const moiNom = profil?.nom || profil?.email || ''
 
   useEffect(() => { charger() }, [])
@@ -937,7 +937,6 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, for
       setMsg({type:'err', text: e.message || String(e)})
     } finally {
       setImporting(false)
-      if (fileRef.current) fileRef.current.value = ''
     }
   }
 
@@ -961,7 +960,6 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, for
       setMsg({type:'err', text: e.message || String(e)})
     } finally {
       setImporting(false)
-      if (fileRefDiag.current) fileRefDiag.current.value = ''
     }
   }
 
@@ -1202,42 +1200,45 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, for
             type="file"
             accept="application/pdf,.pdf"
             style={{display:'none'}}
-            onChange={e => { const f = e.target.files?.[0]; if (f) importerPdf(f, 'regex') }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) { setPdfFile(f); setDiagOutput(null); setMsg(null) } }}
           />
-          <input
-            ref={fileRefIa}
-            type="file"
-            accept="application/pdf,.pdf"
-            style={{display:'none'}}
-            onChange={e => { const f = e.target.files?.[0]; if (f) importerPdf(f, 'ia') }}
-          />
-          <input
-            ref={fileRefDiag}
-            type="file"
-            accept="application/pdf,.pdf"
-            style={{display:'none'}}
-            onChange={e => { const f = e.target.files?.[0]; if (f) diagnostiquerPdf(f) }}
-          />
-          <button
-            disabled={importing}
-            onClick={()=>fileRef.current?.click()}
-            style={{background:importing?sub:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 18px',fontWeight:800,cursor:importing?'not-allowed':'pointer',fontSize:13}}>
-            {importing ? '⏳ Import…' : '📥 Importer PDF'}
-          </button>
-          <button
-            disabled={importing}
-            onClick={()=>fileRefIa.current?.click()}
-            title="Mode IA — plus précis mais beaucoup plus lent (1-3 min). Utile si l'import standard rate des lignes."
-            style={{background:'transparent',color:C.blue,border:`1px solid ${C.blue}`,borderRadius:8,padding:'10px 14px',fontWeight:700,cursor:importing?'not-allowed':'pointer',fontSize:12}}>
-            🤖 Mode IA
-          </button>
-          <button
-            disabled={importing}
-            onClick={()=>fileRefDiag.current?.click()}
-            title="Affiche les lignes brutes extraites du PDF — utile si l'import rate"
-            style={{background:'transparent',color:sub,border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 14px',fontWeight:700,cursor:importing?'not-allowed':'pointer',fontSize:12}}>
-            🔍 Diagnostic
-          </button>
+          {!pdfFile ? (
+            <button
+              disabled={importing}
+              onClick={()=>fileRef.current?.click()}
+              style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 18px',fontWeight:800,cursor:'pointer',fontSize:13}}>
+              📎 Choisir le PDF
+            </button>
+          ) : (
+            <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+              <div style={{display:'flex',alignItems:'center',gap:8,background:dark?'#1a233a':'#e8f0fe',border:`1px solid ${C.blue}33`,borderRadius:8,padding:'8px 12px'}}>
+                <span style={{fontSize:13,fontWeight:700,color:C.blue}}>📄 {pdfFile.name}</span>
+                <button onClick={()=>{ setPdfFile(null); setDiagOutput(null); setMsg(null); if (fileRef.current) fileRef.current.value='' }}
+                  style={{background:'transparent',border:'none',color:sub,cursor:'pointer',fontSize:14,padding:'0 4px',lineHeight:1}}
+                  title="Retirer le fichier">✕</button>
+              </div>
+              <button
+                disabled={importing}
+                onClick={()=>importerPdf(pdfFile, 'regex')}
+                style={{background:importing?sub:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 16px',fontWeight:800,cursor:importing?'not-allowed':'pointer',fontSize:13}}>
+                {importing ? '⏳ Import…' : '📥 Importer'}
+              </button>
+              <button
+                disabled={importing}
+                onClick={()=>importerPdf(pdfFile, 'ia')}
+                title="Mode IA — plus précis mais lent (1-3 min). À utiliser si l'import standard rate des lignes."
+                style={{background:'transparent',color:C.blue,border:`1px solid ${C.blue}`,borderRadius:8,padding:'10px 14px',fontWeight:700,cursor:importing?'not-allowed':'pointer',fontSize:12}}>
+                🤖 Mode IA
+              </button>
+              <button
+                disabled={importing}
+                onClick={()=>diagnostiquerPdf(pdfFile)}
+                title="Affiche les lignes brutes extraites du PDF — utile pour debug"
+                style={{background:'transparent',color:sub,border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 14px',fontWeight:700,cursor:importing?'not-allowed':'pointer',fontSize:12}}>
+                🔍 Diagnostic
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Paramètres exacts à utiliser dans Traction pour générer le PDF */}
