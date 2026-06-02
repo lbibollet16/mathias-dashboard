@@ -327,26 +327,29 @@ export async function parseCommandesPdf(buffer: Buffer | Uint8Array): Promise<Co
       const idxHeaderPiece = lines.findIndex(isHeaderPieceLine)
       if (idxHeaderPiece < 0) continue  // commande sans pièces
 
-      // Trouver la fin de la zone "pièces" : ligne qui commence par "Coût Total"
-      // ou une ligne "Commande" / "Réservation" qui marque le bloc Employé.
+      // Trouver la fin de la zone "pièces" : UNIQUEMENT "Coût Total de la
+      // Commande". On NE PEUT PAS s'arrêter à "Commande"/"Réservation" ni au
+      // header employé, parce qu'avec plusieurs pièces sur la même page, chaque
+      // pièce est suivie de son propre bloc Réservation/Commande, puis vient
+      // la pièce suivante. Le seul vrai marqueur de fin = "Coût Total".
       let idxFinPieces = lines.length
       for (let k = idxHeaderPiece + 1; k < lines.length; k++) {
-        const l = lines[k]
-        if (/^Coût\s+Total\s+de\s+la\s+Commande/i.test(l)) { idxFinPieces = k; break }
-        if (/^(Commande|Réservation)$/i.test(l)) { idxFinPieces = k; break }
-        if (isHeaderEmployeLine(l)) { idxFinPieces = k; break }
+        if (/^Coût\s+Total\s+de\s+la\s+Commande/i.test(lines[k])) { idxFinPieces = k; break }
       }
 
-      // Parser les lignes de pièces + collecter celles qui ressemblent à des
-      // pièces mais qui ont été rejetées (pour diagnostic).
-      const pieces: { num_piece: string, qte_commandee: number, description: string | null }[] = []
+      // Parser les lignes de pièces + collecter celles rejetées (pour diagnostic).
+      // On garde l'index de chaque pièce dans `piecesAvecIdx` pour pouvoir
+      // associer ensuite chaque pièce à SON employé/facture (celui du bloc
+      // Réservation/Commande qui la suit, avant la pièce suivante).
+      const piecesAvecIdx: { idx: number, piece: { num_piece: string, qte_commandee: number, description: string | null } }[] = []
       const lignesRejetees: string[] = []
       for (let k = idxHeaderPiece + 1; k < idxFinPieces; k++) {
         const l = lines[k]
         const piece = parsePieceLine(l)
-        if (piece) pieces.push(piece)
+        if (piece) piecesAvecIdx.push({ idx: k, piece })
         else if (looksLikePieceLine(l)) lignesRejetees.push(l)
       }
+      const pieces = piecesAvecIdx.map(x => x.piece)
 
       // Extraire "Nombre d'Items de la Commande: X" pour comparer au #pièces parsées
       let nbItemsAttendu: number | null = null
@@ -364,43 +367,50 @@ export async function parseCommandesPdf(buffer: Buffer | Uint8Array): Promise<Co
         warnings.push(`${header.num_commande} (p.${p + 1}): ${nbItemsAttendu} attendu(s), ${pieces.length} parsé(s)${detail}`)
       }
 
-      // Trouver nom_employe + num_facture — 3 phases pour être robuste :
+      // Pour chaque pièce, on cherche son employé/facture dans le bloc qui la
+      // suit IMMÉDIATEMENT (avant la prochaine pièce ou avant "Coût Total").
+      // Cas multi-pièces : chaque pièce a son propre bloc Réservation/Commande.
+      // Cas mono-pièce : la pièce hérite du bloc du bas de page.
       //
-      // Phase 1 : 1re ligne qui matche "<date> <num> <Nom, Prénom> [#Facture] ..."
-      // Phase 2 : 1re ligne après une ligne contenant "Nom Employé" (= header de bloc)
-      // Phase 3 : recherche permissive de "Nom, Prénom" dans toute la zone après l'en-tête
-      let nom_employe: string | null = null
-      let num_facture: string | null = null
-
-      // Phase 1
+      // Stratégie de fallback global si aucun match par pièce :
+      //   - 1er employé trouvé n'importe où sur la page (pour les pages sans
+      //     bloc explicite après la pièce).
+      let nomEmployeGlobal: string | null = null
+      let numFactureGlobal: string | null = null
       for (let k = idxHeaderCmd + 2; k < lines.length; k++) {
         const r = parseEmployeLine(lines[k])
-        if (r) { nom_employe = r.nom; num_facture = r.facture; break }
+        if (r) { nomEmployeGlobal = r.nom; numFactureGlobal = r.facture; break }
       }
-
-      // Phase 2
-      if (!nom_employe) {
-        for (let k = idxHeaderCmd + 2; k < lines.length - 1; k++) {
-          if (/Nom\s+Employé/i.test(lines[k])) {
-            const r = chercherNomEmploye(lines[k + 1]) || (parseEmployeLine(lines[k + 1]) as any)
-            if (r) { nom_employe = r.nom; num_facture = r.facture; break }
-          }
-        }
-      }
-
-      // Phase 3 — fallback : 1er "Nom, Prénom" trouvé dans la zone après
-      // les pièces (en évitant d'attraper le "Commandé Par" du header).
-      if (!nom_employe && idxHeaderPiece >= 0) {
+      if (!nomEmployeGlobal && idxHeaderPiece >= 0) {
         for (let k = idxHeaderPiece + 1; k < lines.length; k++) {
           if (parsePieceLine(lines[k])) continue
           if (/^Coût\s+Total|^Déduction|^Montant|^Core|^Coût\s+Net|^Nombre/i.test(lines[k])) continue
           const r = chercherNomEmploye(lines[k])
-          if (r) { nom_employe = r.nom; num_facture = r.facture; break }
+          if (r) { nomEmployeGlobal = r.nom; numFactureGlobal = r.facture; break }
         }
       }
 
-      // Émettre une entrée par pièce
-      for (const piece of pieces) {
+      function trouverEmployePourPiece(idxPiece: number, idxPieceSuivante: number): { nom: string | null, facture: string | null } {
+        for (let k = idxPiece + 1; k < idxPieceSuivante; k++) {
+          const r = parseEmployeLine(lines[k])
+          if (r) return { nom: r.nom, facture: r.facture }
+        }
+        // Fallback permissif
+        for (let k = idxPiece + 1; k < idxPieceSuivante; k++) {
+          if (/^Coût\s+Total|^Déduction|^Montant|^Core|^Coût\s+Net|^Nombre|^Commande$|^Réservation$/i.test(lines[k])) continue
+          if (isHeaderEmployeLine(lines[k])) continue
+          const r = chercherNomEmploye(lines[k])
+          if (r) return { nom: r.nom, facture: r.facture }
+        }
+        return { nom: null, facture: null }
+      }
+
+      // Émettre une entrée par pièce avec son employé/facture spécifique
+      for (let i = 0; i < piecesAvecIdx.length; i++) {
+        const { idx, piece } = piecesAvecIdx[i]
+        const idxSuiv = i + 1 < piecesAvecIdx.length ? piecesAvecIdx[i + 1].idx : idxFinPieces
+        let { nom, facture } = trouverEmployePourPiece(idx, idxSuiv)
+        if (!nom) { nom = nomEmployeGlobal; facture = numFactureGlobal }
         commandes.push({
           num_commande:    header.num_commande,
           statut:          header.statut,
@@ -411,8 +421,8 @@ export async function parseCommandesPdf(buffer: Buffer | Uint8Array): Promise<Co
           num_piece:       piece.num_piece,
           qte_commandee:   piece.qte_commandee,
           description:     piece.description,
-          nom_employe,
-          num_facture,
+          nom_employe:     nom,
+          num_facture:     facture,
         })
       }
     }
