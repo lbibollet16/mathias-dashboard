@@ -882,6 +882,7 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, for
   const [notifVu, setNotifVu] = useState(false)
   // Un seul fichier sélectionné, réutilisable pour Import / Mode IA / Diagnostic
   const [pdfFile, setPdfFile] = useState<File|null>(null)
+  const [cmdFilter, setCmdFilter] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
   const moiNom = profil?.nom || profil?.email || ''
 
@@ -948,12 +949,14 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, for
       const fd = new FormData()
       fd.append('file', file)
       fd.append('diagnostic', '1')
+      if (cmdFilter.trim()) fd.append('cmd', cmdFilter.trim())
       const r = await fetch('/api/commandes-attente/import', { method:'POST', body: fd })
       const d = await r.json()
       if (!r.ok || d.erreur) {
         setMsg({type:'err', text: d.erreur || 'Erreur diagnostic'})
       } else {
-        setMsg({type:'ok', text:`Diagnostic : ${d.nb_lignes_brutes} lignes brutes, ${d.nb_commandes_parsees} commandes reconnues.`})
+        const suffixeFiltre = d.cmd_filter ? ` (filtré sur ${d.cmd_filter})` : ''
+        setMsg({type:'ok', text:`Diagnostic${suffixeFiltre} : ${d.nb_lignes_brutes} lignes brutes, ${d.nb_commandes_parsees} commandes reconnues.`})
         setDiagOutput(d)
       }
     } catch (e:any) {
@@ -1230,10 +1233,16 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, for
                 style={{background:'transparent',color:C.blue,border:`1px solid ${C.blue}`,borderRadius:8,padding:'10px 14px',fontWeight:700,cursor:importing?'not-allowed':'pointer',fontSize:12}}>
                 🤖 Mode IA
               </button>
+              <input
+                value={cmdFilter}
+                onChange={e=>setCmdFilter(e.target.value)}
+                placeholder="N° commande (ex: M1C0041688)"
+                title="Optionnel : filtre le diagnostic sur une commande précise"
+                style={{padding:'9px 10px',fontSize:12,border:`1px solid ${bdr}`,borderRadius:8,background:card,color:dark?'#eee':'#222',width:200}}/>
               <button
                 disabled={importing}
                 onClick={()=>diagnostiquerPdf(pdfFile)}
-                title="Affiche les lignes brutes extraites du PDF — utile pour debug"
+                title="Affiche les lignes brutes extraites du PDF — laisse le filtre vide pour tout voir, ou tape un n° de commande pour zoomer dessus"
                 style={{background:'transparent',color:sub,border:`1px solid ${bdr}`,borderRadius:8,padding:'10px 14px',fontWeight:700,cursor:importing?'not-allowed':'pointer',fontSize:12}}>
                 🔍 Diagnostic
               </button>
@@ -1268,9 +1277,15 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, for
               <span style={{fontSize:11,color:sub}}>{diagOutput.commandes?.length || 0} commandes reconnues</span>
               <button onClick={()=>setDiagOutput(null)} style={{marginLeft:'auto',background:'transparent',border:'none',color:sub,cursor:'pointer',fontSize:13}}>✕</button>
             </div>
-            <div style={{padding:10,maxHeight:380,overflow:'auto',fontFamily:'ui-monospace,monospace',fontSize:11,whiteSpace:'pre-wrap',background:dark?'#0d0d0d':'#fff'}}>
+            <div style={{padding:10,maxHeight:480,overflow:'auto',fontFamily:'ui-monospace,monospace',fontSize:11,whiteSpace:'pre-wrap',background:dark?'#0d0d0d':'#fff'}}>
               {diagOutput.note && <div style={{color:C.red,fontWeight:700,marginBottom:8}}>{diagOutput.note}</div>}
-              <div style={{fontWeight:700,marginBottom:4,color:C.blue}}>— Texte brut extrait du PDF (premiers 8000 car) —</div>
+              {diagOutput.warnings && diagOutput.warnings.length > 0 && <>
+                <div style={{fontWeight:700,marginBottom:4,color:C.red}}>⚠️ Warnings ({diagOutput.warnings.length}) — commandes avec mismatch "Nombre d'Items" :</div>
+                <div style={{background:dark?'#2a1611':'#fff8f6',border:`1px solid ${C.red}33`,padding:'8px 10px',borderRadius:6,marginBottom:12,color:dark?'#ffaa99':'#a52f1f'}}>
+                  {diagOutput.warnings.map((w:string, i:number) => <div key={i} style={{marginBottom:4}}>• {w}</div>)}
+                </div>
+              </>}
+              <div style={{fontWeight:700,marginBottom:4,color:C.blue}}>— Texte brut extrait du PDF {diagOutput.cmd_filter ? `(filtré sur ${diagOutput.cmd_filter})` : '(premiers 8000 car)'} —</div>
               <div>{diagOutput.rawText || (diagOutput.rawLines || []).join('\n')}</div>
               {diagOutput.commandes && diagOutput.commandes.length > 0 && <>
                 <div style={{fontWeight:700,marginTop:14,marginBottom:4,color:C.green}}>— Commandes parsées (JSON) —</div>

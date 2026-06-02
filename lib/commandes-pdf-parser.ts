@@ -231,6 +231,25 @@ function parsePieceLine(line: string): { num_piece: string, qte_commandee: numbe
   return { num_piece, qte_commandee, description }
 }
 
+// Détection laxe d'une ligne qui ressemble à une pièce mais qui pourrait
+// avoir été rejetée par parsePieceLine. Sert juste à signaler dans les
+// warnings : "il y a probablement des pièces que je rate sur cette ligne".
+// Critère : 1er token >= 3 caractères contenant chiffres ou lettres, suivi
+// d'au moins un nombre (num_fourn ou qte) ET d'un coût décimal quelque part.
+function looksLikePieceLine(line: string): boolean {
+  const tokens = line.split(/\s+/)
+  if (tokens.length < 4) return false
+  const first = tokens[0]
+  if (first.length < 3) return false
+  if (!/[A-Z0-9]/i.test(first)) return false
+  // Au moins un nombre dans les 3 premiers tokens (num_fourn ou qte)
+  const aUnNombre = tokens.slice(1, 4).some(t => /^\d+$/.test(t))
+  if (!aUnNombre) return false
+  // Et un coût décimal quelque part dans la ligne
+  const aUnCout = tokens.some(t => /^-?\d+[,.]\d{1,4}$/.test(t))
+  return aUnCout
+}
+
 // Parse une ligne du bloc Commande/Réservation et retourne nom_employe
 // + num_facture (présent uniquement dans le bloc Réservation).
 //
@@ -318,11 +337,31 @@ export async function parseCommandesPdf(buffer: Buffer | Uint8Array): Promise<Co
         if (isHeaderEmployeLine(l)) { idxFinPieces = k; break }
       }
 
-      // Parser les lignes de pièces
+      // Parser les lignes de pièces + collecter celles qui ressemblent à des
+      // pièces mais qui ont été rejetées (pour diagnostic).
       const pieces: { num_piece: string, qte_commandee: number, description: string | null }[] = []
+      const lignesRejetees: string[] = []
       for (let k = idxHeaderPiece + 1; k < idxFinPieces; k++) {
-        const piece = parsePieceLine(lines[k])
+        const l = lines[k]
+        const piece = parsePieceLine(l)
         if (piece) pieces.push(piece)
+        else if (looksLikePieceLine(l)) lignesRejetees.push(l)
+      }
+
+      // Extraire "Nombre d'Items de la Commande: X" pour comparer au #pièces parsées
+      let nbItemsAttendu: number | null = null
+      for (let k = idxFinPieces; k < lines.length; k++) {
+        const m = /^Nombre\s+d'Items\s+de\s+la\s+Commande\s*:\s*(\d+)/i.exec(lines[k])
+        if (m) { nbItemsAttendu = parseInt(m[1], 10); break }
+      }
+      if (nbItemsAttendu != null && nbItemsAttendu !== pieces.length) {
+        const lignesPiecesZone = lines.slice(idxHeaderPiece + 1, idxFinPieces).filter(l => l.trim())
+        const detail = lignesRejetees.length > 0
+          ? ` | ${lignesRejetees.length} ligne(s) rejetée(s) : ${lignesRejetees.map(l => l.slice(0, 80)).join(' || ')}`
+          : lignesPiecesZone.length === 0
+            ? ' | aucune ligne de pièce dans le PDF (probablement Traction qui ne les affiche pas)'
+            : ` | ${lignesPiecesZone.length} ligne(s) dans la zone pièces non reconnue(s)`
+        warnings.push(`${header.num_commande} (p.${p + 1}): ${nbItemsAttendu} attendu(s), ${pieces.length} parsé(s)${detail}`)
       }
 
       // Trouver nom_employe + num_facture — 3 phases pour être robuste :

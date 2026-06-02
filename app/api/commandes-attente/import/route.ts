@@ -27,6 +27,10 @@ export async function POST(req: NextRequest) {
     const form = await req.formData()
     const file = form.get('file') as File | null
     const diagnostic = String(form.get('diagnostic') || '') === '1'
+    // Filtre diagnostic : si fourni, ne renvoie que les lignes brutes autour
+    // de cette commande précise (utile pour debug "il manque des pièces sur
+    // M1C00XXX" quand le dump complet dépasse 8000 char).
+    const cmdFilter = String(form.get('cmd') || '').trim().toUpperCase()
     // Moteur par défaut = regex (rapide, adapté au format multi-page Traction).
     // L'IA reste en option ("moteur=ia") pour les cas où le regex galère.
     const moteur = String(form.get('moteur') || 'regex').toLowerCase()
@@ -40,14 +44,42 @@ export async function POST(req: NextRequest) {
     if (diagnostic) {
       const r = await parseCommandesPdf(buf)
       if (!r.success) return NextResponse.json({ erreur: r.erreur || 'Erreur extraction PDF' }, { status: 500 })
+
+      // Si l'utilisateur a demandé une commande précise, on extrait juste son
+      // bloc dans le texte brut + on filtre les warnings + on garde uniquement
+      // ses pièces parsées. Sinon comportement classique : dump 8000 char.
+      let rawText: string
+      let commandesFiltrees = r.commandes
+      let warningsFiltres = r.warnings
+      if (cmdFilter) {
+        // Trouver l'index de la ligne qui contient cmdFilter (= header de la
+        // commande) et tout extraire jusqu'au prochain header ou la fin.
+        const idxStart = r.rawLines.findIndex(l => l.toUpperCase().startsWith(cmdFilter + ' '))
+        if (idxStart < 0) {
+          rawText = `(commande ${cmdFilter} introuvable dans le PDF)`
+        } else {
+          // Inclure les 4 lignes avant (en-tête colonne) et jusqu'à la prochaine
+          // ligne qui commence par "X / Y" (= début de page suivante) ou la fin.
+          const idxFin = r.rawLines.findIndex((l, i) => i > idxStart && /^\d+\s*\/\s*\d+$/.test(l.trim()))
+          const fin = idxFin > 0 ? idxFin : r.rawLines.length
+          const debut = Math.max(0, idxStart - 4)
+          rawText = r.rawLines.slice(debut, fin).join('\n')
+        }
+        commandesFiltrees = r.commandes.filter(c => c.num_commande.toUpperCase() === cmdFilter)
+        warningsFiltres = r.warnings.filter(w => w.toUpperCase().includes(cmdFilter))
+      } else {
+        rawText = r.rawLines.join('\n').slice(0, 8000)
+      }
+
       return NextResponse.json({
         diagnostic: true,
         moteur: 'regex (diagnostic)',
+        cmd_filter: cmdFilter || null,
         nb_lignes_brutes: r.rawLines.length,
         nb_commandes_parsees: r.commandes.length,
-        rawText: r.rawLines.join('\n').slice(0, 8000),
-        commandes: r.commandes,
-        warnings: r.warnings,
+        rawText,
+        commandes: commandesFiltrees,
+        warnings: warningsFiltres,
       })
     }
 
