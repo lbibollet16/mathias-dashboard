@@ -136,32 +136,21 @@ export async function POST() {
 
     log.push(`${lotsAAjouter.length} nouveaux lots, ${lotsAMaj.length} lots mis à jour`)
 
-    // 6. ROTATION: stock_aujourdhui → stock_hier → remplacer stock_aujourdhui
-    // a) Copier stock_aujourdhui vers stock_hier
-    const ancienAuj: any[] = []
-    let aujFrom = 0
-    while (true) {
-      const { data: rows } = await supabaseAdmin.from('stock_aujourdhui').select('code_piece, quantite, qty_total').range(aujFrom, aujFrom + 999)
-      ancienAuj.push(...(rows || []))
-      if (!rows || rows.length < 1000) break
-      aujFrom += 1000
-    }
+    // 6. ROTATION (corrigée — anti double-comptage des lots)
+    //    AVANT : stock_hier recevait l'ancien stock_aujourdhui, qui datait déjà
+    //    du run PRÉCÉDENT. Résultat : au run suivant, mapHier pointait 2 runs en
+    //    arrière, et chaque réception tombait dans le diff de DEUX syncs
+    //    consécutifs → lot créé 2 fois (sync 2×/jour).
+    //    MAINTENANT : on écrit le Traction frais de CE run dans stock_hier. Au
+    //    prochain run, diff = Traction(k+1) − Traction(k) : chaque réception
+    //    n'est captée qu'UNE seule fois, peu importe le nombre de syncs/jour.
+    //    (mapHier a déjà été lu à l'étape 4, AVANT cette écriture — l'ordre est sûr.)
+    await supabaseAdmin.from('stock_hier').delete().neq('id', 0)
+    for (let i = 0; i < nouveauStockAuj.length; i += 500)
+      await supabaseAdmin.from('stock_hier').insert(nouveauStockAuj.slice(i, i + 500))
+    log.push(`stock_hier ← Traction frais (${nouveauStockAuj.length} pièces) = référence du prochain diff`)
 
-    if (ancienAuj.length > 0) {
-      // stock_aujourdhui existant → devient stock_hier
-      await supabaseAdmin.from('stock_hier').delete().neq('id', 0)
-      for (let i = 0; i < ancienAuj.length; i += 500)
-        await supabaseAdmin.from('stock_hier').insert(ancienAuj.slice(i, i + 500))
-      log.push(`Rotation: ${ancienAuj.length} lignes stock_aujourdhui → stock_hier`)
-    } else {
-      // Première fois: pas de stock_aujourdhui → on initialise stock_hier avec Traction
-      await supabaseAdmin.from('stock_hier').delete().neq('id', 0)
-      for (let i = 0; i < nouveauStockAuj.length; i += 500)
-        await supabaseAdmin.from('stock_hier').insert(nouveauStockAuj.slice(i, i + 500))
-      log.push(`Init: stock_hier initialisé avec ${nouveauStockAuj.length} pièces`)
-    }
-
-    // b) Mettre à jour stock_aujourdhui avec Traction frais
+    // b) Mettre à jour stock_aujourdhui avec le même Traction frais
     await supabaseAdmin.from('stock_aujourdhui').delete().neq('id', 0)
     for (let i = 0; i < nouveauStockAuj.length; i += 500)
       await supabaseAdmin.from('stock_aujourdhui').insert(nouveauStockAuj.slice(i, i + 500))
