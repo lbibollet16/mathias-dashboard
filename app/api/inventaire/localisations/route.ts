@@ -130,6 +130,57 @@ export async function PUT(req: NextRequest) {
   }
 }
 
+// DELETE — supprimer/désassigner une localisation
+//   body { localisation, code_piece? }
+//   - avec code_piece : retire la loc de CETTE pièce (et supprime la ligne si
+//     la pièce n'a plus aucune loc)
+//   - sans code_piece : retire la loc de TOUTES les pièces + supprime le
+//     placeholder LOC_ de cette loc
+export async function DELETE(req: NextRequest) {
+  try {
+    const body = await req.json().catch(() => ({}))
+    const localisation = String(body.localisation || '').trim()
+    const code_piece = String(body.code_piece || '').trim()
+    if (!localisation) return NextResponse.json({ erreur: 'localisation requise' }, { status: 400 })
+    const locUp = localisation.toUpperCase()
+    const slots = ['localisation1', 'localisation2', 'localisation3', 'localisation4'] as const
+
+    let query = supabaseAdmin.from('inventaire_localisations').select('*')
+    if (code_piece) query = query.ilike('code_piece', code_piece)
+    const { data: rows, error } = await query
+    if (error) throw error
+
+    let affected = 0
+    for (const row of rows || []) {
+      const estPlaceholder = String(row.code_piece || '').startsWith('LOC_')
+      const aLaLoc = slots.some(s => String(row[s] || '').toUpperCase() === locUp)
+      // Placeholder de CETTE loc → supprimer la ligne entière (seulement en mode "toute la loc")
+      if (!code_piece && estPlaceholder && String(row.localisation1 || '').toUpperCase() === locUp) {
+        await supabaseAdmin.from('inventaire_localisations').delete().eq('id', row.id)
+        affected++
+        continue
+      }
+      if (!aLaLoc) continue
+      // Retirer la loc en décalant les slots (pas de trous)
+      const remaining = slots.map(s => row[s]).filter((l: any) => l && String(l).toUpperCase() !== locUp)
+      if (remaining.length === 0) {
+        await supabaseAdmin.from('inventaire_localisations').delete().eq('id', row.id)
+      } else {
+        await supabaseAdmin.from('inventaire_localisations').update({
+          localisation1: remaining[0] || null,
+          localisation2: remaining[1] || null,
+          localisation3: remaining[2] || null,
+          localisation4: remaining[3] || null,
+        }).eq('id', row.id)
+      }
+      affected++
+    }
+    return NextResponse.json({ success: true, affected })
+  } catch (e: any) {
+    return NextResponse.json({ erreur: e.message }, { status: 500 })
+  }
+}
+
 // POST — créer une nouvelle localisation vide
 export async function POST(req: NextRequest) {
   try {

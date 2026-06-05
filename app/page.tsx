@@ -2781,7 +2781,27 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
       }
     } catch {}
 
-    setLocInput(''); setEtape('piece'); setComptesDuJour([]); setMultiLocInfo(null); setPieceDejaComptee(null); sonOk(); setLoading(false)
+    // Recharger les comptages DÉJÀ faits aujourd'hui dans cette loc, pour que
+    // l'employé les revoie et puisse les modifier/supprimer même après avoir
+    // quitté la loc ou rechargé la page (avant, la liste repartait vide).
+    let comptesInit: any[] = []
+    try {
+      const rc = await fetch('/api/inventaire/comptages?loc_today=' + encodeURIComponent(loc))
+      if (rc.ok) {
+        const rows = await rc.json()
+        const descMap = new Map<string,string>()
+        for (const p of dataFiltered) descMap.set(p.code_piece, p.description || '')
+        comptesInit = (Array.isArray(rows) ? rows : []).map((c:any) => ({
+          id: c.id, code_piece: c.code_piece, description: descMap.get(c.code_piece) || '',
+          qte_comptee: c.qte_comptee, qte_systeme: c.qte_systeme,
+          ecart: Number(c.ecart ?? (Number(c.qte_comptee || 0) - Number(c.qte_systeme || 0))),
+          heure: c.date_comptage ? new Date(c.date_comptage).toLocaleTimeString('fr-CA') : '',
+          photo_url: c.photo_url || null,
+        }))
+      }
+    } catch {}
+
+    setLocInput(''); setEtape('piece'); setComptesDuJour(comptesInit); setMultiLocInfo(null); setPieceDejaComptee(null); sonOk(); setLoading(false)
     if (!fromCamera) setTimeout(() => pieceRef.current?.focus(), 100)
   }
 
@@ -3028,6 +3048,51 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
     await fetch('/api/inventaire/comptages?code=' + encodeURIComponent(dernierComptage.code_piece) + '&loc=' + encodeURIComponent(locActive||''), { method: 'DELETE' })
     setComptesDuJour(prev => prev.filter((c:any) => c.code_piece !== dernierComptage.code_piece))
     setDernierComptage(null)
+    chargerMultiLocAFinir()
+  }
+
+  // B — supprimer un comptage précis (erreur sur une pièce, pas seulement le dernier)
+  async function supprimerComptage(code: string) {
+    if (!locActive || !code) return
+    if (!window.confirm(`Supprimer le comptage de ${code} dans ${locActive} ?`)) return
+    await fetch('/api/inventaire/comptages?code=' + encodeURIComponent(code) + '&loc=' + encodeURIComponent(locActive), { method: 'DELETE' })
+    setComptesDuJour(prev => prev.filter((c:any) => c.code_piece !== code))
+    if (dernierComptage?.code_piece === code) setDernierComptage(null)
+    chargerMultiLocAFinir()
+  }
+
+  // C — supprimer la localisation active (la retire de toutes les pièces)
+  async function supprimerLocalisation() {
+    if (!locActive) return
+    const nb = piecesLoc.length
+    if (!window.confirm(`Supprimer la localisation ${locActive} ?\nElle sera retirée de ${nb} pièce(s). Action irréversible.`)) return
+    setLoading(true)
+    try {
+      await fetch('/api/inventaire/localisations', {
+        method: 'DELETE', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ localisation: locActive })
+      })
+      try { localStorage.removeItem('inv_loc_active') } catch {}
+      setLocActive(null); setPiecesLoc([]); setComptesDuJour([]); setEtape('localisation')
+      setLocInput(''); setPieceActive(null); setErreur('')
+      chargerMultiLocAFinir()
+      setTimeout(() => locRef.current?.focus(), 100)
+    } catch (e:any) { setErreur('❌ ' + (e?.message||'Erreur suppression')) }
+    setLoading(false)
+  }
+
+  // D — créer explicitement une nouvelle localisation depuis le champ loc
+  async function creerLocalisationDirecte() {
+    const loc = locInput.trim().toUpperCase()
+    if (!loc) { setErreur('Tape un nom de localisation à créer'); return }
+    setLoading(true)
+    try {
+      await fetch('/api/inventaire/localisations', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ localisation: loc, employe })
+      })
+      await scanLocalisationVal(loc) // entre directement dans la nouvelle loc (vide)
+    } catch (e:any) { setErreur('❌ ' + (e?.message||'Erreur création')); setLoading(false) }
   }
 
   function changerLocalisation() {
@@ -3273,6 +3338,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
                       <button onClick={annulerDernier} style={{background:C.yellow+'22',border:`1px solid ${C.yellow}`,borderRadius:8,padding:'6px 10px',color:C.yellow,cursor:'pointer',fontWeight:700,fontSize:12}}>↩ Annuler</button>
                     )}
                     <button onClick={changerLocalisation} style={{background:'none',border:`1px solid ${C.green}`,borderRadius:8,padding:'6px 10px',color:C.green,cursor:'pointer',fontWeight:700,fontSize:12}}>🔄 Changer</button>
+                    <button onClick={supprimerLocalisation} title="Supprimer cette localisation (la retire de toutes les pièces)" style={{background:'none',border:`1px solid ${C.red}`,borderRadius:8,padding:'6px 10px',color:C.red,cursor:'pointer',fontWeight:700,fontSize:12}}>🗑 Supprimer</button>
                   </div>
                 </div>
                 {/* Barre de progression */}
@@ -3352,6 +3418,12 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
                   </button>
                 </div>
               </form>
+              {locInput.trim() && !showCreerLoc && (
+                <button type="button" onClick={creerLocalisationDirecte} disabled={loading}
+                  style={{marginTop:10,width:'100%',background:'none',border:`1px dashed ${C.green}`,borderRadius:10,padding:'10px 0',color:C.green,cursor:'pointer',fontWeight:700,fontSize:isMobile?14:13}}>
+                  ➕ Créer la localisation « {locInput.trim()} »
+                </button>
+              )}
               {showCreerLoc && (
                 <div style={{marginTop:14,background:dark?'#1a1a2e':'#fff8e1',border:`2px solid ${C.yellow}`,borderRadius:12,padding:'14px 16px'}}>
                   <p style={{color:C.yellow,fontWeight:700,fontSize:14,margin:'0 0 6px'}}>⚠️ "{locInconnue}" inconnue</p>
@@ -3600,6 +3672,8 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
                                   }} style={{background:C.blue+'22',color:C.blue,border:`1px solid ${C.blue}`,borderRadius:6,padding:'4px 10px',fontSize:12,fontWeight:700,cursor:'pointer',marginTop:4}}>
                                     ✏️ Modifier
                                   </button>
+                                  <button onClick={()=>supprimerComptage(p.code_piece)} title="Supprimer ce comptage"
+                                    style={{background:C.red+'18',color:C.red,border:`1px solid ${C.red}`,borderRadius:6,padding:'4px 9px',fontSize:12,fontWeight:700,cursor:'pointer',marginTop:4,marginLeft:4}}>🗑</button>
                                 </div>
                               : <div style={{width:36,height:36,borderRadius:'50%',border:`2px dashed ${bdr}`,display:'flex',alignItems:'center',justifyContent:'center',color:sub,fontSize:18}}>—</div>
                             }
@@ -3670,6 +3744,8 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
                     }} style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 12px',fontSize:13,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
                       ✏️ Modifier
                     </button>
+                    <button onClick={()=>supprimerComptage(c.code_piece)} title="Supprimer ce comptage"
+                      style={{background:C.red,color:'#fff',border:'none',borderRadius:8,padding:'8px 11px',fontSize:13,fontWeight:700,cursor:'pointer'}}>🗑</button>
                   </div>
                 </div>
               ))}
