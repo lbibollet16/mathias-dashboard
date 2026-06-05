@@ -258,7 +258,7 @@ export async function POST() {
     //   comptées, sinon on attendrait que l'employé finisse son cycle.
     const { data: comptagesReconcilies } = await supabaseAdmin
       .from('inventaire_comptages')
-      .select('id, code_piece, localisation, qte_comptee, stock_apres_sync, statut')
+      .select('id, code_piece, localisation, qte_comptee, qte_systeme, ecart_reconcilie, stock_apres_sync, statut')
       .eq('statut', 'reconcilie')
 
     if (comptagesReconcilies && comptagesReconcilies.length > 0) {
@@ -280,13 +280,15 @@ export async function POST() {
           locsParCode.set(r.code_piece, set)
         }
       }
-      // Tous les comptages récents (statut reconcilie ou en_attente) pour
-      // vérifier la couverture des localisations.
+      // Couverture des localisations basée UNIQUEMENT sur 'reconcilie' (cohérent
+      // avec l'agrégation en Comptabilité). Une loc seulement 'en_attente' ne
+      // doit pas déclencher l'auto-résolution d'une pièce multi-loc, sinon
+      // l'écart serait clos alors qu'une loc n'est pas encore réconciliée.
       const { data: tousRecents } = await supabaseAdmin
         .from('inventaire_comptages')
         .select('code_piece, localisation, statut')
         .in('code_piece', codesUniq)
-        .in('statut', ['reconcilie', 'en_attente', 'resolu'])
+        .eq('statut', 'reconcilie')
       const compteesParCode = new Map<string, Set<string>>()
       for (const c of tousRecents || []) {
         const set = compteesParCode.get(c.code_piece) || new Set<string>()
@@ -319,14 +321,13 @@ export async function POST() {
             for (const x of list) idsResolus.push(x.id)
           }
         } else {
-          const stockApres = list.find((x:any) => x.stock_apres_sync !== null && x.stock_apres_sync !== undefined)?.stock_apres_sync
-          if (stockApres === null || stockApres === undefined) continue
-          // Single-loc : ancien comportement
+          // Single-loc : un comptage est 'resolu' quand l'écart FIGÉ au comptage
+          // est nul (aucun ajustement d'inventaire à passer). On n'utilise plus
+          // stock_apres_sync === qte_comptee : après une vente intermédiaire ce
+          // test est quasi toujours faux, ce qui laissait des comptages parfaits
+          // coincés en 'reconcilie' et affichait un faux ajustement en Compta.
           for (const x of list) {
-            if (x.stock_apres_sync !== null && x.stock_apres_sync !== undefined
-                && Number(x.stock_apres_sync) === Number(x.qte_comptee || 0)) {
-              idsResolus.push(x.id)
-            }
+            if (Number(x.ecart_reconcilie || 0) === 0) idsResolus.push(x.id)
           }
         }
       }

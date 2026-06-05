@@ -5789,7 +5789,7 @@ function VerificationTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   // Comptages multi-loc / single-loc — même logique d'agrégation que ComptabiliteTab
   const compteesParCode = new Map<string, Set<string>>()
   for (const c of (comptages || [])) {
-    if (c.statut === 'obsolete' || c.statut === 'resolu') continue
+    if (c.statut !== 'reconcilie') continue  // couverture loc = reconcilie uniquement (cohérent avec la somme)
     const set = compteesParCode.get(c.code_piece) || new Set<string>()
     set.add(String(c.localisation || '').toUpperCase())
     compteesParCode.set(c.code_piece, set)
@@ -5830,9 +5830,11 @@ function VerificationTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
         },
       })
     } else {
-      let ajust: number
-      if (c.stock_apres_sync !== null && c.stock_apres_sync !== undefined) ajust = Number(c.qte_comptee || 0) - Number(c.stock_apres_sync)
-      else ajust = Number(c.ecart_reconcilie || 0)
+      // Ajustement = écart FIGÉ au comptage (qte_comptee − qte_systeme au moment
+      // du comptage), cohérent avec sync/route.ts:412 et la branche multi-loc.
+      // Un comptage parfait (ecart_reconcilie=0) → ajust=0 → disparaît de la liste.
+      // stock_apres_sync (stock J+1) reste purement informatif, jamais base d'ajustement.
+      const ajust: number = Number(c.ecart_reconcilie ?? (Number(c.qte_comptee || 0) - Number(c.qte_systeme || 0)))
       if (ajust === 0) continue
       if (Math.abs(ajust) <= SEUIL) continue
       if (estValide('comptage', c.id)) continue
@@ -6286,7 +6288,7 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   // multi-loc a été totalement comptée avant de l'envoyer en Comptabilité.
   const compteesParCode = new Map<string, Set<string>>()
   for (const c of (comptages || [])) {
-    if (c.statut === 'obsolete' || c.statut === 'resolu') continue
+    if (c.statut !== 'reconcilie') continue  // couverture loc = reconcilie uniquement (cohérent avec la somme)
     const set = compteesParCode.get(c.code_piece) || new Set<string>()
     set.add(String(c.localisation || '').toUpperCase())
     compteesParCode.set(c.code_piece, set)
@@ -6368,15 +6370,13 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
       continue
     }
 
-    // Single-loc — comportement classique
-    // L'écart affiché dans la liste = AJUSTEMENT à appliquer maintenant
-    // = qte_comptee - stock_apres_sync (= stock J+1).
-    let ajust: number
-    if (c.stock_apres_sync !== null && c.stock_apres_sync !== undefined) {
-      ajust = Number(c.qte_comptee || 0) - Number(c.stock_apres_sync)
-    } else {
-      ajust = Number(c.ecart_reconcilie || 0)
-    }
+    // Single-loc — l'AJUSTEMENT d'inventaire = écart FIGÉ AU COMPTAGE
+    // (qte_comptee − qte_systeme au moment du comptage), cohérent avec
+    // sync/route.ts:412 et la branche multi-loc (snapshot du 1er comptage).
+    // Les ventes/réceptions intermédiaires sont du trafic normal et ne créent
+    // PAS d'ajustement : un comptage parfait (ecart_reconcilie=0) donne ajust=0
+    // et disparaît. stock_apres_sync (stock J+1) reste purement informatif.
+    const ajust: number = Number(c.ecart_reconcilie ?? (Number(c.qte_comptee || 0) - Number(c.qte_systeme || 0)))
     if (ajust === 0) continue
     if (estValide('comptage', c.id)) continue
     if (estRetourne('comptage', c.id)) continue
