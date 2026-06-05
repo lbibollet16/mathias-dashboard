@@ -57,6 +57,16 @@ export async function POST() {
     }
     log.push(`${stockTraction.size} pièces Traction`)
 
+    // 2c. GARDE-FOU anti-effacement : si le feed parse beaucoup moins de pièces
+    // que ce qu'on a déjà en base, c'est probablement un feed tronqué (incident
+    // réseau/Traction). On refuse d'écraser les tables — un DELETE+INSERT partiel
+    // viderait sinon stock_aujourdhui et memoire_negatifs.
+    const { count: nbStockExistant } = await supabaseAdmin
+      .from('stock_aujourdhui').select('*', { count: 'exact', head: true })
+    if ((nbStockExistant || 0) > 0 && stockTraction.size < 0.8 * (nbStockExistant || 0)) {
+      throw new Error(`Feed Traction suspect : ${stockTraction.size} pièces parsées vs ${nbStockExistant} en base (<80 %). Sync annulé pour éviter un écrasement partiel.`)
+    }
+
     // 3. Politiques fournisseurs
     const { data: pols } = await supabaseAdmin.from('politiques_fournisseurs').select('*')
     const mapPol = new Map<string, { nom: string; jours: number }>()
@@ -73,6 +83,16 @@ export async function POST() {
     }
     const modeInit = mapHier.size === 0
     log.push(modeInit ? 'Mode initialisation (stock_hier vide)' : `${mapHier.size} pièces dans stock_hier`)
+
+    // 4b. Purge des lots expirés : passé la date limite, le retour fournisseur
+    // n'est plus possible — l'unité n'est plus « retournable ». On remet
+    // qte_restante à 0 pour qu'ils ne gonflent plus la valeur des retournables
+    // ni ne faussent le FIFO ci-dessous.
+    const { data: expiresPurge } = await supabaseAdmin
+      .from('lots_retournables').update({ qte_restante: 0 })
+      .gt('qte_restante', 0).lt('date_limite', todayStr).select('id')
+    if (expiresPurge && expiresPurge.length > 0)
+      log.push(`${expiresPurge.length} lots expirés purgés (qte_restante → 0)`)
 
     // 5. Lots actifs
     let lotsActifs: any[] = []
@@ -256,10 +276,19 @@ export async function POST() {
     //   qte_comptee au stock_apres_sync. Le statut n'est passé en « resolu »
     //   que lorsque TOUTES les localisations connues de la pièce ont été
     //   comptées, sinon on attendrait que l'employé finisse son cycle.
-    const { data: comptagesReconcilies } = await supabaseAdmin
-      .from('inventaire_comptages')
-      .select('id, code_piece, localisation, qte_comptee, qte_systeme, ecart_reconcilie, stock_apres_sync, statut')
-      .eq('statut', 'reconcilie')
+    let comptagesReconcilies: any[] = []
+    let reconFrom = 0
+    while (true) {
+      const { data: rows } = await supabaseAdmin
+        .from('inventaire_comptages')
+        .select('id, code_piece, localisation, qte_comptee, qte_systeme, ecart_reconcilie, stock_apres_sync, statut')
+        .eq('statut', 'reconcilie')
+        .order('id', { ascending: true })
+        .range(reconFrom, reconFrom + 999)
+      comptagesReconcilies = comptagesReconcilies.concat(rows || [])
+      if (!rows || rows.length < 1000) break
+      reconFrom += 1000
+    }
 
     if (comptagesReconcilies && comptagesReconcilies.length > 0) {
       // Charger les localisations connues pour ces codes
@@ -347,10 +376,19 @@ export async function POST() {
     //     (code_piece, localisation). Les anciens passent en statut 'obsolete'.
     //     Évite les doublons dans la liste comptable quand un employé refait
     //     le comptage sur la même pièce+loc à plusieurs jours d'intervalle.
-    const { data: tousComptages } = await supabaseAdmin
-      .from('inventaire_comptages')
-      .select('id, code_piece, localisation, date_comptage, statut')
-      .in('statut', ['reconcilie', 'resolu'])
+    let tousComptages: any[] = []
+    let dedupFrom = 0
+    while (true) {
+      const { data: rows } = await supabaseAdmin
+        .from('inventaire_comptages')
+        .select('id, code_piece, localisation, date_comptage, statut')
+        .in('statut', ['reconcilie', 'resolu'])
+        .order('id', { ascending: true })
+        .range(dedupFrom, dedupFrom + 999)
+      tousComptages = tousComptages.concat(rows || [])
+      if (!rows || rows.length < 1000) break
+      dedupFrom += 1000
+    }
 
     if (tousComptages && tousComptages.length > 0) {
       // Grouper par (code_piece, localisation)
