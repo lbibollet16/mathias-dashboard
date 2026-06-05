@@ -877,6 +877,9 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, for
   const [filtCommandePar, setFiltCommandePar] = useState('ALL')
   const [filtMesSuivisSeul, setFiltMesSuivisSeul] = useState(false)
   const [recherche, setRecherche] = useState('')
+  // Pliage : les 2 gros groupes + chaque commande (par numéro)
+  const [bigCollapsed, setBigCollapsed] = useState<{suivi:boolean, encours:boolean}>({suivi:false, encours:false})
+  const [cmdOuvertes, setCmdOuvertes] = useState<Set<string>>(new Set())
   const [diagOutput, setDiagOutput] = useState<any|null>(null)
   const [historique, setHistorique] = useState<{commandeId: number, items: any[]}|null>(null)
   const [notifVu, setNotifVu] = useState(false)
@@ -1117,6 +1120,105 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, for
       </tr>
     </thead>
   )
+
+  // ── Vue groupée par numéro de commande (résumé pliable + détail par pièce) ──
+  const toggleCmd = (num:string) => setCmdOuvertes(prev => { const n = new Set(prev); n.has(num) ? n.delete(num) : n.add(num); return n })
+  const colDetail = ['#Pièce','Qte','Description','Employé','#Facture','Âge','Remarque','Plan d\'action']
+
+  const renderLigneDetail = (l:any) => {
+    const isBO = l.plan_action === PLAN_BO
+    const boManquante = isBO && !l.date_bo
+    const td:any = {padding:'7px 8px',borderBottom:`1px solid ${bdr}`,fontSize:11}
+    return (
+      <tr key={l.id}>
+        <td style={{...td,fontWeight:700,fontSize:12}}>{l.num_piece}</td>
+        <td style={{...td,textAlign:'center',fontWeight:700}}>{l.qte_commandee}</td>
+        <td style={{...td,maxWidth:240}}>{l.description || '—'}</td>
+        <td style={td}>{l.nom_employe || '—'}</td>
+        <td style={{...td,color:sub}}>{l.num_facture || '—'}</td>
+        <td style={{...td,textAlign:'center'}}>{ageBadge(l.ageJours)}</td>
+        <td style={{...td,minWidth:160}}>
+          <input type="text" defaultValue={l.remarque || ''}
+            onBlur={e => { if (e.target.value !== (l.remarque||'')) patcherLigne(l.id, {remarque: e.target.value}) }}
+            placeholder="Remarque…" style={{width:'100%',padding:'5px 7px',border:`1px solid ${bdr}`,borderRadius:5,fontSize:11,background:dark?'#1a1a1a':'#fff',color:dark?'#eee':'#222'}}/>
+        </td>
+        <td style={{...td,minWidth:220}}>
+          <div style={{display:'flex',gap:4,alignItems:'center'}}>
+            <select value={l.plan_action || ''} onChange={e => { const next=e.target.value; const patch:any={plan_action:next}; if(next!==PLAN_BO && l.date_bo) patch.date_bo=null; patcherLigne(l.id, patch) }}
+              style={{flex:1,padding:'5px 7px',border:`1px solid ${boManquante?C.red:bdr}`,borderRadius:5,fontSize:11,background:dark?'#1a1a1a':'#fff',color:dark?'#eee':'#222',fontWeight:l.plan_action?700:400}}>
+              {PLANS_ACTION_CMD.map((p:string) => <option key={p} value={p}>{p || '—'}</option>)}
+            </select>
+            <button onClick={()=>ouvrirHistorique(l.id)} title="Historique" style={{background:'transparent',border:`1px solid ${bdr}`,borderRadius:4,padding:'4px 6px',cursor:'pointer',fontSize:11,color:sub}}>🕐</button>
+          </div>
+          {isBO && (<input type="date" value={l.date_bo || ''} onChange={e => patcherLigne(l.id, {date_bo: e.target.value || null})} required
+            style={{marginTop:4,width:'100%',padding:'4px 6px',border:`1px solid ${boManquante?C.red:bdr}`,borderRadius:4,fontSize:11,background:dark?'#1a1a1a':'#fff',color:boManquante?C.red:(dark?'#eee':'#222'),fontWeight:700}}/>)}
+        </td>
+      </tr>
+    )
+  }
+
+  const renderGroupeCommandes = (lignesGroupe:any[], urgent:boolean) => {
+    const map = new Map<string, any[]>()
+    for (const l of lignesGroupe) {
+      const k = l.num_commande || '(sans n°)'
+      if (!map.has(k)) map.set(k, [])
+      map.get(k)!.push(l)
+    }
+    const groupes = Array.from(map.entries()).sort((a,b) =>
+      Math.max(...b[1].map((x:any)=>x.ageJours)) - Math.max(...a[1].map((x:any)=>x.ageJours)))
+    const thS:any = {padding:'9px 8px',textAlign:'left',fontSize:11,fontWeight:700,borderBottom:`2px solid ${bdr}`,whiteSpace:'nowrap'}
+    const tdS:any = {padding:'9px 8px',borderBottom:`1px solid ${bdr}`,fontSize:12}
+    return (
+      <div style={{overflowX:'auto'}}>
+        <table style={{width:'100%',borderCollapse:'collapse',minWidth:760}}>
+          <thead><tr style={{background:thBg}}>
+            <th style={{...thS,width:30}}></th>
+            <th style={thS}>#Commande</th><th style={thS}>Date</th><th style={thS}>Statut</th>
+            <th style={thS}>#Fourn</th><th style={thS}>Nom Fournisseur</th><th style={thS}>Cmdé Par</th>
+            <th style={{...thS,textAlign:'center'}}>Pièces</th><th style={{...thS,textAlign:'center'}}>Âge max</th>
+          </tr></thead>
+          <tbody>
+            {groupes.map(([num, ls]) => {
+              const ouvert = cmdOuvertes.has(num)
+              const f = ls[0]
+              const ageMax = Math.max(...ls.map((x:any)=>x.ageJours))
+              const sansPlan = ls.filter((x:any)=>!x.plan_action).length
+              return (
+                <React.Fragment key={num}>
+                  <tr onClick={()=>toggleCmd(num)} style={{cursor:'pointer', background: urgent?(dark?'#2b1113':'#fff5f5'):(ouvert?(dark?'#161616':'#eef3fb'):'transparent'), borderLeft: urgent?`4px solid ${C.red}`:'4px solid transparent'}}>
+                    <td style={{...tdS,textAlign:'center',color:sub,fontWeight:900}}>{ouvert?'▼':'▶'}</td>
+                    <td style={{...tdS,fontWeight:800}}>{num}</td>
+                    <td style={{...tdS,fontSize:11}}>{f.date_commande||'—'}</td>
+                    <td style={tdS}>{statutBadge(f.statut)}</td>
+                    <td style={{...tdS,fontSize:11,color:sub}}>{f.num_fournisseur||'—'}</td>
+                    <td style={{...tdS,fontSize:11,fontWeight:600}}>{f.nom_fournisseur||'—'}</td>
+                    <td style={{...tdS,fontSize:11}}>{f.commande_par||'—'}</td>
+                    <td style={{...tdS,textAlign:'center',fontWeight:700}}>
+                      {ls.length}
+                      {sansPlan>0 && <span style={{marginLeft:6,background:C.yellow+'22',color:C.yellow,padding:'1px 7px',borderRadius:10,fontSize:10,fontWeight:700}}>{sansPlan} sans plan</span>}
+                    </td>
+                    <td style={{...tdS,textAlign:'center'}}>{ageBadge(ageMax)}</td>
+                  </tr>
+                  {ouvert && (
+                    <tr>
+                      <td colSpan={9} style={{padding:0,background:dark?'#0f0f0f':'#fafbfc',borderBottom:`2px solid ${bdr}`}}>
+                        <div style={{padding:'6px 6px 10px 34px',overflowX:'auto'}}>
+                          <table style={{width:'100%',borderCollapse:'collapse',minWidth:900}}>
+                            <thead><tr>{colDetail.map(c => <th key={c} style={{...thS,fontSize:10,borderBottom:`1px solid ${bdr}`}}>{c}</th>)}</tr></thead>
+                            <tbody>{ls.map((l:any) => renderLigneDetail(l))}</tbody>
+                          </table>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -1372,42 +1474,30 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, for
           </div>
         </div>
 
-        {/* 🚨 Suivi à faire (≥10j) */}
+        {/* 🚨 Suivi à faire (≥10j) — pliable, regroupé par n° de commande */}
         <div style={{...S.card, background:card, border:`2px solid ${enRetard.length>0?C.red:bdr}`, padding:0, marginBottom:14, overflow:'hidden'}}>
-          <div style={{padding:'12px 14px',background: enRetard.length>0 ? '#fce8e6' : (dark?'#1a1a1a':'#f8f9fa'),borderBottom:`1px solid ${bdr}`,display:'flex',alignItems:'center',gap:10}}>
+          <div onClick={()=>setBigCollapsed(s=>({...s,suivi:!s.suivi}))} style={{padding:'12px 14px',background: enRetard.length>0 ? '#fce8e6' : (dark?'#1a1a1a':'#f8f9fa'),borderBottom:`1px solid ${bdr}`,display:'flex',alignItems:'center',gap:10,cursor:'pointer',userSelect:'none'}}>
+            <span style={{fontSize:14,color:enRetard.length>0?C.red:sub,fontWeight:900,width:14}}>{bigCollapsed.suivi?'▶':'▼'}</span>
             <span style={{fontSize:18}}>🚨</span>
             <span style={{fontSize:14,fontWeight:900,color:enRetard.length>0?C.red:sub}}>Suivi à faire</span>
             <span style={{fontSize:12,color:sub}}>— {enRetard.length} pièce(s) en commande depuis 10 jours ou plus</span>
           </div>
-          {enRetard.length === 0 ? (
+          {!bigCollapsed.suivi && (enRetard.length === 0 ? (
             <div style={{padding:20,textAlign:'center',color:sub,fontSize:12}}>Tout va bien : aucune commande de 10 jours et plus.</div>
-          ) : (
-            <div style={{overflowX:'auto'}}>
-              <table style={{width:'100%',borderCollapse:'collapse',minWidth:1300}}>
-                {tableTop}
-                <tbody>{enRetard.map(l => renderLigne(l, true))}</tbody>
-              </table>
-            </div>
-          )}
+          ) : renderGroupeCommandes(enRetard, true))}
         </div>
 
-        {/* 📋 Toutes les commandes (sauf 10j+) */}
+        {/* 📋 Toutes les commandes (sauf 10j+) — pliable, regroupé par n° de commande */}
         <div style={{...S.card, background:card, border:`1px solid ${bdr}`, padding:0, overflow:'hidden'}}>
-          <div style={{padding:'12px 14px',background:dark?'#1a1a1a':'#f8f9fa',borderBottom:`1px solid ${bdr}`,display:'flex',alignItems:'center',gap:10}}>
+          <div onClick={()=>setBigCollapsed(s=>({...s,encours:!s.encours}))} style={{padding:'12px 14px',background:dark?'#1a1a1a':'#f8f9fa',borderBottom:`1px solid ${bdr}`,display:'flex',alignItems:'center',gap:10,cursor:'pointer',userSelect:'none'}}>
+            <span style={{fontSize:14,color:sub,fontWeight:900,width:14}}>{bigCollapsed.encours?'▶':'▼'}</span>
             <span style={{fontSize:18}}>📋</span>
             <span style={{fontSize:14,fontWeight:900}}>Commandes en cours</span>
             <span style={{fontSize:12,color:sub}}>— {aTemps.length + aSurveil.length} pièce(s) de moins de 10 jours</span>
           </div>
-          {(aTemps.length + aSurveil.length) === 0 ? (
+          {!bigCollapsed.encours && ((aTemps.length + aSurveil.length) === 0 ? (
             <div style={{padding:20,textAlign:'center',color:sub,fontSize:12}}>Rien à afficher avec ces filtres.</div>
-          ) : (
-            <div style={{overflowX:'auto'}}>
-              <table style={{width:'100%',borderCollapse:'collapse',minWidth:1300}}>
-                {tableTop}
-                <tbody>{[...aSurveil, ...aTemps].map(l => renderLigne(l, false))}</tbody>
-              </table>
-            </div>
-          )}
+          ) : renderGroupeCommandes([...aSurveil, ...aTemps], false))}
         </div>
       </>}
     </div>
