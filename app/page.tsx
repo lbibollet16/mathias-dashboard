@@ -4335,6 +4335,8 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
   const [editUser, setEditUser] = useState<any>(null)
   const [editOnglets, setEditOnglets] = useState<string[]>([])
   const [editLoading, setEditLoading] = useState(false)
+  // Modal de désactivation : transfert des données (BO, comptages, négatifs)
+  const [deactiv, setDeactiv] = useState<{user:any, counts:any, dest:string, cats:any, loading:boolean} | null>(null)
 
   // Tous les onglets disponibles
   const TOUS_ONGLETS = [
@@ -4438,6 +4440,36 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
     await chargerUsers()
   }
 
+  // Désactivation : ouvre le modal et charge l'aperçu des données à transférer
+  async function demanderDesactivation(u: any) {
+    setDeactiv({ user: u, counts: null, dest: '', cats: { commandes: true, comptages: true, negatifs: true }, loading: false })
+    try {
+      const r = await fetch('/api/auth/transfer-data?nom=' + encodeURIComponent(u.nom || ''))
+      const counts = r.ok ? await r.json() : { commandes: 0, comptages: 0, negatifs: 0 }
+      setDeactiv(d => d ? { ...d, counts } : d)
+    } catch {
+      setDeactiv(d => d ? { ...d, counts: { commandes: 0, comptages: 0, negatifs: 0 } } : d)
+    }
+  }
+
+  async function confirmerDesactivation(avecTransfert: boolean) {
+    if (!deactiv) return
+    setDeactiv(d => d ? { ...d, loading: true } : d)
+    try {
+      if (avecTransfert && deactiv.dest) {
+        await fetch('/api/auth/transfer-data', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ fromNom: deactiv.user.nom, toNom: deactiv.dest, categories: deactiv.cats })
+        })
+      }
+      await toggleActif(deactiv.user.id, false)
+      setDeactiv(null)
+    } catch (e:any) {
+      setDeactiv(d => d ? { ...d, loading: false } : d)
+      alert('Erreur : ' + (e?.message || e))
+    }
+  }
+
   async function supprimer(id: string, nom: string) {
     if (!confirm(`Supprimer ${nom} ?`)) return
     await fetch('/api/auth/users', { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id }) })
@@ -4446,6 +4478,67 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
 
   return (
     <div>
+      {/* ── Modal Désactivation + transfert des données ── */}
+      {deactiv && (() => {
+        const c = deactiv.counts
+        const total = c ? (c.commandes + c.comptages + c.negatifs) : null
+        const actifsCibles = users.filter((x:any) => x.actif && x.nom !== deactiv.user.nom)
+        const peutTransferer = !!deactiv.dest && (deactiv.cats.commandes || deactiv.cats.comptages || deactiv.cats.negatifs)
+        const Row = ({k, label, n}:{k:string,label:string,n:number}) => (
+          <label style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:10,border:`1px solid ${bdr}`,cursor:n>0?'pointer':'default',opacity:n>0?1:.5}}>
+            <input type="checkbox" disabled={n===0} checked={!!deactiv.cats[k]} onChange={e=>setDeactiv(d=>d?{...d,cats:{...d.cats,[k]:e.target.checked}}:d)}/>
+            <span style={{flex:1,fontSize:13,fontWeight:600}}>{label}</span>
+            <span style={{background:C.blue+'22',color:C.blue,padding:'2px 10px',borderRadius:10,fontSize:12,fontWeight:800}}>{n}</span>
+          </label>
+        )
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+            <div style={{background:card,borderRadius:20,padding:26,width:'100%',maxWidth:480,border:`1px solid ${bdr}`,boxShadow:'0 24px 80px rgba(0,0,0,.4)',maxHeight:'90vh',overflowY:'auto'}}>
+              <div style={{fontWeight:800,fontSize:18,marginBottom:4}}>🚫 Désactiver {deactiv.user.nom}</div>
+              <div style={{color:sub,fontSize:13,marginBottom:18}}>Transmets ses suivis en cours à une personne active avant de la désactiver.</div>
+
+              {c === null ? (
+                <div style={{padding:24,textAlign:'center',color:sub,fontSize:13}}>Analyse des données…</div>
+              ) : total === 0 ? (
+                <div style={{background:dark?'#0d2a18':'#e6f4ea',border:`1px solid ${C.green}`,borderRadius:10,padding:'12px 14px',fontSize:13,color:C.green,marginBottom:18}}>
+                  Aucune donnée rattachée à cette personne — rien à transférer.
+                </div>
+              ) : (
+                <>
+                  <div style={{fontSize:12,fontWeight:700,color:sub,marginBottom:8,textTransform:'uppercase'}}>Données à transférer</div>
+                  <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:16}}>
+                    <Row k="commandes" label="BO / Commandes en attente" n={c.commandes}/>
+                    <Row k="comptages" label="Comptages d'inventaire" n={c.comptages}/>
+                    <Row k="negatifs" label="Négatifs vérifiés" n={c.negatifs}/>
+                  </div>
+                  <div style={{fontSize:12,fontWeight:700,color:sub,marginBottom:6,textTransform:'uppercase'}}>Transmettre à</div>
+                  <select value={deactiv.dest} onChange={e=>setDeactiv(d=>d?{...d,dest:e.target.value}:d)}
+                    style={{width:'100%',padding:'10px 12px',border:`1px solid ${deactiv.dest?C.blue:bdr}`,borderRadius:10,fontSize:14,background:dark?'#1a1a1a':'#fff',color:dark?'#eee':'#222',marginBottom:18,fontWeight:700}}>
+                    <option value="">— Choisir un destinataire —</option>
+                    {actifsCibles.map((x:any) => <option key={x.id} value={x.nom}>{x.nom}</option>)}
+                  </select>
+                </>
+              )}
+
+              <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                <button onClick={()=>setDeactiv(null)} disabled={deactiv.loading}
+                  style={{background:'none',border:`1px solid ${bdr}`,borderRadius:10,padding:'10px 16px',color:sub,fontSize:13,fontWeight:700,cursor:'pointer'}}>Annuler</button>
+                <button onClick={()=>confirmerDesactivation(false)} disabled={deactiv.loading}
+                  style={{background:C.yellow+'22',color:C.yellow,border:`1px solid ${C.yellow}`,borderRadius:10,padding:'10px 16px',fontSize:13,fontWeight:700,cursor:'pointer'}}>
+                  Désactiver sans transférer
+                </button>
+                {(total ?? 0) > 0 && (
+                  <button onClick={()=>confirmerDesactivation(true)} disabled={deactiv.loading || !peutTransferer}
+                    style={{background:peutTransferer?C.green:bdr,color:'#fff',border:'none',borderRadius:10,padding:'10px 16px',fontSize:13,fontWeight:800,cursor:peutTransferer?'pointer':'default'}}>
+                    {deactiv.loading ? '…' : 'Transférer et désactiver'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* ── Modal Modifier Accès ── */}
       {editUser && (
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
@@ -4617,7 +4710,7 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
                         style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'8px 16px',fontSize:13,fontWeight:700,cursor:'pointer'}}>
                         🔐 Modifier accès
                       </button>
-                      <button onClick={()=>toggleActif(u.id,!u.actif)}
+                      <button onClick={()=> u.actif ? demanderDesactivation(u) : toggleActif(u.id, true)}
                         style={{background:u.actif?C.yellow+'22':C.green+'22',color:u.actif?C.yellow:C.green,border:'none',borderRadius:8,padding:'8px 12px',fontSize:13,fontWeight:700,cursor:'pointer'}}>
                         {u.actif?'Désactiver':'Activer'}
                       </button>
