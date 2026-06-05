@@ -428,6 +428,37 @@ export async function POST() {
       }
     }
 
+    // 8f. Auto-résolution des comptages dont la pièce est MAINTENANT à 0 en stock.
+    //   L'écart d'inventaire n'est plus corrigeable : il n'y a plus rien à
+    //   ajuster ni à recompter (le stock compté a été vendu/expédié depuis). On
+    //   passe ces comptages en 'resolu' pour ne plus encombrer la Comptabilité
+    //   avec une valeur « Système » périmée. La donnée reste en base.
+    const stockTotalUC = new Map<string, number>()
+    for (const [k, v] of stockTraction) stockTotalUC.set(k.toUpperCase(), v.qtyTotal || 0)
+    let recAvecEcart: any[] = []
+    let recFrom = 0
+    while (true) {
+      const { data: rows } = await supabaseAdmin
+        .from('inventaire_comptages')
+        .select('id, code_piece')
+        .eq('statut', 'reconcilie')
+        .neq('ecart_reconcilie', 0)
+        .order('id', { ascending: true })
+        .range(recFrom, recFrom + 999)
+      recAvecEcart = recAvecEcart.concat(rows || [])
+      if (!rows || rows.length < 1000) break
+      recFrom += 1000
+    }
+    const idsStock0 = recAvecEcart
+      .filter(c => (stockTotalUC.get(String(c.code_piece || '').toUpperCase()) || 0) === 0)
+      .map(c => c.id)
+    if (idsStock0.length > 0) {
+      for (let i = 0; i < idsStock0.length; i += 200) {
+        await supabaseAdmin.from('inventaire_comptages').update({ statut: 'resolu' }).in('id', idsStock0.slice(i, i + 200))
+      }
+      log.push(`${idsStock0.length} comptages auto-résolus (pièce maintenant à 0 — écart non corrigeable)`)
+    }
+
     // 9. Réconciliation inventaire cyclique
     const hier = new Date(now)
     hier.setDate(hier.getDate() - 1)

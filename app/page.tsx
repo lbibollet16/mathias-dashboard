@@ -6145,11 +6145,17 @@ function VerificationTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                       {it.source === 'comptage' ? (
                         <>
                           <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,textAlign:'center',background:card,borderRadius:8,padding:'10px 12px',border:`1px solid ${bdr}`,marginBottom:10}}>
-                            <div><div style={{fontSize:9,color:sub}}>{it.raw.multi_loc?'Système (snap)':'Système'}</div><div style={{fontSize:16,fontWeight:900,color:C.blue}}>{it.raw.qte_systeme}</div></div>
+                            <div><div style={{fontSize:9,color:sub}} title="Stock système figé au moment du comptage (pas la valeur actuelle)">{it.raw.multi_loc?'Sys. (snap)':'Sys. au comptage'}</div><div style={{fontSize:16,fontWeight:900,color:C.blue}}>{it.raw.qte_systeme}</div></div>
                             <div><div style={{fontSize:9,color:sub}}>{it.raw.multi_loc?'Compté (Σ)':'Compté'}</div><div style={{fontSize:16,fontWeight:900,color:C.green}}>{it.raw.qte_comptee}</div></div>
-                            <div><div style={{fontSize:9,color:sub}}>Stock J+1</div><div style={{fontSize:16,fontWeight:900,color:C.blue}}>{it.raw.stock_apres_sync??'—'}</div></div>
+                            <div><div style={{fontSize:9,color:sub}} title="Stock système le lendemain du comptage">Stock J+1</div><div style={{fontSize:16,fontWeight:900,color:C.blue}}>{it.raw.stock_apres_sync??'—'}</div></div>
                             <div><div style={{fontSize:9,color:sub}}>Loc</div><div style={{fontSize:13,fontWeight:700,fontFamily:'monospace',color:C.blue}}>{it.raw.multi_loc?(it.raw.locs_connues||[]).join(', '):it.raw.localisation}</div></div>
                           </div>
+                          {(() => {
+                            const d = it.raw.date_dernier_comptage || it.raw.date_comptage || it.date
+                            if (!d) return null
+                            const j = Math.round((Date.now() - new Date(d).getTime())/86400000)
+                            return <div style={{fontSize:11,marginBottom:10,textAlign:'center',color:j>21?C.yellow:sub}}>{j>21?'⚠️ ':''}Comptage il y a <strong>{j} jour{j>1?'s':''}</strong>{j>21?' — ancien, à traiter ou ignorer':''}</div>
+                          })()}
                           {it.raw.multi_loc && Array.isArray(it.raw.comptages_par_loc) && (
                             <div style={{background:card,borderRadius:8,padding:'10px 12px',border:`1px solid ${bdr}`,marginBottom:10}}>
                               <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:8}}>Détail par localisation</div>
@@ -6804,8 +6810,8 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
           </div>
           <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,textAlign:'center'}}>
             <div>
-              <div style={{fontSize:9,color:sub}} title={c.multi_loc?'Snapshot du système au premier comptage':'Système au moment du comptage'}>
-                {c.multi_loc?'Système (snap)':'Système'}
+              <div style={{fontSize:9,color:sub}} title={c.multi_loc?'Snapshot du système au premier comptage (pas la valeur actuelle)':'Stock système figé au moment du comptage (pas la valeur actuelle)'}>
+                {c.multi_loc?'Sys. (snap)':'Sys. au comptage'}
               </div>
               <div style={{fontSize:16,fontWeight:900,color:C.blue}}>{c.qte_systeme}</div>
             </div>
@@ -6813,6 +6819,12 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
             <div><div style={{fontSize:9,color:sub}}>Stock J+1</div><div style={{fontSize:16,fontWeight:900,color:C.blue}}>{c.stock_apres_sync??'—'}</div></div>
             <div><div style={{fontSize:9,color:sub}}>Loc</div><div style={{fontSize:13,fontWeight:700,fontFamily:'monospace',color:C.blue}}>{c.multi_loc?(c.locs_connues||[]).join(', '):c.localisation}</div></div>
           </div>
+          {(() => {
+            const d = c.date_dernier_comptage || c.date_comptage || c.date_reconciliation
+            if (!d) return null
+            const j = Math.round((Date.now() - new Date(d).getTime())/86400000)
+            return <div style={{fontSize:11,marginTop:8,textAlign:'center',color:j>21?C.yellow:sub}}>{j>21?'⚠️ ':''}Comptage il y a <strong>{j} jour{j>1?'s':''}</strong>{j>21?' — ancien, à traiter ou ignorer':''}</div>
+          })()}
           {!c.multi_loc && c.ecart !== c.ecart_reconcilie && (
             <div style={{fontSize:11,color:sub,marginTop:8,textAlign:'center'}}>
               Ventes entre-temps : <strong style={{color:C.blue}}>{c.qte_systeme - c.stock_apres_sync}</strong> unité(s)
