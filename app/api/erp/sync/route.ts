@@ -427,19 +427,23 @@ export async function POST() {
       .from('inventaire_comptages').select('*')
       .eq('statut', 'en_attente').lte('date_comptage', hierStr + 'T23:59:59')
     if (comptagesAReconcilier && comptagesAReconcilier.length > 0) {
+      // Index Traction insensible à la casse : les PKCode scannés par l'employé
+      // sont mis en majuscules, un simple écart de casse bloquait sinon la pièce.
+      const stockTractionUC = new Map<string, any>()
+      for (const [k, v] of stockTraction) stockTractionUC.set(k.toUpperCase(), v)
       let nb = 0
       for (const c of comptagesAReconcilier) {
-        const s = stockTraction.get(c.code_piece)
-        if (!s) continue
+        const s = stockTraction.get(c.code_piece) || stockTractionUC.get(String(c.code_piece || '').toUpperCase())
         // Écart d'inventaire = différence AU MOMENT DU COMPTAGE (qte_comptee
         // vs qte_systeme), PAS au moment de la sync. Les ventes intermédiaires
         // (entre comptage et sync) ne doivent pas amplifier l'écart — elles
         // sont déjà comptabilisées normalement.
-        // s.stock est sauvegardé dans stock_apres_sync uniquement à titre
-        // informatif (= où on en est aujourd'hui).
+        // IMPORTANT : on réconcilie MÊME si la pièce a disparu de Traction
+        // (radiée), avec stock_apres_sync=null, pour ne plus laisser le comptage
+        // bloqué en 'en_attente' éternel et perdre l'écart d'inventaire.
         const ecartReconcilie = Number(c.qte_comptee || 0) - Number(c.qte_systeme || 0)
         await supabaseAdmin.from('inventaire_comptages').update({
-          stock_apres_sync: s.stock,
+          stock_apres_sync: s ? s.stock : null,
           ecart_reconcilie: ecartReconcilie,
           date_reconciliation: now.toISOString(),
           statut: 'reconcilie'

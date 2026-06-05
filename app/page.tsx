@@ -4987,11 +4987,29 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
       dedup.set(n.code_piece, n)
   }
   const negsUniques = Array.from(dedup.values())
-  const codesVerifies = new Set(negsVerifies.map((v:any) => v.code_piece))
+  // Niveau auquel chaque pièce a été VÉRIFIÉE (stock_au_moment, négatif). On ne
+  // retient que le plus négatif (= le pire niveau déjà vérifié).
+  const verifLevelMap = new Map<string, number>()
+  for (const v of negsVerifies) {
+    const sam = Number(v.stock_au_moment)
+    if (!Number.isFinite(sam)) continue
+    const cur = verifLevelMap.get(v.code_piece)
+    verifLevelMap.set(v.code_piece, cur === undefined ? sam : Math.min(cur, sam))
+  }
   const negsVerifiesVisibles = negsVerifies.filter((v:any) => !validesNegatifIds.has(v.id))
   const fournisseurs = Array.from(new Set(negsUniques.map((n:any) => n.fournisseur))).sort() as string[]
   const lignes = Array.from(new Set(negsUniques.map((n:any) => n.ligne))).sort() as string[]
-  const negsActifs = negsUniques.filter((n:any) => !codesVerifies.has(n.code_piece))
+  // Une pièce vérifiée est masquée SAUF si elle s'est AGGRAVÉE depuis (stock
+  // courant plus négatif que le niveau vérifié) — on la ré-affiche alors avec un
+  // marqueur, sinon une perte qui empire resterait invisible. Les non-vérifiées
+  // restent toujours visibles.
+  const negsActifs = negsUniques
+    .map((n:any) => {
+      const sam = verifLevelMap.get(n.code_piece)
+      const aggrave = sam !== undefined && Number(n.stock_negatif) < sam
+      return { ...n, _verifie: sam !== undefined, _aggrave: aggrave, _stock_verifie: sam }
+    })
+    .filter((n:any) => !n._verifie || n._aggrave)
 
   const filtered = negsActifs.filter((n:any) => {
     if (filtFourn !== 'ALL' && n.fournisseur !== filtFourn) return false
