@@ -2354,6 +2354,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
   const [pieceAjoutable, setPieceAjoutable] = useState<any>(null)
   const [multiLocInfo, setMultiLocInfo] = useState<{locs: string[], dejaComptee?: {loc: string, employe: string, qte: number}} | null>(null)
   const [pieceDejaComptee, setPieceDejaComptee] = useState<any>(null)
+  const [multiLocAFinir, setMultiLocAFinir] = useState<any[]>([])
   const [photoFile, setPhotoFile] = useState<File|null>(null)
   const [photoPreview, setPhotoPreview] = useState<string|null>(null)
   const [pendingComptage, setPendingComptage] = useState<any>(null)
@@ -2384,7 +2385,17 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
 
   useEffect(() => {
     if (sousOnglet === 'suivi') { chargerComptages(); chargerProgression() }
+    if (sousOnglet === 'compter') chargerMultiLocAFinir()
   }, [sousOnglet])
+
+  // Pièces multi-loc commencées mais pas finies (toutes les locs pas encore
+  // comptées) — l'écart reste faux tant que le cycle n'est pas bouclé.
+  async function chargerMultiLocAFinir() {
+    try {
+      const r = await fetch('/api/inventaire/multi-loc-incomplets')
+      if (r.ok) { const j = await r.json(); setMultiLocAFinir(Array.isArray(j.lignes) ? j.lignes : []) }
+    } catch {}
+  }
 
   // Reprendre la localisation sauvegardée
   useEffect(() => {
@@ -3009,6 +3020,7 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
     setComptesDuJour(prev => [c, ...prev.filter((x:any)=>x.code_piece!==piece.code_piece)])
     setDernierComptage(c); setPieceActive(null); setQteInput(''); setEtape('piece'); sonOk(); setLoading(false)
     setTimeout(() => pieceRef.current?.focus(), 100)
+    chargerMultiLocAFinir() // rafraîchir la liste « à terminer » (la pièce vient peut-être de compléter/débuter un cycle multi-loc)
   }
 
   async function annulerDernier() {
@@ -3182,6 +3194,37 @@ function InventaireTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, validatio
               style={{background:'transparent',color:sub,border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 14px',fontWeight:700,cursor:'pointer',fontSize:13}}>
               ✕ Ignorer
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Pièces multi-loc commencées mais pas finies — l'écart reste faux tant
+          que tous les bacs ne sont pas comptés. Touche un bac pour y aller. */}
+      {multiLocAFinir.length > 0 && (
+        <div style={{background:dark?'#2b2411':'#fff8e6',border:`2px solid ${C.yellow}`,borderRadius:12,padding:'12px 14px',marginBottom:14}}>
+          <div style={{fontWeight:800,fontSize:isMobile?15:14,color:dark?C.yellow:'#9a6b00',marginBottom:4}}>
+            🧩 {multiLocAFinir.length} pièce{multiLocAFinir.length>1?'s':''} multi-loc à terminer
+          </div>
+          <div style={{fontSize:isMobile?12:11,color:sub,marginBottom:10,lineHeight:1.4}}>
+            Rangées dans plusieurs bacs dont un seul a été compté. Tant que tous les bacs ne sont pas comptés, leur écart est faux. Touche un bac pour aller le compter.
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:8,maxHeight:260,overflowY:'auto'}}>
+            {multiLocAFinir.map((m:any) => (
+              <div key={m.code_piece} style={{background:dark?'#1a1a1a':'#fff',borderRadius:10,padding:'8px 10px',border:`1px solid ${bdr}`}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                  <span style={{fontWeight:800,fontSize:isMobile?14:13,fontFamily:'monospace'}}>{m.code_piece}</span>
+                  <span style={{fontSize:11,color:sub,fontWeight:700}}>{m.nb_comptees}/{m.nb_total} bacs comptés</span>
+                </div>
+                <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:6}}>
+                  {m.locs_restantes.map((l:string,i:number)=>(
+                    <button key={i} onClick={()=>{ setLocInput(l); scanLocalisationVal(l, false) }}
+                      style={{background:C.yellow,color:'#fff',border:'none',padding:'4px 10px',borderRadius:8,fontSize:isMobile?13:12,fontWeight:700,cursor:'pointer'}}>
+                      ⏳ {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -5823,7 +5866,8 @@ function VerificationTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
       const compteesLoc = compteesParCode.get(c.code_piece) || new Set<string>()
       const toutesComptees = Array.from(locsConnues).every(l => compteesLoc.has(l))
       if (!toutesComptees) continue
-      const reconcs = (comptages || []).filter((x:any) => x.code_piece === c.code_piece && x.statut === 'reconcilie')
+      const reconcs = (comptages || []).filter((x:any) => x.code_piece === c.code_piece && x.statut === 'reconcilie'
+        && locsConnues.has(String(x.localisation || '').toUpperCase()))  // #2: ne sommer que les localisations connues (cohérent avec toutesComptees)
       const sumComptee = reconcs.reduce((s:number, x:any) => s + Number(x.qte_comptee || 0), 0)
       const oldest = [...reconcs].sort((a:any,b:any) => new Date(a.date_comptage).getTime() - new Date(b.date_comptage).getTime())[0]
       const latest = [...reconcs].sort((a:any,b:any) => new Date(b.date_reconciliation || b.date_comptage).getTime() - new Date(a.date_reconciliation || a.date_comptage).getTime())[0]
@@ -6331,9 +6375,11 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
       const toutesComptees = Array.from(locsConnues).every(l => compteesLoc.has(l))
       if (!toutesComptees) continue  // attendre la fin du comptage
 
-      // Agréger tous les comptages reconcilies de cette pièce
+      // Agréger les comptages reconcilies de cette pièce — uniquement sur les
+      // localisations CONNUES (cohérent avec toutesComptees ; #2).
       const reconcs = (comptages || []).filter((x:any) =>
-        x.code_piece === c.code_piece && x.statut === 'reconcilie')
+        x.code_piece === c.code_piece && x.statut === 'reconcilie'
+        && locsConnues.has(String(x.localisation || '').toUpperCase()))
       const sumComptee = reconcs.reduce((s:number, x:any) => s + Number(x.qte_comptee || 0), 0)
       // SNAPSHOT au PREMIER comptage : qte_systeme du comptage le plus ancien
       // sert de référence. Toutes les ventes ultérieures sont traitées comme

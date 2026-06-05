@@ -343,15 +343,16 @@ export async function POST() {
       const idsResolus: number[] = []
       for (const [code, list] of parCode) {
         const locsConnues = locsParCode.get(code) || new Set<string>()
-        const sumComptee = list.reduce((s:number, x:any) => s + Number(x.qte_comptee || 0), 0)
         if (locsConnues.size > 1) {
           // Pièce multi-loc : exiger que toutes les locs aient été comptées
           const comptees = compteesParCode.get(code) || new Set<string>()
           const toutesComptees = Array.from(locsConnues).every(l => comptees.has(l))
           if (!toutesComptees) continue
-          // Snapshot au PREMIER comptage : si sum(qte_comptee) == qte_systeme du
-          // comptage le plus ancien, l'ajustement est nul → auto-resolve.
-          const ordered = [...list].sort((a:any, b:any) =>
+          // Somme sur les localisations CONNUES uniquement (#2), comparée au
+          // snapshot qte_systeme du premier comptage : si égal, ajustement nul → resolu.
+          const listConnues = list.filter((x:any) => locsConnues.has(String(x.localisation || '').toUpperCase()))
+          const sumComptee = listConnues.reduce((s:number, x:any) => s + Number(x.qte_comptee || 0), 0)
+          const ordered = [...listConnues].sort((a:any, b:any) =>
             new Date(a.date_comptage).getTime() - new Date(b.date_comptage).getTime())
           const qteSysFirst = Number(ordered[0]?.qte_systeme || 0)
           if (sumComptee === qteSysFirst) {
@@ -402,7 +403,7 @@ export async function POST() {
       // Grouper par (code_piece, localisation)
       const groupes = new Map<string, any[]>()
       for (const c of tousComptages) {
-        const key = `${c.code_piece}__${c.localisation}`
+        const key = `${c.code_piece}__${String(c.localisation || '').toUpperCase()}`
         if (!groupes.has(key)) groupes.set(key, [])
         groupes.get(key)!.push(c)
       }
