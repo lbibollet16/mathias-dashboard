@@ -11,17 +11,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(data || null)
     }
 
-    // Vérifier les comptages d'aujourd'hui pour une pièce spécifique
-    const codeCheck = req.nextUrl.searchParams.get('code_today')
-    if (codeCheck) {
-      const today = new Date().toISOString().split('T')[0]
-      const { data, error } = await supabaseAdmin.from('inventaire_comptages').select('*')
-        .eq('code_piece', codeCheck)
-        .gte('date_comptage', today + 'T00:00:00').lte('date_comptage', today + 'T23:59:59')
-      if (error) throw error
-      return NextResponse.json(data || [])
-    }
-
     // Comptages ACTIFS (non résolus, non obsolètes) sur une pièce — sans limite
     // de date. Sert à signaler à l'employé qu'une autre loc a déjà été comptée
     // dans le cycle en cours, même si c'était il y a plusieurs jours.
