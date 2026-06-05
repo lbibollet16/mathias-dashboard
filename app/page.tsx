@@ -4865,7 +4865,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     if (e) e.preventDefault()
     if (!noteModal) return
     const n = noteModal
-    const stockSys = Number(n.stock_negatif)
+    const stockSys = Number(n.qty_total ?? n.stock_negatif)  // TOTAL physique (dispo+réservé), pas le dispo négatif
     const altCodes: string[] = (alts && alts.get && alts.get(n.code_piece)) || []
     const hasAlt = altCodes.length > 0
 
@@ -5100,7 +5100,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
     {/* Modal vérification — plein écran mobile */}
     {noteModal && (() => {
       const n = noteModal
-      const stockSys = Number(n.stock_negatif)
+      const stockSys = Number(n.qty_total ?? n.stock_negatif)  // TOTAL physique (dispo+réservé), pas le dispo négatif
       const altCodes: string[] = (alts && alts.get && alts.get(n.code_piece)) || []
       const hasAlt = altCodes.length > 0
       const altItem = hasAlt ? (data?.liste_complete||[]).find((x:any) => x.pk === altCodes[0]) : null
@@ -5143,15 +5143,15 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
               <div style={{marginTop:10,display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}}>
                 <div style={{background:dark?'#1a1a1a':'#fff8f8',borderRadius:10,padding:'10px',textAlign:'center',border:`1px solid ${C.red}33`}}>
                   <div style={{fontSize:11,color:sub,fontWeight:700,textTransform:'uppercase'}}>Stock total</div>
-                  <div style={{fontSize:22,fontWeight:900,color:C.red}}>{n.stock_negatif}</div>
+                  <div style={{fontSize:22,fontWeight:900,color:(n.qty_total ?? n.stock_negatif) < 0 ? C.red : C.green}}>{n.qty_total ?? n.stock_negatif}</div>
                 </div>
                 <div style={{background:dark?'#1a233a':'#e8f0fe',borderRadius:10,padding:'10px',textAlign:'center',border:`1px solid ${C.blue}33`}}>
                   <div style={{fontSize:11,color:sub,fontWeight:700,textTransform:'uppercase'}}>Disponible</div>
-                  <div style={{fontSize:22,fontWeight:900,color:C.blue}}>{n.stock_negatif}</div>
+                  <div style={{fontSize:22,fontWeight:900,color:C.red}}>{n.stock_negatif}</div>
                 </div>
                 <div style={{background:dark?'#2b2411':'#fef7e0',borderRadius:10,padding:'10px',textAlign:'center',border:`1px solid ${C.yellow}33`}}>
                   <div style={{fontSize:11,color:sub,fontWeight:700,textTransform:'uppercase'}}>Réservé</div>
-                  <div style={{fontSize:22,fontWeight:900,color:C.yellow}}>0</div>
+                  <div style={{fontSize:22,fontWeight:900,color:C.yellow}}>{n.qte_reservee ?? 0}</div>
                 </div>
               </div>
               <div style={{marginTop:8,fontSize:12,color:sub}}>🏢 {n.fournisseur} • Ligne {n.ligne}</div>
@@ -5344,7 +5344,7 @@ function NegatifsTab({negs, dark, card, bdr, sub, thBg, S, C, hvr, alts, negsVer
             )}
 
             {/* Bouton soumettre */}
-            <button onClick={soumettre} disabled={loading||!allFormsComplet||(photoObligatoire(getAjust(Number(noteModal?.stock_negatif),form),form.cause)&&nbPhotos===0)}
+            <button onClick={soumettre} disabled={loading||!allFormsComplet||(photoObligatoire(getAjust(Number(noteModal?.qty_total ?? noteModal?.stock_negatif),form),form.cause)&&nbPhotos===0)}
               style={{...btnStyle,background:allFormsComplet&&(!photoObligatoire(ajust, form.cause, form.causeIdx)||nbPhotos>0)?C.green:'#94a3b8',marginBottom:32,fontSize:18,padding:'18px 0'}}>
               {loading?'Enregistrement...':editNegId?'✅ Enregistrer la correction':'✅ Confirmer la vérification'}
             </button>

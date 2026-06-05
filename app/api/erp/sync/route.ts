@@ -115,11 +115,16 @@ export async function POST() {
       // Préparer stock_aujourdhui (remplace l'ancien)
       nouveauStockAuj.push({ code_piece: pk, quantite: info.stock, qty_total: info.qtyTotal || info.stock })
 
-      // Négatifs
+      // Négatifs. On persiste aussi le TOTAL physique (qty_total) et la quantité
+      // réservée : un « négatif » où seul le disponible est < 0 mais le total ≥ 0
+      // est en réalité une pièce entièrement réservée (négatif fictif), pas un
+      // vrai manque physique. La modale et getAjust s'appuient là-dessus pour ne
+      // pas sur-corriger de la quantité réservée.
       if (info.stock < 0) {
         nouveauxNegatifs.push({
           fournisseur: info.nomF, ligne: info.ligne, code_piece: pk,
           description: info.desc, stock_negatif: info.stock,
+          qty_total: info.qtyTotal, qte_reservee: info.qtyTotal - info.stock,
           cout_unitaire: info.cost, date_apparition: todayStr
         })
       }
@@ -191,16 +196,19 @@ export async function POST() {
     for (let i = 0; i < negAvecDates.length; i += 500)
       await supabaseAdmin.from('memoire_negatifs').insert(negAvecDates.slice(i, i + 500))
 
-    // 8b. Nettoyage négatifs vérifiés — supprimer ceux qui ne sont plus en négatif
+    // 8b. Négatifs vérifiés dont le stock est revenu positif : on ARCHIVE
+    // (soft-delete via archive_le) au lieu de supprimer, pour conserver la trace
+    // d'enquête (cause, photos, justification). Si la pièce redevient négative
+    // plus tard, elle réapparaîtra comme un négatif neuf à investiguer.
     const codesEncoreNegatifs = new Set(nouveauxNegatifs.map((n: any) => n.code_piece))
-    const { data: verifiesExistants } = await supabaseAdmin.from('negatifs_verifies').select('id, code_piece')
-    const verifiesASupprimer = (verifiesExistants || []).filter((v: any) => !codesEncoreNegatifs.has(v.code_piece))
-    if (verifiesASupprimer.length > 0) {
-      const ids = verifiesASupprimer.map((v: any) => v.id)
+    const { data: verifiesExistants } = await supabaseAdmin.from('negatifs_verifies').select('id, code_piece').is('archive_le', null)
+    const verifiesAArchiver = (verifiesExistants || []).filter((v: any) => !codesEncoreNegatifs.has(v.code_piece))
+    if (verifiesAArchiver.length > 0) {
+      const ids = verifiesAArchiver.map((v: any) => v.id)
       for (let i = 0; i < ids.length; i += 100) {
-        await supabaseAdmin.from('negatifs_verifies').delete().in('id', ids.slice(i, i + 100))
+        await supabaseAdmin.from('negatifs_verifies').update({ archive_le: now.toISOString() }).in('id', ids.slice(i, i + 100))
       }
-      log.push(`${verifiesASupprimer.length} négatifs vérifiés supprimés (stock corrigé)`)
+      log.push(`${verifiesAArchiver.length} négatifs vérifiés archivés (stock corrigé)`)
     }
 
     // 8c. Auto-correction des retours comptables
