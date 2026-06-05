@@ -11,9 +11,13 @@ export async function GET(req: NextRequest) {
       if (error) throw error
       return NextResponse.json(data || null)
     }
+    // On ne renvoie que les vérifications ACTIVES (non archivées). Une pièce dont
+    // le stock est revenu positif est archivée (archive_le) par le sync plutôt
+    // que supprimée, pour conserver la trace d'enquête.
     const { data, error } = await supabaseAdmin
       .from('negatifs_verifies')
       .select('*')
+      .is('archive_le', null)
       .order('date_verification', { ascending: false })
     if (error) throw error
     return NextResponse.json(data || [])

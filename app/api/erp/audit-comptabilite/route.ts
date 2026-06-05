@@ -44,6 +44,26 @@ export async function GET() {
       }
     }
 
+    // 2b) Nombre de localisations connues par pièce. Une pièce multi-loc ne peut
+    // PAS être classée par comparaison ligne-à-ligne : le comptage est par
+    // emplacement alors que stock_aujourdhui est un TOTAL toutes locs confondues.
+    const locCountMap = new Map<string, number>()
+    if (codesUniques.length > 0) {
+      for (let i = 0; i < codesUniques.length; i += 200) {
+        const slice = codesUniques.slice(i, i + 200)
+        const { data: rows } = await supabaseAdmin
+          .from('inventaire_localisations')
+          .select('code_piece, localisation1, localisation2, localisation3, localisation4')
+          .in('code_piece', slice)
+        for (const r of rows || []) {
+          if (!r.code_piece || r.code_piece.startsWith('LOC_')) continue
+          const set = new Set<string>()
+          for (const l of [r.localisation1, r.localisation2, r.localisation3, r.localisation4]) if (l) set.add(String(l).toUpperCase())
+          locCountMap.set(r.code_piece, set.size)
+        }
+      }
+    }
+
     // 3) Vérifier si validations comptables existent
     const { data: validations } = await supabaseAdmin
       .from('validations_comptables')
@@ -60,10 +80,10 @@ export async function GET() {
     const retournesIds = new Set((retours || []).map(r => r.ref_id))
 
     // 5) Classifier chaque comptage
-    type Categorie = 'RESOLU' | 'SYS_TROP_HAUT' | 'SYS_TROP_BAS' | 'SANS_STOCK'
+    type Categorie = 'RESOLU' | 'SYS_TROP_HAUT' | 'SYS_TROP_BAS' | 'SANS_STOCK' | 'MULTI_LOC'
     const lignes: any[] = []
     const stats: Record<Categorie, number> = {
-      RESOLU: 0, SYS_TROP_HAUT: 0, SYS_TROP_BAS: 0, SANS_STOCK: 0,
+      RESOLU: 0, SYS_TROP_HAUT: 0, SYS_TROP_BAS: 0, SANS_STOCK: 0, MULTI_LOC: 0,
     }
 
     for (const c of comptages || []) {
@@ -72,9 +92,13 @@ export async function GET() {
 
       let cat: Categorie
       let diagnostic: string
+      const nbLoc = locCountMap.get(c.code_piece) || 1
       if (stockAct === null) {
         cat = 'SANS_STOCK'
         diagnostic = `La pièce a disparu de Traction (absente de stock_aujourdhui). À investiguer.`
+      } else if (nbLoc > 1) {
+        cat = 'MULTI_LOC'
+        diagnostic = `Pièce répartie sur ${nbLoc} localisations : le comptage est par emplacement (${c.qte_comptee}) mais le stock système (${stockAct}) est un TOTAL toutes locs. La comparaison ligne-à-ligne n'est PAS concluante — se référer à l'onglet Comptabilité qui agrège par pièce.`
       } else if (stockAct === Number(c.qte_comptee || 0)) {
         cat = 'RESOLU'
         diagnostic = `Stock actuel (${stockAct}) = quantité comptée (${c.qte_comptee}). Devrait auto-résoudre au prochain sync.`
@@ -108,7 +132,7 @@ export async function GET() {
     }
 
     // Trier par catégorie puis par date
-    const ordre: Record<Categorie, number> = { SYS_TROP_BAS: 1, SYS_TROP_HAUT: 2, SANS_STOCK: 3, RESOLU: 4 }
+    const ordre: Record<Categorie, number> = { SYS_TROP_BAS: 1, SYS_TROP_HAUT: 2, MULTI_LOC: 3, SANS_STOCK: 4, RESOLU: 5 }
     lignes.sort((a, b) => (ordre[a.categorie as Categorie] - ordre[b.categorie as Categorie]) || a.code_piece.localeCompare(b.code_piece))
 
     return NextResponse.json({
@@ -119,6 +143,7 @@ export async function GET() {
         SYS_TROP_HAUT: 'Système > comptage — probable réception entre temps, OU comptage incomplet. Option : recompter ou valider manuellement.',
         SYS_TROP_BAS: 'Système < comptage — VRAIE DISCORDANCE. Le physique vu par l\'employé n\'a jamais été reflété dans le système. À investiguer.',
         SANS_STOCK: 'Pièce absente de Traction — peut-être un PKCode supprimé ou un code erroné.',
+        MULTI_LOC: 'Pièce sur plusieurs localisations — comptage par emplacement vs stock total : non concluant ici. Voir l\'onglet Comptabilité (agrégation par pièce).',
       },
       lignes,
     })

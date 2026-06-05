@@ -13,7 +13,18 @@ export const supabaseAdmin = createClient(
 export const parseFrNum = (val: any): number => {
   if (!val && val !== 0) return 0
   if (typeof val === 'number') return val
-  let s = String(val).replace(/[\s$,\u00a0]/g, '').replace(',', '.')
+  // On retire espaces / $ / espace ins\u00e9cable, mais PAS la virgule : avant, la
+  // virgule \u00e9tait supprim\u00e9e AVANT la conversion d\u00e9cimale, donc \u00ab 1,5 \u00bb devenait
+  // \u00ab 15 \u00bb (\u00d710) et \u00ab 12,75 \u00bb \u2192 1275. On traite d\u00e9sormais la virgule comme
+  // s\u00e9parateur d\u00e9cimal, et on g\u00e8re aussi les s\u00e9parateurs de milliers.
+  let s = String(val).replace(/[\s$\u00a0]/g, '')
+  if (s.includes(',') && s.includes('.')) {
+    // Deux s\u00e9parateurs : le plus \u00e0 droite est le d\u00e9cimal, l'autre = milliers.
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.') // 1.234,56 \u2192 1234.56
+    else s = s.replace(/,/g, '')                                                            // 1,234.56 \u2192 1234.56
+  } else {
+    s = s.replace(',', '.')                                                                 // 12,75 \u2192 12.75
+  }
   if (s.startsWith('(') && s.endsWith(')')) s = '-' + s.slice(1, -1)
   const p = parseFloat(s)
   return isNaN(p) ? 0 : p

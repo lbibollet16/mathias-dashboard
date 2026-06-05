@@ -57,6 +57,16 @@ export async function POST() {
     }
     log.push(`${stockTraction.size} pièces Traction`)
 
+    // 2c. GARDE-FOU anti-effacement : si le feed parse beaucoup moins de pièces
+    // que ce qu'on a déjà en base, c'est probablement un feed tronqué (incident
+    // réseau/Traction). On refuse d'écraser les tables — un DELETE+INSERT partiel
+    // viderait sinon stock_aujourdhui et memoire_negatifs.
+    const { count: nbStockExistant } = await supabaseAdmin
+      .from('stock_aujourdhui').select('*', { count: 'exact', head: true })
+    if ((nbStockExistant || 0) > 0 && stockTraction.size < 0.8 * (nbStockExistant || 0)) {
+      throw new Error(`Feed Traction suspect : ${stockTraction.size} pièces parsées vs ${nbStockExistant} en base (<80 %). Sync annulé pour éviter un écrasement partiel.`)
+    }
+
     // 3. Politiques fournisseurs
     const { data: pols } = await supabaseAdmin.from('politiques_fournisseurs').select('*')
     const mapPol = new Map<string, { nom: string; jours: number }>()
@@ -73,6 +83,16 @@ export async function POST() {
     }
     const modeInit = mapHier.size === 0
     log.push(modeInit ? 'Mode initialisation (stock_hier vide)' : `${mapHier.size} pièces dans stock_hier`)
+
+    // 4b. Purge des lots expirés : passé la date limite, le retour fournisseur
+    // n'est plus possible — l'unité n'est plus « retournable ». On remet
+    // qte_restante à 0 pour qu'ils ne gonflent plus la valeur des retournables
+    // ni ne faussent le FIFO ci-dessous.
+    const { data: expiresPurge } = await supabaseAdmin
+      .from('lots_retournables').update({ qte_restante: 0 })
+      .gt('qte_restante', 0).lt('date_limite', todayStr).select('id')
+    if (expiresPurge && expiresPurge.length > 0)
+      log.push(`${expiresPurge.length} lots expirés purgés (qte_restante → 0)`)
 
     // 5. Lots actifs
     let lotsActifs: any[] = []
@@ -95,11 +115,16 @@ export async function POST() {
       // Préparer stock_aujourdhui (remplace l'ancien)
       nouveauStockAuj.push({ code_piece: pk, quantite: info.stock, qty_total: info.qtyTotal || info.stock })
 
-      // Négatifs
+      // Négatifs. On persiste aussi le TOTAL physique (qty_total) et la quantité
+      // réservée : un « négatif » où seul le disponible est < 0 mais le total ≥ 0
+      // est en réalité une pièce entièrement réservée (négatif fictif), pas un
+      // vrai manque physique. La modale et getAjust s'appuient là-dessus pour ne
+      // pas sur-corriger de la quantité réservée.
       if (info.stock < 0) {
         nouveauxNegatifs.push({
           fournisseur: info.nomF, ligne: info.ligne, code_piece: pk,
           description: info.desc, stock_negatif: info.stock,
+          qty_total: info.qtyTotal, qte_reservee: info.qtyTotal - info.stock,
           cout_unitaire: info.cost, date_apparition: todayStr
         })
       }
@@ -136,32 +161,21 @@ export async function POST() {
 
     log.push(`${lotsAAjouter.length} nouveaux lots, ${lotsAMaj.length} lots mis à jour`)
 
-    // 6. ROTATION: stock_aujourdhui → stock_hier → remplacer stock_aujourdhui
-    // a) Copier stock_aujourdhui vers stock_hier
-    const ancienAuj: any[] = []
-    let aujFrom = 0
-    while (true) {
-      const { data: rows } = await supabaseAdmin.from('stock_aujourdhui').select('code_piece, quantite, qty_total').range(aujFrom, aujFrom + 999)
-      ancienAuj.push(...(rows || []))
-      if (!rows || rows.length < 1000) break
-      aujFrom += 1000
-    }
+    // 6. ROTATION (corrigée — anti double-comptage des lots)
+    //    AVANT : stock_hier recevait l'ancien stock_aujourdhui, qui datait déjà
+    //    du run PRÉCÉDENT. Résultat : au run suivant, mapHier pointait 2 runs en
+    //    arrière, et chaque réception tombait dans le diff de DEUX syncs
+    //    consécutifs → lot créé 2 fois (sync 2×/jour).
+    //    MAINTENANT : on écrit le Traction frais de CE run dans stock_hier. Au
+    //    prochain run, diff = Traction(k+1) − Traction(k) : chaque réception
+    //    n'est captée qu'UNE seule fois, peu importe le nombre de syncs/jour.
+    //    (mapHier a déjà été lu à l'étape 4, AVANT cette écriture — l'ordre est sûr.)
+    await supabaseAdmin.from('stock_hier').delete().neq('id', 0)
+    for (let i = 0; i < nouveauStockAuj.length; i += 500)
+      await supabaseAdmin.from('stock_hier').insert(nouveauStockAuj.slice(i, i + 500))
+    log.push(`stock_hier ← Traction frais (${nouveauStockAuj.length} pièces) = référence du prochain diff`)
 
-    if (ancienAuj.length > 0) {
-      // stock_aujourdhui existant → devient stock_hier
-      await supabaseAdmin.from('stock_hier').delete().neq('id', 0)
-      for (let i = 0; i < ancienAuj.length; i += 500)
-        await supabaseAdmin.from('stock_hier').insert(ancienAuj.slice(i, i + 500))
-      log.push(`Rotation: ${ancienAuj.length} lignes stock_aujourdhui → stock_hier`)
-    } else {
-      // Première fois: pas de stock_aujourdhui → on initialise stock_hier avec Traction
-      await supabaseAdmin.from('stock_hier').delete().neq('id', 0)
-      for (let i = 0; i < nouveauStockAuj.length; i += 500)
-        await supabaseAdmin.from('stock_hier').insert(nouveauStockAuj.slice(i, i + 500))
-      log.push(`Init: stock_hier initialisé avec ${nouveauStockAuj.length} pièces`)
-    }
-
-    // b) Mettre à jour stock_aujourdhui avec Traction frais
+    // b) Mettre à jour stock_aujourdhui avec le même Traction frais
     await supabaseAdmin.from('stock_aujourdhui').delete().neq('id', 0)
     for (let i = 0; i < nouveauStockAuj.length; i += 500)
       await supabaseAdmin.from('stock_aujourdhui').insert(nouveauStockAuj.slice(i, i + 500))
@@ -182,16 +196,19 @@ export async function POST() {
     for (let i = 0; i < negAvecDates.length; i += 500)
       await supabaseAdmin.from('memoire_negatifs').insert(negAvecDates.slice(i, i + 500))
 
-    // 8b. Nettoyage négatifs vérifiés — supprimer ceux qui ne sont plus en négatif
+    // 8b. Négatifs vérifiés dont le stock est revenu positif : on ARCHIVE
+    // (soft-delete via archive_le) au lieu de supprimer, pour conserver la trace
+    // d'enquête (cause, photos, justification). Si la pièce redevient négative
+    // plus tard, elle réapparaîtra comme un négatif neuf à investiguer.
     const codesEncoreNegatifs = new Set(nouveauxNegatifs.map((n: any) => n.code_piece))
-    const { data: verifiesExistants } = await supabaseAdmin.from('negatifs_verifies').select('id, code_piece')
-    const verifiesASupprimer = (verifiesExistants || []).filter((v: any) => !codesEncoreNegatifs.has(v.code_piece))
-    if (verifiesASupprimer.length > 0) {
-      const ids = verifiesASupprimer.map((v: any) => v.id)
+    const { data: verifiesExistants } = await supabaseAdmin.from('negatifs_verifies').select('id, code_piece').is('archive_le', null)
+    const verifiesAArchiver = (verifiesExistants || []).filter((v: any) => !codesEncoreNegatifs.has(v.code_piece))
+    if (verifiesAArchiver.length > 0) {
+      const ids = verifiesAArchiver.map((v: any) => v.id)
       for (let i = 0; i < ids.length; i += 100) {
-        await supabaseAdmin.from('negatifs_verifies').delete().in('id', ids.slice(i, i + 100))
+        await supabaseAdmin.from('negatifs_verifies').update({ archive_le: now.toISOString() }).in('id', ids.slice(i, i + 100))
       }
-      log.push(`${verifiesASupprimer.length} négatifs vérifiés supprimés (stock corrigé)`)
+      log.push(`${verifiesAArchiver.length} négatifs vérifiés archivés (stock corrigé)`)
     }
 
     // 8c. Auto-correction des retours comptables
@@ -267,10 +284,19 @@ export async function POST() {
     //   qte_comptee au stock_apres_sync. Le statut n'est passé en « resolu »
     //   que lorsque TOUTES les localisations connues de la pièce ont été
     //   comptées, sinon on attendrait que l'employé finisse son cycle.
-    const { data: comptagesReconcilies } = await supabaseAdmin
-      .from('inventaire_comptages')
-      .select('id, code_piece, localisation, qte_comptee, stock_apres_sync, statut')
-      .eq('statut', 'reconcilie')
+    let comptagesReconcilies: any[] = []
+    let reconFrom = 0
+    while (true) {
+      const { data: rows } = await supabaseAdmin
+        .from('inventaire_comptages')
+        .select('id, code_piece, localisation, qte_comptee, qte_systeme, ecart_reconcilie, stock_apres_sync, statut')
+        .eq('statut', 'reconcilie')
+        .order('id', { ascending: true })
+        .range(reconFrom, reconFrom + 999)
+      comptagesReconcilies = comptagesReconcilies.concat(rows || [])
+      if (!rows || rows.length < 1000) break
+      reconFrom += 1000
+    }
 
     if (comptagesReconcilies && comptagesReconcilies.length > 0) {
       // Charger les localisations connues pour ces codes
@@ -291,13 +317,15 @@ export async function POST() {
           locsParCode.set(r.code_piece, set)
         }
       }
-      // Tous les comptages récents (statut reconcilie ou en_attente) pour
-      // vérifier la couverture des localisations.
+      // Couverture des localisations basée UNIQUEMENT sur 'reconcilie' (cohérent
+      // avec l'agrégation en Comptabilité). Une loc seulement 'en_attente' ne
+      // doit pas déclencher l'auto-résolution d'une pièce multi-loc, sinon
+      // l'écart serait clos alors qu'une loc n'est pas encore réconciliée.
       const { data: tousRecents } = await supabaseAdmin
         .from('inventaire_comptages')
         .select('code_piece, localisation, statut')
         .in('code_piece', codesUniq)
-        .in('statut', ['reconcilie', 'en_attente', 'resolu'])
+        .eq('statut', 'reconcilie')
       const compteesParCode = new Map<string, Set<string>>()
       for (const c of tousRecents || []) {
         const set = compteesParCode.get(c.code_piece) || new Set<string>()
@@ -330,14 +358,13 @@ export async function POST() {
             for (const x of list) idsResolus.push(x.id)
           }
         } else {
-          const stockApres = list.find((x:any) => x.stock_apres_sync !== null && x.stock_apres_sync !== undefined)?.stock_apres_sync
-          if (stockApres === null || stockApres === undefined) continue
-          // Single-loc : ancien comportement
+          // Single-loc : un comptage est 'resolu' quand l'écart FIGÉ au comptage
+          // est nul (aucun ajustement d'inventaire à passer). On n'utilise plus
+          // stock_apres_sync === qte_comptee : après une vente intermédiaire ce
+          // test est quasi toujours faux, ce qui laissait des comptages parfaits
+          // coincés en 'reconcilie' et affichait un faux ajustement en Compta.
           for (const x of list) {
-            if (x.stock_apres_sync !== null && x.stock_apres_sync !== undefined
-                && Number(x.stock_apres_sync) === Number(x.qte_comptee || 0)) {
-              idsResolus.push(x.id)
-            }
+            if (Number(x.ecart_reconcilie || 0) === 0) idsResolus.push(x.id)
           }
         }
       }
@@ -357,10 +384,19 @@ export async function POST() {
     //     (code_piece, localisation). Les anciens passent en statut 'obsolete'.
     //     Évite les doublons dans la liste comptable quand un employé refait
     //     le comptage sur la même pièce+loc à plusieurs jours d'intervalle.
-    const { data: tousComptages } = await supabaseAdmin
-      .from('inventaire_comptages')
-      .select('id, code_piece, localisation, date_comptage, statut')
-      .in('statut', ['reconcilie', 'resolu'])
+    let tousComptages: any[] = []
+    let dedupFrom = 0
+    while (true) {
+      const { data: rows } = await supabaseAdmin
+        .from('inventaire_comptages')
+        .select('id, code_piece, localisation, date_comptage, statut')
+        .in('statut', ['reconcilie', 'resolu'])
+        .order('id', { ascending: true })
+        .range(dedupFrom, dedupFrom + 999)
+      tousComptages = tousComptages.concat(rows || [])
+      if (!rows || rows.length < 1000) break
+      dedupFrom += 1000
+    }
 
     if (tousComptages && tousComptages.length > 0) {
       // Grouper par (code_piece, localisation)
@@ -399,19 +435,23 @@ export async function POST() {
       .from('inventaire_comptages').select('*')
       .eq('statut', 'en_attente').lte('date_comptage', hierStr + 'T23:59:59')
     if (comptagesAReconcilier && comptagesAReconcilier.length > 0) {
+      // Index Traction insensible à la casse : les PKCode scannés par l'employé
+      // sont mis en majuscules, un simple écart de casse bloquait sinon la pièce.
+      const stockTractionUC = new Map<string, any>()
+      for (const [k, v] of stockTraction) stockTractionUC.set(k.toUpperCase(), v)
       let nb = 0
       for (const c of comptagesAReconcilier) {
-        const s = stockTraction.get(c.code_piece)
-        if (!s) continue
+        const s = stockTraction.get(c.code_piece) || stockTractionUC.get(String(c.code_piece || '').toUpperCase())
         // Écart d'inventaire = différence AU MOMENT DU COMPTAGE (qte_comptee
         // vs qte_systeme), PAS au moment de la sync. Les ventes intermédiaires
         // (entre comptage et sync) ne doivent pas amplifier l'écart — elles
         // sont déjà comptabilisées normalement.
-        // s.stock est sauvegardé dans stock_apres_sync uniquement à titre
-        // informatif (= où on en est aujourd'hui).
+        // IMPORTANT : on réconcilie MÊME si la pièce a disparu de Traction
+        // (radiée), avec stock_apres_sync=null, pour ne plus laisser le comptage
+        // bloqué en 'en_attente' éternel et perdre l'écart d'inventaire.
         const ecartReconcilie = Number(c.qte_comptee || 0) - Number(c.qte_systeme || 0)
         await supabaseAdmin.from('inventaire_comptages').update({
-          stock_apres_sync: s.stock,
+          stock_apres_sync: s ? s.stock : null,
           ecart_reconcilie: ecartReconcilie,
           date_reconciliation: now.toISOString(),
           statut: 'reconcilie'
