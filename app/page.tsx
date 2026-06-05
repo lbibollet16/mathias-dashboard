@@ -147,6 +147,16 @@ export default function Dashboard() {
         .eq('id', session.user.id)
         .single()
       setProfil(p)
+      // Navigation depuis le menu (/?tab=xxx) : ouvrir l'onglet demandé s'il est
+      // autorisé pour cet utilisateur, puis nettoyer l'URL. Avant, ce paramètre
+      // était ignoré et on restait toujours sur l'onglet par défaut.
+      try {
+        const requested = new URLSearchParams(window.location.search).get('tab')
+        if (requested && ongletsVisibles(p).includes(requested)) {
+          setTab(requested)
+          window.history.replaceState({}, '', window.location.pathname)
+        }
+      } catch {}
       setAuthLoading(false)
       fetchAll()
     })
