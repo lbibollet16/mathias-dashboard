@@ -6467,6 +6467,8 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
   const [locsParCode, setLocsParCode] = useState<Map<string, Set<string>>>(new Map())
   // Description par code_piece (depuis inventaire_localisations ou memoire_negatifs)
   const [descParCode, setDescParCode] = useState<Map<string, string>>(new Map())
+  // Nom du fournisseur par code_piece (résolu côté API depuis l'ID)
+  const [fournParCode, setFournParCode] = useState<Map<string, string>>(new Map())
 
   async function recharger() {
     try {
@@ -6483,18 +6485,20 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
       if (Array.isArray(rT)) setRetoursTous(rT)
       if (Array.isArray(vd) && setVerifsDoubles) setVerifsDoubles(vd)
 
-      // Charger les localisations connues pour les codes en jeu (reconcilie ou récents)
+      // Charger les localisations (description + fournisseur) pour TOUTES les
+      // pièces affichées en Comptabilité : comptages récents ET négatifs vérifiés.
       if (Array.isArray(c)) {
-        const codesUniques = Array.from(new Set(c
-          .filter((x:any) => x.statut === 'reconcilie' || x.statut === 'en_attente')
-          .map((x:any) => x.code_piece)
-          .filter(Boolean)))
+        const codesUniques = Array.from(new Set([
+          ...c.filter((x:any) => x.statut === 'reconcilie' || x.statut === 'en_attente').map((x:any) => x.code_piece),
+          ...(negsVerifies || []).map((n:any) => n.code_piece),
+        ].filter(Boolean)))
         if (codesUniques.length > 0) {
           const rLoc = await fetch('/api/inventaire/localisations?codes=' + encodeURIComponent(codesUniques.join('|')))
           const rows = await rLoc.json()
           if (Array.isArray(rows)) {
             const map = new Map<string, Set<string>>()
             const desc = new Map<string, string>()
+            const fourn = new Map<string, string>()
             for (const row of rows) {
               if (!row.code_piece || row.code_piece.startsWith('LOC_')) continue
               const set = map.get(row.code_piece) || new Set<string>()
@@ -6505,16 +6509,20 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
               if (row.description && !desc.has(row.code_piece)) {
                 desc.set(row.code_piece, String(row.description))
               }
+              if (row.fournisseur_nom && !fourn.has(row.code_piece)) {
+                fourn.set(row.code_piece, String(row.fournisseur_nom))
+              }
             }
             setLocsParCode(map)
-            // Compléter avec les descriptions des pièces négatives (qui ne sont
-            // peut-être pas dans inventaire_localisations)
+            // Compléter description ET fournisseur depuis les négatifs vérifiés
+            // (memoire_negatifs/negatifs stockent déjà le NOM du fournisseur).
             for (const n of (negsVerifies || [])) {
               if (n.code_piece && n.description && !desc.has(n.code_piece)) {
                 desc.set(n.code_piece, String(n.description))
               }
             }
             setDescParCode(desc)
+            setFournParCode(fourn)
           }
         } else {
           setLocsParCode(new Map())
@@ -6569,7 +6577,9 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
     } finally { setLoadingAction(null) }
   }
 
-  useEffect(() => { recharger() }, [])
+  // Recharge aussi quand les négatifs vérifiés arrivent (pour inclure leurs
+  // codes dans le fetch description/fournisseur).
+  useEffect(() => { recharger() }, [negsVerifies])
 
   const validations = validationsCompta || []
   const validesKey = new Set(validations.map((v:any) => `${v.source}:${v.ref_id}`))
@@ -7234,10 +7244,12 @@ function ComptabiliteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, negsVer
                             )}
                             {(() => {
                               const d = descParCode.get(it.code_piece)
-                              if (!d) return null
+                              const f = it.raw?.fournisseur || fournParCode.get(it.code_piece)
+                              if (!d && !f) return null
                               return (
-                                <div style={{fontFamily:'sans-serif',fontSize:11,fontWeight:400,color:sub,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}} title={d}>
-                                  {d}
+                                <div style={{fontFamily:'sans-serif',fontSize:11,fontWeight:400,color:sub,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:isMobile?200:340}} title={[d,f].filter(Boolean).join(' · ')}>
+                                  {d ? <span>{d}</span> : null}
+                                  {f ? <span style={{color:C.blue,marginLeft:d?6:0,fontWeight:600}}>🏢 {f}</span> : null}
                                 </div>
                               )
                             })()}

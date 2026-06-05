@@ -1,6 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 
+// Dict fournisseur ID → nom (FOURNISSEURS_URL est un TSV id<TAB>nom). Mis en
+// cache 1h par instance pour ne pas re-télécharger à chaque requête. Sert à
+// afficher le NOM du fournisseur (inventaire_localisations stocke un ID).
+let fournDictCache: { at: number; map: Record<string, string> } | null = null
+async function getFournDict(): Promise<Record<string, string>> {
+  if (fournDictCache && Date.now() - fournDictCache.at < 3600_000) return fournDictCache.map
+  const map: Record<string, string> = {}
+  try {
+    const r = await fetch(process.env.FOURNISSEURS_URL!, { signal: AbortSignal.timeout(20000) })
+    const tsv = await r.text()
+    for (const line of tsv.split(/\r?\n/).slice(1)) {
+      const cols = line.split('\t')
+      const id = cols[0]?.replace(/['"]/g, '').trim()
+      const nom = cols[1]?.replace(/['"]/g, '').trim()
+      if (id && nom) map[id] = nom
+    }
+  } catch {}
+  fournDictCache = { at: Date.now(), map }
+  return map
+}
+
 // GET — chercher par localisation ou par code pièce
 export async function GET(req: NextRequest) {
   try {
@@ -40,10 +61,16 @@ export async function GET(req: NextRequest) {
         const slice = list.slice(i, i + 200)
         const { data, error } = await supabaseAdmin
           .from('inventaire_localisations')
-          .select('code_piece, description, localisation1, localisation2, localisation3, localisation4')
+          .select('code_piece, description, fournisseur, localisation1, localisation2, localisation3, localisation4')
           .in('code_piece', slice)
         if (error) throw error
         if (data) out.push(...data)
+      }
+      // Résoudre le NOM du fournisseur (la colonne stocke un ID)
+      const dict = await getFournDict()
+      for (const r of out) {
+        const id = r.fournisseur ? String(r.fournisseur).trim() : ''
+        r.fournisseur_nom = id ? (dict[id] || ('ID:' + id)) : null
       }
       return NextResponse.json(out)
     }
