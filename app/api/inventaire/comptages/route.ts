@@ -11,6 +11,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(data || null)
     }
 
+    // Comptages du JOUR pour une localisation donnée. Sert à recharger la liste
+    // de saisie quand l'employé (re)vient dans une loc, pour qu'il revoie et
+    // puisse modifier/supprimer ce qu'il a déjà compté (sinon la liste repart
+    // vide et il croit avoir tout perdu).
+    const locToday = req.nextUrl.searchParams.get('loc_today')
+    if (locToday) {
+      const today = new Date().toISOString().split('T')[0]
+      const { data, error } = await supabaseAdmin.from('inventaire_comptages').select('*')
+        .eq('localisation', locToday)
+        .gte('date_comptage', today + 'T00:00:00').lte('date_comptage', today + 'T23:59:59')
+        .order('date_comptage', { ascending: false })
+      if (error) throw error
+      return NextResponse.json(data || [])
+    }
+
     // Comptages ACTIFS (non résolus, non obsolètes) sur une pièce — sans limite
     // de date. Sert à signaler à l'employé qu'une autre loc a déjà été comptée
     // dans le cycle en cours, même si c'était il y a plusieurs jours.
