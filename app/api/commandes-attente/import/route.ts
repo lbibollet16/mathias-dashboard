@@ -145,8 +145,12 @@ export async function POST(req: NextRequest) {
     }
 
     const seenKeys = new Set<string>()
-    const toInsert: any[] = []
-    const toUpdate: { id: number, patch: any }[] = []
+    // Dédoublonnage intra-PDF : une même paire (num_commande, num_piece) peut
+    // apparaître plusieurs fois dans le même fichier. On indexe par clé pour
+    // que la dernière occurrence écrase les précédentes — sinon deux INSERT
+    // sur la même clé violeraient la contrainte UNIQUE(num_commande, num_piece).
+    const insertByKey = new Map<string, any>()
+    const updateById  = new Map<number, { id: number, patch: any }>()
 
     for (const c of commandes) {
       // Validation minimum
@@ -171,7 +175,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (!ex) {
-        toInsert.push({
+        insertByKey.set(key, {
           ...baseRow,
           date_premiere_vue:   now,
           date_dernier_import: now,
@@ -180,7 +184,7 @@ export async function POST(req: NextRequest) {
       } else {
         const statutChange = ex.statut !== c.statut
         const wasInactive  = !ex.active
-        toUpdate.push({
+        updateById.set(ex.id, {
           id: ex.id,
           patch: {
             ...baseRow,
@@ -191,6 +195,9 @@ export async function POST(req: NextRequest) {
         })
       }
     }
+
+    const toInsert = Array.from(insertByKey.values())
+    const toUpdate = Array.from(updateById.values())
 
     const toDeactivate: number[] = []
     for (const r of existants || []) {
