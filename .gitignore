@@ -9,6 +9,9 @@ tsconfig.tsbuildinfo
 # Préférences locales Claude Code
 .claude/settings.local.json
 
+# Sauvegardes de tables avant suppression (données métier — ne pas commiter)
+/backup_scoa_vente_2026-07-16/
+
 # Documents source comptables (ne pas commiter — données sensibles)
 /Releve paiement/
 /custumer return/
