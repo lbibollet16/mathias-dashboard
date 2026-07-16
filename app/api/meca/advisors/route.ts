@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { chargerTout } from '@/lib/meca-db'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -56,7 +57,21 @@ export async function GET() {
       }
     })
 
-    return NextResponse.json({ advisors: result })
+    // Noms vus dans le rapport aviseur sans aviseur rattaché.
+    //
+    // Les deux fichiers sources n'ont AUCUNE clé commune : la liste des bons
+    // donne le numéro d'aviseur (d'où les « Aviseur #NN »), le rapport donne le
+    // nom. Le rattachement se fait par nom, donc il n'aboutit qu'une fois
+    // l'aviseur renommé à l'identique. On renvoie la liste des noms en attente
+    // pour que l'UI les propose au lieu de faire retaper la chaîne exacte.
+    const orphelins = await chargerTout<any>(
+      'meca_advisor_performance',
+      q => q.select('advisor_nom').is('advisor_id', null),
+      'advisor_nom'
+    )
+    const nomsRapportNonRattaches = Array.from(new Set(orphelins.map(o => o.advisor_nom))).sort()
+
+    return NextResponse.json({ advisors: result, nomsRapportNonRattaches })
   } catch (e: any) {
     return NextResponse.json({ erreur: e?.message || String(e) }, { status: 500 })
   }
@@ -81,7 +96,23 @@ export async function PATCH(req: NextRequest) {
       .from('meca_advisors').update(patch).eq('id', id).select().single()
     if (error) throw error
 
-    return NextResponse.json({ success: true, advisor: data })
+    // Renommage : on rattache aussi les lignes de performance déjà importées qui
+    // portaient ce nom sans aviseur. Sans ça, renommer ne servirait à rien tant
+    // qu'on n'a pas réimporté le rapport — le rattachement ne se fait qu'à
+    // l'import, et l'utilisateur ne peut pas le deviner.
+    let perfRattachees = 0
+    if (patch.nom) {
+      const { data: liees, error: errLink } = await supabaseAdmin
+        .from('meca_advisor_performance')
+        .update({ advisor_id: id })
+        .eq('advisor_nom', patch.nom)
+        .is('advisor_id', null)
+        .select('id')
+      if (errLink) throw errLink
+      perfRattachees = liees?.length ?? 0
+    }
+
+    return NextResponse.json({ success: true, advisor: data, perfRattachees })
   } catch (e: any) {
     return NextResponse.json({ erreur: e?.message || String(e) }, { status: 500 })
   }

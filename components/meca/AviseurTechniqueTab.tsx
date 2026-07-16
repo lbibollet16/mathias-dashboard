@@ -24,6 +24,7 @@ interface AdvisorRow {
 
 export default function AviseurTechniqueTab({ ...t }: Theme) {
   const [advisors, setAdvisors] = useState<AdvisorRow[]>([])
+  const [nomsRapport, setNomsRapport] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState<{ type: 'info' | 'ok' | 'err', text: string } | null>(null)
   const [avertissements, setAvertissements] = useState<string[]>([])
@@ -37,7 +38,7 @@ export default function AviseurTechniqueTab({ ...t }: Theme) {
       const r = await fetch('/api/meca/advisors')
       const j = await r.json()
       if (j.erreur) setMsg({ type: 'err', text: j.erreur })
-      else setAdvisors(j.advisors ?? [])
+      else { setAdvisors(j.advisors ?? []); setNomsRapport(j.nomsRapportNonRattaches ?? []) }
     } catch (e: any) {
       setMsg({ type: 'err', text: e?.message || String(e) })
     } finally { setLoading(false) }
@@ -81,7 +82,11 @@ export default function AviseurTechniqueTab({ ...t }: Theme) {
       body: JSON.stringify({ id, ...patch }),
     })
     const j = await r.json()
-    if (j.erreur) { setMsg({ type: 'err', text: j.erreur }); charger() }
+    if (j.erreur) { setMsg({ type: 'err', text: j.erreur }); charger(); return }
+    if (j.perfRattachees) {
+      setMsg({ type: 'ok', text: `✅ ${j.perfRattachees} ligne(s) du rapport aviseur rattachée(s) à cet aviseur.` })
+      charger()
+    }
   }
 
   const selectStyle: any = {
@@ -102,7 +107,7 @@ export default function AviseurTechniqueTab({ ...t }: Theme) {
         <SectionTitre
           t={t}
           titre="Importer les fichiers Excel"
-          aide="Importe le rapport aviseur en premier : il donne les noms. La liste des bons ne fournit que les numéros d'aviseur."
+          aide="Importe la liste des bons en premier : c'est elle qui crée les aviseurs. Le rapport aviseur se rattache ensuite par nom."
         />
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 14 }}>
           <BoutonImport t={t} label="📊 Rapport des Aviseurs Technique" disabled={uploading} onFile={f => importer('rapport-aviseur', f)} />
@@ -130,6 +135,12 @@ export default function AviseurTechniqueTab({ ...t }: Theme) {
         )}
       </Carte>
 
+      {/* Les noms du rapport en attente de rattachement, proposés à la saisie :
+          le rattachement est une égalité de chaîne, autant éviter la faute de frappe. */}
+      <datalist id="meca-noms-rapport">
+        {nomsRapport.map(n => <option key={n} value={n} />)}
+      </datalist>
+
       <Carte t={t} style={{ padding: 0, overflow: 'auto' }}>
         <div style={{ padding: '16px 18px 12px' }}>
           <SectionTitre
@@ -137,6 +148,18 @@ export default function AviseurTechniqueTab({ ...t }: Theme) {
             titre="Paramétrage des aviseurs"
             aide="Détermine qui apparaît dans les dashboards Powersport / Marine, et dans lequel. Clique un nom pour son détail, ✏️ pour le renommer."
           />
+          {nomsRapport.length > 0 && (
+            <div style={{
+              marginTop: 10, padding: '10px 14px', borderRadius: 8, fontSize: 12.5, lineHeight: 1.6,
+              color: t.C.yellow, background: `${t.C.yellow}14`, border: `1px solid ${t.C.yellow}55`,
+            }}>
+              ⚠️ {nomsRapport.length} nom(s) du rapport aviseur ne sont rattachés à aucun aviseur, donc leurs chiffres
+              financiers n'apparaissent nulle part : {nomsRapport.map(n => `« ${n} »`).join(', ')}.<br />
+              Les deux fichiers n'ont pas de clé commune — la liste des bons donne le numéro, le rapport donne le nom.
+              Renomme l'« Aviseur #NN » correspondant avec ✏️ (les noms ci-dessus sont proposés à la saisie) : le
+              rattachement se fera aussitôt, sans réimporter.
+            </div>
+          )}
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
@@ -163,13 +186,14 @@ export default function AviseurTechniqueTab({ ...t }: Theme) {
                     <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                       <input
                         autoFocus
+                        list="meca-noms-rapport"
                         value={renomme.nom}
                         onChange={e => setRenomme({ id: a.id, nom: e.target.value })}
                         onKeyDown={e => {
                           if (e.key === 'Enter' && renomme.nom.trim()) { patcher(a.id, { nom: renomme.nom.trim() }); setRenomme(null) }
                           if (e.key === 'Escape') setRenomme(null)
                         }}
-                        style={{ ...selectStyle, width: 180 }}
+                        style={{ ...selectStyle, width: 200 }}
                       />
                       <button onClick={() => { if (renomme.nom.trim()) patcher(a.id, { nom: renomme.nom.trim() }); setRenomme(null) }}
                         style={{ ...selectStyle, cursor: 'pointer', color: t.C.green, fontWeight: 700 }}>✓</button>
