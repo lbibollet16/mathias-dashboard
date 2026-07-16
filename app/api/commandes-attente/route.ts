@@ -6,19 +6,27 @@ export const runtime = 'nodejs'
 // GET — toutes les commandes en attente (active=true) + config (seuil_jours)
 export async function GET() {
   try {
-    const [{ data: lignes, error: e1 }, { data: cfg, error: e2 }] = await Promise.all([
-      supabaseAdmin
+    // Chargement paginé : un select() sans range est plafonné à 1000 lignes par
+    // PostgREST, ce qui tronquerait silencieusement la liste affichée.
+    const lignes: any[] = []
+    for (let from = 0; ; from += 1000) {
+      const { data, error: e1 } = await supabaseAdmin
         .from('commandes_attente')
         .select('*')
         .eq('active', true)
-        .order('date_premiere_vue', { ascending: true }),
-      supabaseAdmin
-        .from('commandes_attente_config')
-        .select('seuil_jours')
-        .eq('id', 1)
-        .single(),
-    ])
-    if (e1) throw e1
+        .order('date_premiere_vue', { ascending: true })
+        .range(from, from + 999)
+      if (e1) throw e1
+      if (!data || data.length === 0) break
+      lignes.push(...data)
+      if (data.length < 1000) break
+    }
+
+    const { data: cfg, error: e2 } = await supabaseAdmin
+      .from('commandes_attente_config')
+      .select('seuil_jours')
+      .eq('id', 1)
+      .single()
     const seuil_jours = (cfg && !e2) ? cfg.seuil_jours : 5
     return NextResponse.json({ lignes: lignes || [], seuil_jours })
   } catch (e: any) {

@@ -22,6 +22,54 @@ export const dynamic = 'force-dynamic'
 //   - Toutes les lignes actives qui n'apparaissent PAS dans cet import
 //     sont marquées active=false (= reçues / fermées).
 
+// Nombre de jours pendant lesquels on garde une ligne désactivée (= pièce
+// reçue/fermée) avant de la supprimer définitivement.
+const RETENTION_JOURS = 90
+
+// Supprime les lignes inactives depuis plus de RETENTION_JOURS qui ne portent
+// aucune saisie humaine. Retourne le nombre de lignes supprimées.
+//
+// On sélectionne puis on supprime par id plutôt que de filtrer directement
+// dans le DELETE : ça permet d'écarter aussi les chaînes vides laissées par
+// d'anciennes versions du PATCH (aujourd'hui il écrit `null`), que `.is(null)`
+// ne verrait pas — et donc de ne jamais purger une ligne annotée.
+async function purgerInactives(): Promise<number> {
+  const seuil = new Date(Date.now() - RETENTION_JOURS * 86400000).toISOString()
+
+  const candidats: any[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabaseAdmin
+      .from('commandes_attente')
+      .select('id, remarque, plan_action, date_bo')
+      .eq('active', false)
+      .lt('date_dernier_import', seuil)
+      .order('id', { ascending: true })
+      .range(from, from + 999)
+    if (error) throw error
+    if (!data || data.length === 0) break
+    candidats.push(...data)
+    if (data.length < 1000) break
+  }
+
+  const aSupprimer = candidats
+    .filter(r => !String(r.remarque ?? '').trim()
+              && !String(r.plan_action ?? '').trim()
+              && !r.date_bo)
+    .map(r => r.id)
+
+  let purged = 0
+  for (let i = 0; i < aSupprimer.length; i += 500) {
+    const batch = aSupprimer.slice(i, i + 500)
+    const { error } = await supabaseAdmin
+      .from('commandes_attente')
+      .delete()
+      .in('id', batch)
+    if (error) throw error
+    purged += batch.length
+  }
+  return purged
+}
+
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData()
@@ -133,11 +181,22 @@ export async function POST(req: NextRequest) {
 
     const now = new Date().toISOString()
 
-    // Charger l'existant
-    const { data: existants, error: errLoad } = await supabaseAdmin
-      .from('commandes_attente')
-      .select('id, num_commande, num_piece, statut, date_premiere_vue, active')
-    if (errLoad) throw errLoad
+    // Charger l'existant — PAGINÉ.
+    // PostgREST/Supabase plafonne un select() sans range à 1000 lignes. Au-delà,
+    // les lignes non chargées étaient vues comme absentes → INSERT sur une clé
+    // déjà présente → violation de UNIQUE(num_commande, num_piece) → import KO.
+    const existants: any[] = []
+    for (let from = 0; ; from += 1000) {
+      const { data, error: errLoad } = await supabaseAdmin
+        .from('commandes_attente')
+        .select('id, num_commande, num_piece, statut, date_premiere_vue, active')
+        .order('id', { ascending: true })
+        .range(from, from + 999)
+      if (errLoad) throw errLoad
+      if (!data || data.length === 0) break
+      existants.push(...data)
+      if (data.length < 1000) break
+    }
 
     const existMap = new Map<string, any>()
     for (const r of existants || []) {
@@ -145,8 +204,12 @@ export async function POST(req: NextRequest) {
     }
 
     const seenKeys = new Set<string>()
-    const toInsert: any[] = []
-    const toUpdate: { id: number, patch: any }[] = []
+    // Dédoublonnage intra-PDF : une même paire (num_commande, num_piece) peut
+    // apparaître plusieurs fois dans le même fichier. On indexe par clé pour
+    // que la dernière occurrence écrase les précédentes — sinon deux INSERT
+    // sur la même clé violeraient la contrainte UNIQUE(num_commande, num_piece).
+    const insertByKey = new Map<string, any>()
+    const updateById  = new Map<number, { id: number, patch: any }>()
 
     for (const c of commandes) {
       // Validation minimum
@@ -171,7 +234,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (!ex) {
-        toInsert.push({
+        insertByKey.set(key, {
           ...baseRow,
           date_premiere_vue:   now,
           date_dernier_import: now,
@@ -180,7 +243,7 @@ export async function POST(req: NextRequest) {
       } else {
         const statutChange = ex.statut !== c.statut
         const wasInactive  = !ex.active
-        toUpdate.push({
+        updateById.set(ex.id, {
           id: ex.id,
           patch: {
             ...baseRow,
@@ -192,6 +255,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const toInsert = Array.from(insertByKey.values())
+    const toUpdate = Array.from(updateById.values())
+
     const toDeactivate: number[] = []
     for (const r of existants || []) {
       const key = `${r.num_commande}__${r.num_piece}`
@@ -202,7 +268,11 @@ export async function POST(req: NextRequest) {
 
     for (let i = 0; i < toInsert.length; i += 500) {
       const batch = toInsert.slice(i, i + 500)
-      const { error } = await supabaseAdmin.from('commandes_attente').insert(batch)
+      // upsert plutôt qu'insert : filet de sécurité si une clé existait malgré
+      // tout en base (course avec un autre import, ligne créée à la main…).
+      const { error } = await supabaseAdmin
+        .from('commandes_attente')
+        .upsert(batch, { onConflict: 'num_commande,num_piece' })
       if (error) throw error
       inserted += batch.length
     }
@@ -228,12 +298,28 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Purge des lignes désactivées trop vieilles ────────────────
+    // Sans purge la table grossit indéfiniment (~18 lignes/jour), alors qu'une
+    // ligne désactivée = pièce reçue/fermée, donc de l'historique mort.
+    //
+    // Deux garde-fous :
+    //   - on ne touche qu'aux lignes inactives depuis RETENTION_JOURS ;
+    //   - on épargne celles portant une saisie humaine (remarque / plan
+    //     d'action / date BO). commandes_attente_historique référence
+    //     commandes_attente(id) ON DELETE CASCADE : supprimer la ligne
+    //     effacerait aussi la trace de qui a écrit quoi et quand.
+    //
+    // date_dernier_import fige la date de désactivation : une ligne inactive
+    // n'est plus jamais retouchée par les imports suivants.
+    const purged = await purgerInactives()
+
     return NextResponse.json({
       success: true,
       moteur: moteurUtilise,
       inserted,
       updated,
       deactivated,
+      purged,
       nb_commandes_parsees: commandes.length,
       duree_ms_ia: dureeMsIa,
       warnings,
