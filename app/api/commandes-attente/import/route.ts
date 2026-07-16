@@ -22,6 +22,54 @@ export const dynamic = 'force-dynamic'
 //   - Toutes les lignes actives qui n'apparaissent PAS dans cet import
 //     sont marquées active=false (= reçues / fermées).
 
+// Nombre de jours pendant lesquels on garde une ligne désactivée (= pièce
+// reçue/fermée) avant de la supprimer définitivement.
+const RETENTION_JOURS = 90
+
+// Supprime les lignes inactives depuis plus de RETENTION_JOURS qui ne portent
+// aucune saisie humaine. Retourne le nombre de lignes supprimées.
+//
+// On sélectionne puis on supprime par id plutôt que de filtrer directement
+// dans le DELETE : ça permet d'écarter aussi les chaînes vides laissées par
+// d'anciennes versions du PATCH (aujourd'hui il écrit `null`), que `.is(null)`
+// ne verrait pas — et donc de ne jamais purger une ligne annotée.
+async function purgerInactives(): Promise<number> {
+  const seuil = new Date(Date.now() - RETENTION_JOURS * 86400000).toISOString()
+
+  const candidats: any[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabaseAdmin
+      .from('commandes_attente')
+      .select('id, remarque, plan_action, date_bo')
+      .eq('active', false)
+      .lt('date_dernier_import', seuil)
+      .order('id', { ascending: true })
+      .range(from, from + 999)
+    if (error) throw error
+    if (!data || data.length === 0) break
+    candidats.push(...data)
+    if (data.length < 1000) break
+  }
+
+  const aSupprimer = candidats
+    .filter(r => !String(r.remarque ?? '').trim()
+              && !String(r.plan_action ?? '').trim()
+              && !r.date_bo)
+    .map(r => r.id)
+
+  let purged = 0
+  for (let i = 0; i < aSupprimer.length; i += 500) {
+    const batch = aSupprimer.slice(i, i + 500)
+    const { error } = await supabaseAdmin
+      .from('commandes_attente')
+      .delete()
+      .in('id', batch)
+    if (error) throw error
+    purged += batch.length
+  }
+  return purged
+}
+
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData()
@@ -250,12 +298,28 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Purge des lignes désactivées trop vieilles ────────────────
+    // Sans purge la table grossit indéfiniment (~18 lignes/jour), alors qu'une
+    // ligne désactivée = pièce reçue/fermée, donc de l'historique mort.
+    //
+    // Deux garde-fous :
+    //   - on ne touche qu'aux lignes inactives depuis RETENTION_JOURS ;
+    //   - on épargne celles portant une saisie humaine (remarque / plan
+    //     d'action / date BO). commandes_attente_historique référence
+    //     commandes_attente(id) ON DELETE CASCADE : supprimer la ligne
+    //     effacerait aussi la trace de qui a écrit quoi et quand.
+    //
+    // date_dernier_import fige la date de désactivation : une ligne inactive
+    // n'est plus jamais retouchée par les imports suivants.
+    const purged = await purgerInactives()
+
     return NextResponse.json({
       success: true,
       moteur: moteurUtilise,
       inserted,
       updated,
       deactivated,
+      purged,
       nb_commandes_parsees: commandes.length,
       duree_ms_ia: dureeMsIa,
       warnings,

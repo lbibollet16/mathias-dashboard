@@ -943,7 +943,8 @@ function CommandesAttenteTab({dark, card, bdr, sub, thBg, S, C, hvr, profil, for
       } else {
         setMsg({
           type:'ok',
-          text:`✅ ${d.nb_commandes_parsees} commandes lues (moteur ${d.moteur}) — ${d.inserted} nouvelles, ${d.updated} mises à jour, ${d.deactivated} reçues/fermées.`,
+          text:`✅ ${d.nb_commandes_parsees} commandes lues (moteur ${d.moteur}) — ${d.inserted} nouvelles, ${d.updated} mises à jour, ${d.deactivated} reçues/fermées.`
+            + (d.purged ? ` ${d.purged} ancienne(s) ligne(s) purgée(s).` : ''),
         })
         await charger()
       }
