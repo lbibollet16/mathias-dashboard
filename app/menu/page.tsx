@@ -56,20 +56,6 @@ const CATEGORIES: Category[] = [
         color: '#dc2626',
         isStandalone: true,
       },
-      {
-        label: 'Vente',
-        icon: '💰',
-        description: 'Promos, packages, sous-catégories',
-        href: '/?tab=vente',
-        color: '#a855f7',
-      },
-      {
-        label: 'Paramètres Vente',
-        icon: '⚙️',
-        description: 'Configuration vente',
-        href: '/?tab=parametre_vente',
-        color: '#7e22ce',
-      },
     ],
   },
   {
@@ -151,13 +137,6 @@ const CATEGORIES: Category[] = [
         description: 'Import des données de ventes',
         href: '/?tab=import',
         color: '#0284c7',
-      },
-      {
-        label: 'SCOA',
-        icon: '🏍',
-        description: 'Analyse ventes PS / Bateau',
-        href: '/?tab=scoa',
-        color: '#be185d',
       },
       {
         label: 'Booking',
