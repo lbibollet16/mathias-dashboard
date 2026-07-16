@@ -133,11 +133,22 @@ export async function POST(req: NextRequest) {
 
     const now = new Date().toISOString()
 
-    // Charger l'existant
-    const { data: existants, error: errLoad } = await supabaseAdmin
-      .from('commandes_attente')
-      .select('id, num_commande, num_piece, statut, date_premiere_vue, active')
-    if (errLoad) throw errLoad
+    // Charger l'existant — PAGINÉ.
+    // PostgREST/Supabase plafonne un select() sans range à 1000 lignes. Au-delà,
+    // les lignes non chargées étaient vues comme absentes → INSERT sur une clé
+    // déjà présente → violation de UNIQUE(num_commande, num_piece) → import KO.
+    const existants: any[] = []
+    for (let from = 0; ; from += 1000) {
+      const { data, error: errLoad } = await supabaseAdmin
+        .from('commandes_attente')
+        .select('id, num_commande, num_piece, statut, date_premiere_vue, active')
+        .order('id', { ascending: true })
+        .range(from, from + 999)
+      if (errLoad) throw errLoad
+      if (!data || data.length === 0) break
+      existants.push(...data)
+      if (data.length < 1000) break
+    }
 
     const existMap = new Map<string, any>()
     for (const r of existants || []) {
@@ -209,7 +220,11 @@ export async function POST(req: NextRequest) {
 
     for (let i = 0; i < toInsert.length; i += 500) {
       const batch = toInsert.slice(i, i + 500)
-      const { error } = await supabaseAdmin.from('commandes_attente').insert(batch)
+      // upsert plutôt qu'insert : filet de sécurité si une clé existait malgré
+      // tout en base (course avec un autre import, ligne créée à la main…).
+      const { error } = await supabaseAdmin
+        .from('commandes_attente')
+        .upsert(batch, { onConflict: 'num_commande,num_piece' })
       if (error) throw error
       inserted += batch.length
     }

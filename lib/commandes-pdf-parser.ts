@@ -44,8 +44,13 @@ const TYPE_RE = /^(Stock|Retour au Fournisseur|Réception|Réception Partielle|G
 // Format "Nom, Prénom" (avec accents)
 const NOM_PRENOM_RE = /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]+,\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\- ]+$/
 
-function parseInt0(s: string): number {
-  const n = parseInt(s.replace(/[^\d-]/g, ''), 10)
+// Les quantités Traction sont tantôt entières ("1"), tantôt décimales à la
+// française ("32,00" pour du tapis vendu au pi²). parseInt sur "32,00" aurait
+// rendu 3200 — on passe donc par parseFloat après normalisation de la virgule.
+const QTE_RE = /^\d{1,5}(?:[.,]\d{1,3})?$/
+
+function parseQte(s: string): number {
+  const n = parseFloat(s.replace(',', '.'))
   return isNaN(n) ? 0 : n
 }
 
@@ -190,43 +195,55 @@ function parseHeaderCommande(line: string): {
 // Parse une ligne de pièce.
 //   "365005 100010 1 PS2AA 23 MBTZ10S BATTERIE QUADFLEX MO 87,49 N N 1"
 //   "9931-819 44405 1 1 7 DECK LIGHT,WHT10-30V,LED,680 96,52 N N D 1"
+//   "GRASS CLOTH NO.10 19457 32,00 32,00 TOI Tapis Grass Cloth #10 15,94 N N D 32,00"
 function parsePieceLine(line: string): { num_piece: string, qte_commandee: number, description: string | null } | null {
   const tokens = line.split(/\s+/)
   if (tokens.length < 4) return null
 
-  const num_piece = tokens[0]
-  // Le #pièce doit contenir au moins un chiffre OU une lettre majuscule
+  // Le #pièce peut contenir des espaces ("GRASS CLOTH NO.10", "KA 400").
+  // On ne peut donc pas se fier à tokens[0] : on repère d'abord le #Fourn
+  // (4-6 chiffres suivi d'une quantité), et tout ce qui précède est le #pièce.
+  let idxFourn = -1
+  for (let k = 1; k <= Math.min(4, tokens.length - 2); k++) {
+    if (/^\d{4,6}$/.test(tokens[k]) && QTE_RE.test(tokens[k + 1])) { idxFourn = k; break }
+  }
+  if (idxFourn < 0) return null
+
+  const num_piece = tokens.slice(0, idxFourn).join(' ')
+  // Le #pièce doit contenir au moins un chiffre OU une lettre
   if (!/[0-9A-Z]/i.test(num_piece) || num_piece.length < 2) return null
 
-  // tokens[1] = #fourn (entier 4-6 chiffres)
-  if (!/^\d{4,6}$/.test(tokens[1])) return null
+  const qte_commandee = parseQte(tokens[idxFourn + 1])
 
-  // tokens[2] = qte_comm (petit entier)
-  if (!/^\d{1,5}$/.test(tokens[2])) return null
-  const qte_commandee = parseInt0(tokens[2])
-
-  // Le reste : on cherche le coût (nombre avec virgule décimale) qui sépare
-  // la description du bloc final (N N <stock>).
-  // Format des nombres Traction : "87,49" ou "87.49"
+  // Le coût sépare la description du bloc final ("N N D <qte>"). On le repère
+  // comme le dernier décimal SUIVI d'un drapeau une-lettre (N/O/D) — chercher
+  // simplement le dernier décimal de la ligne attraperait la quantité finale
+  // quand elle est décimale ("… 15,94 N N D 32,00").
   const COUT_RE = /^-?\d+[,.]\d{1,4}$/
+  const FLAG_RE = /^[NODSBE]$/i
+  const descStart = idxFourn + 2
   let coutIdx = -1
-  for (let k = tokens.length - 1; k >= 3; k--) {
-    if (COUT_RE.test(tokens[k])) { coutIdx = k; break }
+  for (let k = tokens.length - 2; k > descStart; k--) {
+    if (COUT_RE.test(tokens[k]) && FLAG_RE.test(tokens[k + 1])) { coutIdx = k; break }
   }
-  // La description est entre tokens[3..coutIdx-1] (en filtrant les codes
-  // de localisation qui sont en début).
-  // Stratégie simple : on prend tous les tokens entre 3 et coutIdx-1.
-  // Les premiers tokens (codes de localisation) seront inclus dans la
-  // description — pas idéal mais pas grave pour le suivi.
-  let description: string | null = null
-  if (coutIdx > 3) {
-    description = tokens.slice(3, coutIdx).join(' ').trim() || null
-  } else if (coutIdx === -1) {
-    // Pas de coût détecté — prendre tout après tokens[2]
-    description = tokens.slice(3).join(' ').trim() || null
+  if (coutIdx === -1) {
+    // Repli : dernier décimal de la ligne (ancien comportement)
+    for (let k = tokens.length - 1; k > descStart; k--) {
+      if (COUT_RE.test(tokens[k])) { coutIdx = k; break }
+    }
   }
-  // Nettoyage : enlever des codes de localisation purement alphanumériques
-  // courts en début (mais c'est risqué — on laisse tel quel)
+
+  // Description = tout entre la qte et le coût. Les codes de localisation en
+  // début (PSMUR6, T3-7…) y restent inclus — pas idéal mais sans impact sur le suivi.
+  const descTokens = coutIdx > descStart
+    ? tokens.slice(descStart, coutIdx)
+    : coutIdx === -1 ? tokens.slice(descStart) : []
+  // La colonne "Qte Réserv" est optionnelle et vient juste après "Qte Comm" :
+  // quand elle est présente elle répète la quantité et polluerait la description.
+  if (descTokens.length > 1 && QTE_RE.test(descTokens[0]) && parseQte(descTokens[0]) === qte_commandee) {
+    descTokens.shift()
+  }
+  const description = descTokens.join(' ').trim() || null
 
   return { num_piece, qte_commandee, description }
 }
