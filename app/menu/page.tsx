@@ -59,6 +59,33 @@ const CATEGORIES: Category[] = [
     ],
   },
   {
+    title: 'SERVICE / MÉCANIQUE',
+    emoji: '🔧',
+    tiles: [
+      {
+        label: 'Service Powersport',
+        icon: '🔧',
+        description: 'Rentabilité mécanique — aviseurs Powersport',
+        href: '/?tab=service_powersport',
+        color: '#0891b2',
+      },
+      {
+        label: 'Service Marine',
+        icon: '⚓',
+        description: 'Rentabilité mécanique — aviseurs Marine',
+        href: '/?tab=service_marine',
+        color: '#0284c7',
+      },
+      {
+        label: 'Aviseur Technique',
+        icon: '⚙️',
+        description: 'Imports Excel, paramétrage aviseurs, suivi des bons',
+        href: '/?tab=aviseur_technique',
+        color: '#7c3aed',
+      },
+    ],
+  },
+  {
     title: 'COMMANDES & INVENTAIRE',
     emoji: '📋',
     tiles: [

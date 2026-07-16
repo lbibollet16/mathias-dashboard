@@ -1,6 +1,8 @@
 'use client'
 import React, { useState, useEffect, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
+import DepartmentDashboard from '@/components/meca/DepartmentDashboard'
+import AviseurTechniqueTab from '@/components/meca/AviseurTechniqueTab'
 
 const supabaseCli = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -8,8 +10,8 @@ const supabaseCli = createClient(
 )
 
 const ROLES_ONGLETS: Record<string, string[]> = {
-  admin:        ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','verification','comptabilite','amazon','utilisateurs'],
-  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon'],
+  admin:        ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','verification','comptabilite','amazon','service_powersport','service_marine','aviseur_technique','utilisateurs'],
+  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','service_powersport','service_marine','aviseur_technique'],
   commis:       ['commandes','commandes_attente','fournitures','retours'],
   employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours'],
 }
@@ -397,7 +399,7 @@ export default function Dashboard() {
 
       {/* TABS */}
       <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,overflowX:'auto',display:'flex',WebkitOverflowScrolling:'touch',scrollbarWidth:'none',gap:isMobile?2:0}}>
-        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'commandes_attente',l:isMobile?'⏳':'⏳ Commandes en attente'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'verification',l:isMobile?'🔍':'🔍 Vérification'},{id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>ongletsVisibles(profil).includes(t.id)).map(t=>(
+        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'commandes_attente',l:isMobile?'⏳':'⏳ Commandes en attente'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'verification',l:isMobile?'🔍':'🔍 Vérification'},{id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},{id:'service_powersport',l:isMobile?'🔧 PS':'🔧 Service Powersport'},{id:'service_marine',l:isMobile?'⚓ Marine':'⚓ Service Marine'},{id:'aviseur_technique',l:isMobile?'⚙️ Aviseur':'⚙️ Aviseur Technique'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>ongletsVisibles(profil).includes(t.id)).map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:isMobile?'12px 14px':'12px 16px',border:'none',background:tab===t.id?(dark?'#1a233a':'#dbeafe'):'transparent',cursor:'pointer',fontSize:isMobile?14:13,fontWeight:tab===t.id?800:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',borderRadius:isMobile?'8px 8px 0 0':0,transition:'all .15s',whiteSpace:'nowrap',flexShrink:0}}>
             {t.l}
           </button>
@@ -817,6 +819,9 @@ export default function Dashboard() {
         {tab==='comptabilite' && <ComptabiliteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} validationsCompta={validationsCompta} setValidationsCompta={setValidationsCompta} verifsDoubles={verifsDoubles} setVerifsDoubles={setVerifsDoubles}/>}
         {tab==='verification' && <VerificationTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} verifsDoubles={verifsDoubles} setVerifsDoubles={setVerifsDoubles} validationsCompta={validationsCompta}/>}
         {tab==='amazon' && <AmazonTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
+        {tab==='service_powersport' && <DepartmentDashboard dept="powersport" dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} hvr={hvr} C={C}/>}
+        {tab==='service_marine' && <DepartmentDashboard dept="marine" dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} hvr={hvr} C={C}/>}
+        {tab==='aviseur_technique' && <AviseurTechniqueTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} hvr={hvr} C={C}/>}
         {tab==='utilisateurs' && <UtilisateursTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
         {tab==='fournitures' && <FournituresTab fournituresData={fournituresData} setFournituresData={setFournituresData} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} data={data} profil={profil}/>}
       </div>
@@ -4358,12 +4363,15 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
     { id: 'inventaire',  label: '📦 Inventaire',          desc: 'Inventaire cyclique et comptage' },
     { id: 'comptabilite',label: '💰 Comptabilité',        desc: 'Validation comptable et historique' },
     { id: 'amazon',      label: '📦 Amazon',              desc: 'Réconciliation FBA/FBM et LAUTOPAK' },
+    { id: 'service_powersport', label: '🔧 Service Powersport', desc: 'Rentabilité mécanique — aviseurs Powersport' },
+    { id: 'service_marine',     label: '⚓ Service Marine',      desc: 'Rentabilité mécanique — aviseurs Marine' },
+    { id: 'aviseur_technique',  label: '⚙️ Aviseur Technique',   desc: 'Imports Excel, paramétrage aviseurs, suivi des bons' },
     { id: 'utilisateurs',label: '👥 Utilisateurs',        desc: 'Gestion des accès et utilisateurs' },
   ]
 
   const ROLES_LEGACY: Record<string, string[]> = {
-    admin:         ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','verification','comptabilite','amazon','utilisateurs'],
-    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon'],
+    admin:         ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','verification','comptabilite','amazon','service_powersport','service_marine','aviseur_technique','utilisateurs'],
+    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','service_powersport','service_marine','aviseur_technique'],
     commis:        ['commandes','commandes_attente','fournitures','retours'],
     employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours'],
   }
