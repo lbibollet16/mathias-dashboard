@@ -86,6 +86,33 @@ const CATEGORIES: Category[] = [
     ],
   },
   {
+    title: 'COMPTOIR PIÈCES',
+    emoji: '🧰',
+    tiles: [
+      {
+        label: 'Commis Pièces',
+        icon: '🧰',
+        description: 'Tableau de bord personnel du commis pièces',
+        href: '/?tab=commis_pieces',
+        color: '#0d9488',
+      },
+      {
+        label: 'Comptoir Pièces',
+        icon: '🛠',
+        description: 'Vue directeur du comptoir pièces, commis à suivre',
+        href: '/?tab=comptoir_pieces',
+        color: '#0284c7',
+      },
+      {
+        label: 'Pièces — Réglages',
+        icon: '⚙️',
+        description: 'Imports Excel pièces + paramétrage des commis',
+        href: '/?tab=pieces_config',
+        color: '#7c3aed',
+      },
+    ],
+  },
+  {
     title: 'COMMANDES & INVENTAIRE',
     emoji: '📋',
     tiles: [

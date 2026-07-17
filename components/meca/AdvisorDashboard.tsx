@@ -17,6 +17,15 @@ export default function AdvisorDashboard({ advisorId, onClose, suiviEditable = f
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [erreur, setErreur] = useState<string | null>(null)
+  const [boMap, setBoMap] = useState<Record<string, any[]>>({})
+
+  useEffect(() => {
+    let annule = false
+    fetch('/api/bo-alerts').then(r => r.json())
+      .then(j => { if (!annule && j.alerts) setBoMap(j.alerts) })
+      .catch(() => {})
+    return () => { annule = true }
+  }, [])
 
   const charger = useCallback(async (silencieux = false) => {
     if (!silencieux) setLoading(true)
@@ -36,6 +45,10 @@ export default function AdvisorDashboard({ advisorId, onClose, suiviEditable = f
   if (!data)   return null
 
   const tdNum: any = { padding: '8px 12px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12.5 }
+
+  // Pièces en back-order sur les bons ouverts de cet aviseur.
+  const nbBoPieces = (data.workOrders ?? []).reduce((s: number, w: any) => s + (boMap[String(w.facture_no)]?.length ?? 0), 0)
+  const nbBoBons = (data.workOrders ?? []).filter((w: any) => (boMap[String(w.facture_no)]?.length ?? 0) > 0).length
 
   return (
     <Carte t={t} style={{ display: 'flex', flexDirection: 'column', gap: 16, background: t.dark ? '#141414' : '#fafbfc' }}>
@@ -58,6 +71,12 @@ export default function AdvisorDashboard({ advisorId, onClose, suiviEditable = f
           </button>
         )}
       </div>
+
+      {nbBoPieces > 0 && (
+        <div style={{ padding: '10px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, color: t.C.red, background: `${t.C.red}14`, border: `1px solid ${t.C.red}` }}>
+          🔁 {nbBoPieces} pièce(s) en back-order sur {nbBoBons} de tes bons — voir le détail dans la liste des bons ouverts.
+        </div>
+      )}
 
       <GrilleKpi min={160}>
         <KpiCard t={t} label="Revenu (MTD)" value={fmtArgentCourt(data.kpi.revenuGenere)} />
@@ -124,7 +143,7 @@ export default function AdvisorDashboard({ advisorId, onClose, suiviEditable = f
               <SuiviBonRow
                 key={w.facture_no}
                 {...t}
-                bon={w}
+                bon={{ ...w, boAlerts: boMap[String(w.facture_no)] }}
                 editable={suiviEditable}
                 moiNom={moiNom}
                 onSaved={() => charger(true)}

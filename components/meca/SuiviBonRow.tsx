@@ -16,8 +16,8 @@ function couleurTon(ton: ReturnType<typeof tonStatut>, C: Theme['C'], sub: strin
        : ton === 'blue' ? C.blue : ton === 'green' ? C.green : sub
 }
 
-export default function SuiviBonRow({ bon, editable, moiNom, onSaved, ...t }:
-  { bon: any, editable?: boolean, moiNom?: string, onSaved?: () => void } & Theme) {
+export default function SuiviBonRow({ bon, editable, moiNom, onSaved, endpoint = '/api/meca/work-orders', ...t }:
+  { bon: any, editable?: boolean, moiNom?: string, onSaved?: () => void, endpoint?: string } & Theme) {
   const [statut, setStatut] = useState<string>(bon.suiviStatut ?? '')
   const [date, setDate]     = useState<string>(bon.suiviDatePlanifiee ?? '')
   const [note, setNote]     = useState<string>(bon.suiviNote ?? '')
@@ -31,7 +31,7 @@ export default function SuiviBonRow({ bon, editable, moiNom, onSaved, ...t }:
   const enregistrer = async (patch: { statut?: string, datePlanifiee?: string, note?: string }) => {
     setEtat('saving')
     try {
-      const r = await fetch('/api/meca/work-orders', {
+      const r = await fetch(endpoint, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -93,6 +93,21 @@ export default function SuiviBonRow({ bon, editable, moiNom, onSaved, ...t }:
       </td>
       <td style={tdNum}>{fmtArgent(valeur)}</td>
       <td style={{ padding: '8px 10px', minWidth: 320 }}>
+        {Array.isArray(bon.boAlerts) && bon.boAlerts.length > 0 && (
+          <div style={{
+            marginBottom: 6, padding: '6px 10px', borderRadius: 6,
+            background: `${t.C.red}14`, border: `1px solid ${t.C.red}55`,
+          }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: t.C.red }}>
+              🔁 {bon.boAlerts.length} pièce(s) en back-order
+            </div>
+            {bon.boAlerts.map((a: any, i: number) => (
+              <div key={i} style={{ fontSize: 11.5, color: t.dark ? '#cfd2d6' : '#3c4043', marginTop: 2 }}>
+                <strong>BO {a.dateBo}</strong> — {a.numPiece}{a.description ? ` · ${a.description}` : ''}
+              </div>
+            ))}
+          </div>
+        )}
         {editable ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
