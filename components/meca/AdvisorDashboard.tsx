@@ -8,25 +8,28 @@
 // motiver, jamais pour sanctionner : vert si mieux que la moyenne, ambre sinon,
 // et aucun jugement dans le texte.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { Theme, Carte, SectionTitre, KpiCard, GrilleKpi, Th, fmtArgent, fmtArgentCourt } from './MecaUI'
+import SuiviBonRow from './SuiviBonRow'
 
-export default function AdvisorDashboard({ advisorId, onClose, ...t }:
-  { advisorId: string, onClose?: () => void } & Theme) {
+export default function AdvisorDashboard({ advisorId, onClose, suiviEditable = false, moiNom, ...t }:
+  { advisorId: string, onClose?: () => void, suiviEditable?: boolean, moiNom?: string } & Theme) {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [erreur, setErreur] = useState<string | null>(null)
 
-  useEffect(() => {
-    let annule = false
-    setLoading(true); setErreur(null)
-    fetch(`/api/meca/advisor-summary?id=${encodeURIComponent(advisorId)}`)
-      .then(r => r.json())
-      .then(j => { if (!annule) { if (j.erreur) setErreur(j.erreur); else setData(j) } })
-      .catch(e => { if (!annule) setErreur(String(e)) })
-      .finally(() => { if (!annule) setLoading(false) })
-    return () => { annule = true }
+  const charger = useCallback(async (silencieux = false) => {
+    if (!silencieux) setLoading(true)
+    setErreur(null)
+    try {
+      const r = await fetch(`/api/meca/advisor-summary?id=${encodeURIComponent(advisorId)}`)
+      const j = await r.json()
+      if (j.erreur) setErreur(j.erreur); else setData(j)
+    } catch (e: any) { setErreur(String(e)) }
+    finally { setLoading(false) }
   }, [advisorId])
+
+  useEffect(() => { charger() }, [charger])
 
   if (loading) return <Carte t={t}><span style={{ color: t.sub, fontSize: 14 }}>⏳ Chargement…</span></Carte>
   if (erreur)  return <Carte t={t}><span style={{ color: t.C.red, fontSize: 14 }}>Erreur : {erreur}</span></Carte>
@@ -95,44 +98,37 @@ export default function AdvisorDashboard({ advisorId, onClose, ...t }:
 
       <Carte t={t} style={{ padding: 0, overflow: 'auto' }}>
         <div style={{ padding: '14px 16px 10px' }}>
-          <SectionTitre t={t} titre={`Bons de travail ouverts (${data.workOrders.length})`} />
+          <SectionTitre
+            t={t}
+            titre={`Bons de travail ouverts (${data.workOrders.length})`}
+            aide={suiviEditable
+              ? 'Renseigne le suivi de chaque bon : statut, date planifiée, note. Enregistré automatiquement.'
+              : undefined}
+          />
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
           <thead>
             <tr style={{ background: t.thBg, borderBottom: `1px solid ${t.bdr}` }}>
               <Th t={t} align="left">#Facture</Th>
               <Th t={t} align="left">Client</Th>
-              <Th t={t} align="left">Statut</Th>
-              <Th t={t}>Ouvert le</Th>
               <Th t={t}>Âge</Th>
               <Th t={t}>Valeur</Th>
-              <Th t={t} align="center">Signalé</Th>
+              <Th t={t} align="left" >Suivi</Th>
             </tr>
           </thead>
           <tbody>
             {data.workOrders.length === 0 && (
-              <tr><td colSpan={7} style={{ padding: 16, textAlign: 'center', color: t.sub }}>Aucun bon de travail ouvert.</td></tr>
+              <tr><td colSpan={5} style={{ padding: 16, textAlign: 'center', color: t.sub }}>Aucun bon de travail ouvert.</td></tr>
             )}
             {data.workOrders.map((w: any) => (
-              <tr key={w.facture_no} style={{
-                borderBottom: `1px solid ${t.bdr}`,
-                background: w.signale ? (t.dark ? '#2a1512' : '#fdecea') : undefined,
-              }}>
-                <td style={{ padding: '8px 12px', fontFamily: 'monospace' }}>{w.facture_no}</td>
-                <td style={{ padding: '8px 12px' }}>{w.client_nom}</td>
-                <td style={{ padding: '8px 12px', color: t.sub }}>{w.statut}</td>
-                <td style={tdNum}>{w.date_ouverture}</td>
-                <td style={{ ...tdNum, fontWeight: w.ageJours > 30 ? 700 : 400, color: w.ageJours > 30 ? t.C.red : undefined }}>
-                  {w.ageJours} j
-                </td>
-                <td style={tdNum}>{fmtArgent(w.valeur)}</td>
-                <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                  {w.signale && (
-                    <span title="Non fermé depuis 2 imports ou plus"
-                      style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: t.C.red }} />
-                  )}
-                </td>
-              </tr>
+              <SuiviBonRow
+                key={w.facture_no}
+                {...t}
+                bon={w}
+                editable={suiviEditable}
+                moiNom={moiNom}
+                onSaved={() => charger(true)}
+              />
             ))}
           </tbody>
         </table>

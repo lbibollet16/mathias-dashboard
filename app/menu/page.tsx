@@ -63,17 +63,17 @@ const CATEGORIES: Category[] = [
     emoji: '🔧',
     tiles: [
       {
-        label: 'Service Powersport',
+        label: 'Aviseur',
         icon: '🔧',
-        description: 'Rentabilité mécanique — aviseurs Powersport',
-        href: '/?tab=service_powersport',
+        description: 'Tableau de bord personnel + suivi de ses bons de travail',
+        href: '/?tab=aviseur',
         color: '#0891b2',
       },
       {
-        label: 'Service Marine',
-        icon: '⚓',
-        description: 'Rentabilité mécanique — aviseurs Marine',
-        href: '/?tab=service_marine',
+        label: 'Directeur de service',
+        icon: '📊',
+        description: 'Powersport + Marine réunis, aviseurs à suivre',
+        href: '/?tab=directeur_service',
         color: '#0284c7',
       },
       {

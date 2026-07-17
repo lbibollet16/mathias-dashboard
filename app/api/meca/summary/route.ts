@@ -40,16 +40,17 @@ const CATEGORY_ORDER = ['Client', 'Interne', 'Garantie', 'Gar.Prol.', 'Total', '
 export async function GET(req: NextRequest) {
   try {
     const dept = new URL(req.url).searchParams.get('dept')
-    if (dept !== 'powersport' && dept !== 'marine') {
-      return NextResponse.json({ erreur: "Paramètre 'dept' doit être 'powersport' ou 'marine'." }, { status: 400 })
+    if (dept !== 'powersport' && dept !== 'marine' && dept !== 'tous') {
+      return NextResponse.json({ erreur: "Paramètre 'dept' doit être 'powersport', 'marine' ou 'tous'." }, { status: 400 })
     }
 
-    const { data: advisors, error: advErr } = await supabaseAdmin
-      .from('meca_advisors')
-      .select('id, nom')
-      .eq('departement', dept)
-      .eq('actif', true)
+    // dept=tous : les aviseurs actifs des DEUX départements (vue directeur).
+    // On garde le département de chacun pour l'afficher dans le classement.
+    let qAdv = supabaseAdmin.from('meca_advisors').select('id, nom, departement').eq('actif', true)
+    qAdv = dept === 'tous' ? qAdv.not('departement', 'is', null) : qAdv.eq('departement', dept)
+    const { data: advisors, error: advErr } = await qAdv
     if (advErr) throw advErr
+    const deptParAviseur = new Map((advisors ?? []).map(a => [a.id, a.departement]))
 
     const advisorIds = (advisors ?? []).map(a => a.id)
     if (advisorIds.length === 0) {
@@ -183,6 +184,7 @@ export async function GET(req: NextRequest) {
       return {
         id: a.id,
         nom: a.nom,
+        departement: deptParAviseur.get(a.id) ?? null,
         revenuGenere: Math.round(pf.ventes * 100) / 100,
         profitPct: pf.profitPctCount > 0 ? Math.round((pf.profitPctSum / pf.profitPctCount) * 100) / 100 : null,
         bonsOuverts: wo.count,
