@@ -1,8 +1,12 @@
 'use client'
 import React, { useState, useEffect, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import DepartmentDashboard from '@/components/meca/DepartmentDashboard'
+import AviseurTab from '@/components/meca/AviseurTab'
+import DirecteurServiceTab from '@/components/meca/DirecteurServiceTab'
 import AviseurTechniqueTab from '@/components/meca/AviseurTechniqueTab'
+import CommisPiecesTab from '@/components/pieces/CommisPiecesTab'
+import PartsCounterDashboard from '@/components/pieces/PartsCounterDashboard'
+import PiecesConfigTab from '@/components/pieces/PiecesConfigTab'
 
 const supabaseCli = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -10,10 +14,10 @@ const supabaseCli = createClient(
 )
 
 const ROLES_ONGLETS: Record<string, string[]> = {
-  admin:        ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','verification','comptabilite','amazon','service_powersport','service_marine','aviseur_technique','utilisateurs'],
-  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','service_powersport','service_marine','aviseur_technique'],
-  commis:       ['commandes','commandes_attente','fournitures','retours'],
-  employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours'],
+  admin:        ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','verification','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config','utilisateurs'],
+  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config'],
+  commis:       ['commandes','commandes_attente','fournitures','retours','aviseur','commis_pieces'],
+  employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours','aviseur','commis_pieces'],
 }
 
 // Onglets TOUJOURS visibles pour tout le monde — même si l'utilisateur a un
@@ -72,6 +76,7 @@ const TIPS: Record<string, string> = {
 
 export default function Dashboard() {
   const [tab, setTab]       = useState('calc')
+  const [openMenu, setOpenMenu] = useState<string|null>(null)
   const [data, setData]     = useState<any>(null)
   const [lots, setLots]     = useState<Lot[]>([])
   const [negs, setNegs]     = useState<Negatif[]>([])
@@ -397,14 +402,64 @@ export default function Dashboard() {
         </div>
       </nav>
 
-      {/* TABS */}
-      <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`,overflowX:'auto',display:'flex',WebkitOverflowScrolling:'touch',scrollbarWidth:'none',gap:isMobile?2:0}}>
-        {[{id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},{id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},{id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},{id:'commandes_attente',l:isMobile?'⏳':'⏳ Commandes en attente'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},{id:'inventaire',l:'📦 Inventaire'},{id:'verification',l:isMobile?'🔍':'🔍 Vérification'},{id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},{id:'service_powersport',l:isMobile?'🔧 PS':'🔧 Service Powersport'},{id:'service_marine',l:isMobile?'⚓ Marine':'⚓ Service Marine'},{id:'aviseur_technique',l:isMobile?'⚙️ Aviseur':'⚙️ Aviseur Technique'},{id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'}].filter(t=>ongletsVisibles(profil).includes(t.id)).map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:isMobile?'12px 14px':'12px 16px',border:'none',background:tab===t.id?(dark?'#1a233a':'#dbeafe'):'transparent',cursor:'pointer',fontSize:isMobile?14:13,fontWeight:tab===t.id?800:600,color:tab===t.id?C.blue:t.d?C.red:sub,borderBottom:tab===t.id?`3px solid ${C.blue}`:'3px solid transparent',borderRadius:isMobile?'8px 8px 0 0':0,transition:'all .15s',whiteSpace:'nowrap',flexShrink:0}}>
-            {t.l}
-          </button>
-        ))}
-      </div>
+      {/* TABS — onglets simples + menus déroulants (Service, Pièces) pour éviter
+          que la barre déborde. Un menu ouvre un panneau sous la barre. */}
+      {(() => {
+        const vis = ongletsVisibles(profil)
+        // Onglets isolés, dans l'ordre, jusqu'à Amazon.
+        const simples = [
+          {id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},
+          {id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},
+          {id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},
+          {id:'commandes_attente',l:isMobile?'⏳':'⏳ Commandes en attente'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},
+          {id:'inventaire',l:'📦 Inventaire'},{id:'verification',l:isMobile?'🔍':'🔍 Vérification'},
+          {id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},
+        ]
+        // Groupes déroulants.
+        const groupes = [
+          {key:'grp_service', l:isMobile?'🔧 Service':'🔧 Service Méca', enfants:[
+            {id:'aviseur',l:'🔧 Aviseur'},{id:'directeur_service',l:'📊 Directeur de service'},{id:'aviseur_technique',l:'⚙️ Aviseur Technique'},
+          ]},
+          {key:'grp_pieces', l:isMobile?'🧰 Pièces':'🧰 Pièces', enfants:[
+            {id:'commis_pieces',l:'🧰 Commis Pièces'},{id:'comptoir_pieces',l:'🛠 Comptoir Pièces'},{id:'pieces_config',l:'⚙️ Pièces — Réglages'},
+          ]},
+        ]
+        const btnStyle = (actif:boolean, rouge?:boolean) => ({padding:isMobile?'12px 14px':'12px 16px',border:'none',background:actif?(dark?'#1a233a':'#dbeafe'):'transparent',cursor:'pointer',fontSize:isMobile?14:13,fontWeight:actif?800:600 as any,color:actif?C.blue:rouge?C.red:sub,borderBottom:actif?`3px solid ${C.blue}`:'3px solid transparent',borderRadius:isMobile?'8px 8px 0 0':0,transition:'all .15s',whiteSpace:'nowrap',flexShrink:0} as any)
+        const grpOuvert = groupes.find(g => g.key === openMenu)
+        return (
+          <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`}}>
+            <div style={{overflowX:'auto',display:'flex',WebkitOverflowScrolling:'touch',scrollbarWidth:'none',gap:isMobile?2:0}}>
+              {simples.filter(t=>vis.includes(t.id)).map(t=>(
+                <button key={t.id} onClick={()=>{setTab(t.id);setOpenMenu(null)}} style={btnStyle(tab===t.id, t.d)}>{t.l}</button>
+              ))}
+              {groupes.filter(g=>g.enfants.some(e=>vis.includes(e.id))).map(g=>{
+                const actif = g.enfants.some(e=>e.id===tab)
+                const ouvert = openMenu===g.key
+                return (
+                  <button key={g.key} onClick={()=>setOpenMenu(ouvert?null:g.key)} style={btnStyle(actif)}>
+                    {g.l} <span style={{fontSize:10}}>{ouvert?'▲':'▼'}</span>
+                  </button>
+                )
+              })}
+              {vis.includes('utilisateurs') && (
+                <button onClick={()=>{setTab('utilisateurs');setOpenMenu(null)}} style={btnStyle(tab==='utilisateurs')}>{isMobile?'👥':'👥 Utilisateurs'}</button>
+              )}
+            </div>
+            {grpOuvert && (
+              <div style={{display:'flex',flexWrap:'wrap',gap:8,padding:'8px 12px',background:dark?'#0f0f0f':'#eef1f7',borderTop:`1px solid ${bdr}`}}>
+                {grpOuvert.enfants.filter(e=>vis.includes(e.id)).map(e=>(
+                  <button key={e.id} onClick={()=>{setTab(e.id);setOpenMenu(null)}}
+                    style={{padding:'8px 14px',borderRadius:8,cursor:'pointer',fontSize:13,fontWeight:tab===e.id?800:600,
+                      border:`1px solid ${tab===e.id?C.blue:bdr}`,background:tab===e.id?(dark?'#1a233a':'#dbeafe'):(dark?'#141414':'#fff'),
+                      color:tab===e.id?C.blue:sub,whiteSpace:'nowrap'}}>
+                    {e.l}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       <div style={{maxWidth:1700,margin:'0 auto',padding:isMobile?'10px 10px':'18px 16px'}}>
 
@@ -819,9 +874,12 @@ export default function Dashboard() {
         {tab==='comptabilite' && <ComptabiliteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} validationsCompta={validationsCompta} setValidationsCompta={setValidationsCompta} verifsDoubles={verifsDoubles} setVerifsDoubles={setVerifsDoubles}/>}
         {tab==='verification' && <VerificationTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} verifsDoubles={verifsDoubles} setVerifsDoubles={setVerifsDoubles} validationsCompta={validationsCompta}/>}
         {tab==='amazon' && <AmazonTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil}/>}
-        {tab==='service_powersport' && <DepartmentDashboard dept="powersport" dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} hvr={hvr} C={C}/>}
-        {tab==='service_marine' && <DepartmentDashboard dept="marine" dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} hvr={hvr} C={C}/>}
+        {tab==='aviseur' && <AviseurTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} hvr={hvr} C={C}/>}
+        {tab==='directeur_service' && <DirecteurServiceTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} hvr={hvr} C={C}/>}
         {tab==='aviseur_technique' && <AviseurTechniqueTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} hvr={hvr} C={C}/>}
+        {tab==='commis_pieces' && <CommisPiecesTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} hvr={hvr} C={C}/>}
+        {tab==='comptoir_pieces' && <PartsCounterDashboard dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} hvr={hvr} C={C}/>}
+        {tab==='pieces_config' && <PiecesConfigTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} hvr={hvr} C={C}/>}
         {tab==='utilisateurs' && <UtilisateursTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr}/>}
         {tab==='fournitures' && <FournituresTab fournituresData={fournituresData} setFournituresData={setFournituresData} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} data={data} profil={profil}/>}
       </div>
@@ -4363,17 +4421,20 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
     { id: 'inventaire',  label: '📦 Inventaire',          desc: 'Inventaire cyclique et comptage' },
     { id: 'comptabilite',label: '💰 Comptabilité',        desc: 'Validation comptable et historique' },
     { id: 'amazon',      label: '📦 Amazon',              desc: 'Réconciliation FBA/FBM et LAUTOPAK' },
-    { id: 'service_powersport', label: '🔧 Service Powersport', desc: 'Rentabilité mécanique — aviseurs Powersport' },
-    { id: 'service_marine',     label: '⚓ Service Marine',      desc: 'Rentabilité mécanique — aviseurs Marine' },
+    { id: 'aviseur',            label: '🔧 Aviseur',            desc: 'Tableau de bord personnel + suivi de ses bons de travail' },
+    { id: 'directeur_service',  label: '📊 Directeur de service', desc: 'Powersport + Marine réunis, aviseurs à suivre' },
     { id: 'aviseur_technique',  label: '⚙️ Aviseur Technique',   desc: 'Imports Excel, paramétrage aviseurs, suivi des bons' },
+    { id: 'commis_pieces',      label: '🧰 Commis Pièces',       desc: 'Tableau de bord personnel du commis pièces' },
+    { id: 'comptoir_pieces',    label: '🛠 Comptoir Pièces',      desc: 'Vue directeur du comptoir pièces, commis à suivre' },
+    { id: 'pieces_config',      label: '⚙️ Pièces — Réglages',    desc: 'Imports Excel pièces + paramétrage des commis' },
     { id: 'utilisateurs',label: '👥 Utilisateurs',        desc: 'Gestion des accès et utilisateurs' },
   ]
 
   const ROLES_LEGACY: Record<string, string[]> = {
-    admin:         ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','verification','comptabilite','amazon','service_powersport','service_marine','aviseur_technique','utilisateurs'],
-    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','service_powersport','service_marine','aviseur_technique'],
-    commis:        ['commandes','commandes_attente','fournitures','retours'],
-    employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours'],
+    admin:         ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','verification','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config','utilisateurs'],
+    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config'],
+    commis:        ['commandes','commandes_attente','fournitures','retours','aviseur','commis_pieces'],
+    employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours','aviseur','commis_pieces'],
   }
 
   const ROLES = [

@@ -44,16 +44,26 @@ export async function GET(req: NextRequest) {
     // ── Bons de travail ouverts, en détail (les plus vieux en premier)
     const workOrders = await chargerTout<any>(
       'meca_work_orders',
-      q => q.select('facture_no, client_nom, statut, no_serie, no_stock, date_ouverture, montants, imports_vus_ouvert')
+      q => q.select('facture_no, client_nom, statut, no_serie, no_stock, date_ouverture, montants, imports_vus_ouvert, suivi_statut, suivi_date_planifiee, suivi_note, suivi_par, suivi_maj_at')
             .eq('is_open', true).eq('advisor_id', id),
       'date_ouverture'
     )
 
     const workOrdersWithAge = workOrders.map(w => ({
-      ...w,
+      facture_no:   w.facture_no,
+      client_nom:   w.client_nom,
+      statut:       w.statut,
+      no_serie:     w.no_serie,
+      no_stock:     w.no_stock,
+      date_ouverture: w.date_ouverture,
       ageJours: Math.floor((now - new Date(w.date_ouverture).getTime()) / 86400000),
       valeur: valeurDe(w.montants),
       signale: (w.imports_vus_ouvert ?? 0) >= SEUIL_SIGNALEMENT,
+      suiviStatut:        w.suivi_statut ?? null,
+      suiviDatePlanifiee: w.suivi_date_planifiee ?? null,
+      suiviNote:          w.suivi_note ?? null,
+      suiviPar:           w.suivi_par ?? null,
+      suiviMajAt:         w.suivi_maj_at ?? null,
     }))
 
     const ageMoyenJours = workOrdersWithAge.length > 0

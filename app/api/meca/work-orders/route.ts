@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { chargerTout } from '@/lib/meca-db'
+import { estStatutValide } from '@/lib/meca-suivi'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -71,6 +72,12 @@ export async function GET(req: NextRequest) {
         assigneManuel: w.advisor_assigned_manually ?? false,
         valeur,
         montants:      w.montants ?? {},
+        // Suivi renseigné par l'aviseur.
+        suiviStatut:        w.suivi_statut ?? null,
+        suiviDatePlanifiee: w.suivi_date_planifiee ?? null,
+        suiviNote:          w.suivi_note ?? null,
+        suiviPar:           w.suivi_par ?? null,
+        suiviMajAt:         w.suivi_maj_at ?? null,
       }
     })
 
@@ -107,12 +114,43 @@ export async function GET(req: NextRequest) {
   }
 }
 
+// PATCH gère deux actions distinctes sur un bon (par facture_no) :
+//   - réassignation d'aviseur : { factureNo, advisorId }
+//   - suivi de l'aviseur       : { factureNo, suivi: { statut, datePlanifiee, note }, par }
 export async function PATCH(req: NextRequest) {
   try {
-    const { factureNo, advisorId } = await req.json()
-    if (!factureNo || !advisorId) {
-      return NextResponse.json({ erreur: "Champs 'factureNo' et 'advisorId' requis." }, { status: 400 })
+    const body = await req.json()
+    const factureNo = body?.factureNo
+    if (!factureNo) return NextResponse.json({ erreur: "Champ 'factureNo' requis." }, { status: 400 })
+
+    // ── Mise à jour du suivi
+    if (body.suivi !== undefined) {
+      const s = body.suivi ?? {}
+      if (s.statut != null && s.statut !== '' && !estStatutValide(s.statut)) {
+        return NextResponse.json({ erreur: `Statut de suivi inconnu : ${s.statut}` }, { status: 400 })
+      }
+      const datePlan = s.datePlanifiee && /^\d{4}-\d{2}-\d{2}$/.test(s.datePlanifiee) ? s.datePlanifiee : null
+      const par = typeof body.par === 'string' && body.par.trim() ? body.par.trim() : null
+
+      const { data, error } = await supabaseAdmin
+        .from('meca_work_orders')
+        .update({
+          suivi_statut:         s.statut || null,
+          suivi_date_planifiee: datePlan,
+          suivi_note:           (typeof s.note === 'string' && s.note.trim()) ? s.note.trim() : null,
+          suivi_par:            par,
+          suivi_maj_at:         new Date().toISOString(),
+        })
+        .eq('facture_no', factureNo)
+        .select()
+        .single()
+      if (error) throw error
+      return NextResponse.json({ success: true, workOrder: data })
     }
+
+    // ── Réassignation d'aviseur
+    const advisorId = body?.advisorId
+    if (!advisorId) return NextResponse.json({ erreur: "Champ 'advisorId' ou 'suivi' requis." }, { status: 400 })
 
     const { data: advisor } = await supabaseAdmin
       .from('meca_advisors').select('id').eq('id', advisorId).maybeSingle()
