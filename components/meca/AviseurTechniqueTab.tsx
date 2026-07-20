@@ -110,8 +110,8 @@ export default function AviseurTechniqueTab({ ...t }: Theme) {
           aide="Importe la liste des bons en premier : c'est elle qui crée les aviseurs. Le rapport aviseur se rattache ensuite par nom."
         />
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 14 }}>
-          <BoutonImport t={t} label="📊 Rapport des Aviseurs Technique" disabled={uploading} onFile={f => importer('rapport-aviseur', f)} />
-          <BoutonImport t={t} label="📋 Liste des Bons de Travail Ouverts" disabled={uploading} onFile={f => importer('bons-de-travail', f)} />
+          <BoutonImport t={t} label="📊 Rapport des aviseurs technique (1612)" disabled={uploading} onFile={f => importer('rapport-aviseur', f)} />
+          <BoutonImport t={t} label="📋 Liste des bons de travail (182)" disabled={uploading} onFile={f => importer('bons-de-travail', f)} />
         </div>
         {msg && (
           <div style={{
