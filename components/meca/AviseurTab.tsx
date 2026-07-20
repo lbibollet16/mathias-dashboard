@@ -32,7 +32,9 @@ export default function AviseurTab({ ...t }: Theme) {
 
   const filtres = useMemo(() => {
     const s = q.trim().toLowerCase()
-    const liste = s ? advisors.filter(a => a.nom.toLowerCase().includes(s)) : advisors
+    // Seuls les aviseurs visibles (actifs) sont sélectionnables ici.
+    const base = advisors.filter(a => a.actif !== false)
+    const liste = s ? base.filter(a => a.nom.toLowerCase().includes(s)) : base
     return [...liste].sort((a, b) => a.nom.localeCompare(b.nom))
   }, [advisors, q])
 

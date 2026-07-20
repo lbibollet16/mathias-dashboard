@@ -89,6 +89,22 @@ export default function AviseurTechniqueTab({ ...t }: Theme) {
     }
   }
 
+  // Transfert : donner tous les bons + la performance d'un aviseur à un autre
+  // (départ d'un employé, ou vider un "Aviseur #NN" placeholder).
+  async function transferer(id: string, vers: string) {
+    const src = advisors.find(a => a.id === id)?.nom || id
+    const dst = advisors.find(a => a.id === vers)?.nom || vers
+    if (!confirm(`Transférer tout le suivi de « ${src} » vers « ${dst} » ? Cette action déplace ses bons de travail et sa performance.`)) return
+    setMsg({ type: 'info', text: 'Transfert en cours…' })
+    const r = await fetch('/api/meca/advisors', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, transfererVers: vers }),
+    })
+    const j = await r.json()
+    if (j.erreur) setMsg({ type: 'err', text: j.erreur })
+    else { setMsg({ type: 'ok', text: `✅ ${j.transfere.bons} bon(s) et ${j.transfere.perf} ligne(s) de performance transférés vers ${j.transfere.vers}.` }); charger() }
+  }
+
   const selectStyle: any = {
     padding: '5px 8px', borderRadius: 6, border: `1px solid ${t.bdr}`,
     fontSize: 13, background: t.card, color: 'inherit',
@@ -170,12 +186,13 @@ export default function AviseurTechniqueTab({ ...t }: Theme) {
               <Th t={t} align="center">Signalés</Th>
               <Th t={t} align="center">Département</Th>
               <Th t={t} align="center">Visible</Th>
+              <Th t={t} align="center">Transférer vers</Th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={6} style={{ padding: 20, textAlign: 'center', color: t.sub }}>⏳ Chargement…</td></tr>}
+            {loading && <tr><td colSpan={7} style={{ padding: 20, textAlign: 'center', color: t.sub }}>⏳ Chargement…</td></tr>}
             {!loading && advisors.length === 0 && (
-              <tr><td colSpan={6} style={{ padding: 20, textAlign: 'center', color: t.sub }}>
+              <tr><td colSpan={7} style={{ padding: 20, textAlign: 'center', color: t.sub }}>
                 Aucun aviseur — importe d'abord un des deux fichiers Excel ci-dessus.
               </td></tr>
             )}
@@ -254,6 +271,17 @@ export default function AviseurTechniqueTab({ ...t }: Theme) {
                     onChange={e => patcher(a.id, { actif: e.target.checked })}
                     style={{ width: 16, height: 16, accentColor: t.C.blue, cursor: 'pointer' }}
                   />
+                </td>
+                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                  <select
+                    value=""
+                    onChange={e => { if (e.target.value) transferer(a.id, e.target.value); e.target.value = '' }}
+                    title="Transférer tous ses bons et sa performance à un autre aviseur"
+                    style={{ ...selectStyle, maxWidth: 150 }}
+                  >
+                    <option value="">— transférer… —</option>
+                    {advisors.filter(x => x.id !== a.id).map(x => <option key={x.id} value={x.id}>{x.nom}</option>)}
+                  </select>
                 </td>
               </tr>
             ))}

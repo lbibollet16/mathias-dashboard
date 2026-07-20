@@ -62,6 +62,18 @@ export default function PiecesConfigTab({ ...t }: Theme) {
     if (j.erreur) { setMsg({ type: 'err', text: j.erreur }); charger() }
   }
 
+  // Transfert : donner tout ce qui appartient à un commis à un autre.
+  async function transferer(id: string, vers: string) {
+    const src = clerks.find(c => c.id === id)?.nom || id
+    const dst = clerks.find(c => c.id === vers)?.nom || vers
+    if (!confirm(`Transférer tout le suivi de « ${src} » vers « ${dst} » ? Cette action déplace ses ventes et ses factures.`)) return
+    setMsg({ type: 'info', text: 'Transfert en cours…' })
+    const r = await fetch('/api/pieces/commis', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, transfererVers: vers }) })
+    const j = await r.json()
+    if (j.erreur) setMsg({ type: 'err', text: j.erreur })
+    else { setMsg({ type: 'ok', text: `✅ Suivi transféré vers ${j.transfere.vers} (${j.transfere.parts_open_invoices} facture(s) ouverte(s), ${j.transfere.parts_sales} ligne(s) de vente).` }); charger() }
+  }
+
   const col = (ty: string) => ty === 'err' ? t.C.red : ty === 'ok' ? t.C.green : t.C.blue
   const selectStyle: any = { padding: '5px 8px', borderRadius: 6, border: `1px solid ${t.bdr}`, fontSize: 13, background: t.card, color: 'inherit' }
 
@@ -101,11 +113,12 @@ export default function PiecesConfigTab({ ...t }: Theme) {
             <tr style={{ background: t.thBg, borderBottom: `1px solid ${t.bdr}` }}>
               <Th t={t} align="left">Commis</Th>
               <Th t={t} align="center">Visible</Th>
+              <Th t={t} align="center">Transférer vers</Th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={2} style={{ padding: 20, textAlign: 'center', color: t.sub }}>⏳ Chargement…</td></tr>}
-            {!loading && clerks.length === 0 && <tr><td colSpan={2} style={{ padding: 20, textAlign: 'center', color: t.sub }}>Aucun commis — importe d'abord le rapport de vente de pièces.</td></tr>}
+            {loading && <tr><td colSpan={3} style={{ padding: 20, textAlign: 'center', color: t.sub }}>⏳ Chargement…</td></tr>}
+            {!loading && clerks.length === 0 && <tr><td colSpan={3} style={{ padding: 20, textAlign: 'center', color: t.sub }}>Aucun commis — importe d'abord le rapport de vente de pièces.</td></tr>}
             {!loading && clerks.map(c => (
               <tr key={c.id} style={{ borderBottom: `1px solid ${t.bdr}` }}>
                 <td style={{ padding: '10px 12px' }}>
@@ -131,6 +144,17 @@ export default function PiecesConfigTab({ ...t }: Theme) {
                 </td>
                 <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                   <input type="checkbox" checked={c.actif} onChange={e => patcher(c.id, { actif: e.target.checked })} style={{ width: 16, height: 16, accentColor: t.C.blue, cursor: 'pointer' }} />
+                </td>
+                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                  <select
+                    value=""
+                    onChange={e => { if (e.target.value) transferer(c.id, e.target.value); e.target.value = '' }}
+                    title="Transférer tout son suivi à un autre commis"
+                    style={{ ...selectStyle, maxWidth: 150 }}
+                  >
+                    <option value="">— transférer… —</option>
+                    {clerks.filter(x => x.id !== c.id).map(x => <option key={x.id} value={x.id}>{x.nom}</option>)}
+                  </select>
                 </td>
               </tr>
             ))}

@@ -27,7 +27,9 @@ export default function CommisPiecesTab({ ...t }: Theme) {
 
   const filtres = useMemo(() => {
     const s = q.trim().toLowerCase()
-    const l = s ? clerks.filter(c => c.nom.toLowerCase().includes(s)) : clerks
+    // Seuls les commis visibles (actifs) sont sélectionnables ici.
+    const base = clerks.filter(c => c.actif !== false)
+    const l = s ? base.filter(c => c.nom.toLowerCase().includes(s)) : base
     return [...l].sort((a, b) => a.nom.localeCompare(b.nom))
   }, [clerks, q])
 
