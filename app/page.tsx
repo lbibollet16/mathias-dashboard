@@ -406,48 +406,52 @@ export default function Dashboard() {
           que la barre déborde. Un menu ouvre un panneau sous la barre. */}
       {(() => {
         const vis = ongletsVisibles(profil)
-        // Onglets isolés, dans l'ordre, jusqu'à Amazon.
-        const simples = [
-          {id:'calc',l:isMobile?'🧮':'Calculateur Achats'},{id:'import',l:isMobile?'📥':'Importer Ventes'},
-          {id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},{id:'booking',l:isMobile?'📊':'Booking'},
-          {id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},{id:'commandes',l:isMobile?'📋':'📋 Commandes'},
-          {id:'commandes_attente',l:isMobile?'⏳':'⏳ Commandes en attente'},{id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},
-          {id:'inventaire',l:'📦 Inventaire'},{id:'verification',l:isMobile?'🔍':'🔍 Vérification'},
-          {id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},{id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},
-        ]
-        // Groupes déroulants.
-        const groupes = [
+        // Barre ordonnée : chaque entrée est un onglet simple {id} ou un menu
+        // déroulant {key, enfants[]}. Les menus évitent que la barre déborde.
+        const items: any[] = [
+          {key:'grp_achats', l:isMobile?'🧮 Achats':'🧮 Calculateur Achats', enfants:[
+            {id:'calc',l:'🧮 Calculateur Achats'},{id:'import',l:'📥 Importer Ventes'},{id:'booking',l:'📊 Booking'},
+          ]},
+          {id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},
+          {id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},
+          {id:'commandes',l:isMobile?'📋':'📋 Commandes'},
+          {id:'commandes_attente',l:isMobile?'⏳':'⏳ Commandes en attente'},
+          {id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},
+          {id:'inventaire',l:'📦 Inventaire'},
+          {id:'verification',l:isMobile?'🔍':'🔍 Vérification'},
+          {id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},
+          {id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},
           {key:'grp_service', l:isMobile?'🔧 Service':'🔧 Service Méca', enfants:[
             {id:'aviseur',l:'🔧 Aviseur'},{id:'directeur_service',l:'📊 Directeur de service'},{id:'aviseur_technique',l:'⚙️ Aviseur Technique'},
           ]},
           {key:'grp_pieces', l:isMobile?'🧰 Pièces':'🧰 Pièces', enfants:[
             {id:'commis_pieces',l:'🧰 Commis Pièces'},{id:'comptoir_pieces',l:'🛠 Comptoir Pièces'},{id:'pieces_config',l:'⚙️ Pièces — Réglages'},
           ]},
+          {id:'utilisateurs',l:isMobile?'👥':'👥 Utilisateurs'},
         ]
         const btnStyle = (actif:boolean, rouge?:boolean) => ({padding:isMobile?'12px 14px':'12px 16px',border:'none',background:actif?(dark?'#1a233a':'#dbeafe'):'transparent',cursor:'pointer',fontSize:isMobile?14:13,fontWeight:actif?800:600 as any,color:actif?C.blue:rouge?C.red:sub,borderBottom:actif?`3px solid ${C.blue}`:'3px solid transparent',borderRadius:isMobile?'8px 8px 0 0':0,transition:'all .15s',whiteSpace:'nowrap',flexShrink:0} as any)
-        const grpOuvert = groupes.find(g => g.key === openMenu)
+        const grpOuvert = items.find(it => it.enfants && it.key === openMenu)
         return (
           <div style={{background:dark?'#141414':'#e2e6ef',borderBottom:`1px solid ${bdr}`}}>
             <div style={{overflowX:'auto',display:'flex',WebkitOverflowScrolling:'touch',scrollbarWidth:'none',gap:isMobile?2:0}}>
-              {simples.filter(t=>vis.includes(t.id)).map(t=>(
-                <button key={t.id} onClick={()=>{setTab(t.id);setOpenMenu(null)}} style={btnStyle(tab===t.id, t.d)}>{t.l}</button>
-              ))}
-              {groupes.filter(g=>g.enfants.some(e=>vis.includes(e.id))).map(g=>{
-                const actif = g.enfants.some(e=>e.id===tab)
-                const ouvert = openMenu===g.key
-                return (
-                  <button key={g.key} onClick={()=>setOpenMenu(ouvert?null:g.key)} style={btnStyle(actif)}>
-                    {g.l} <span style={{fontSize:10}}>{ouvert?'▲':'▼'}</span>
-                  </button>
-                )
+              {items.map(it => {
+                if (it.enfants) {
+                  if (!it.enfants.some((e:any)=>vis.includes(e.id))) return null
+                  const actif = it.enfants.some((e:any)=>e.id===tab)
+                  const ouvert = openMenu===it.key
+                  return (
+                    <button key={it.key} onClick={()=>setOpenMenu(ouvert?null:it.key)} style={btnStyle(actif)}>
+                      {it.l} <span style={{fontSize:10}}>{ouvert?'▲':'▼'}</span>
+                    </button>
+                  )
+                }
+                if (!vis.includes(it.id)) return null
+                return <button key={it.id} onClick={()=>{setTab(it.id);setOpenMenu(null)}} style={btnStyle(tab===it.id, it.d)}>{it.l}</button>
               })}
-              {vis.includes('utilisateurs') && (
-                <button onClick={()=>{setTab('utilisateurs');setOpenMenu(null)}} style={btnStyle(tab==='utilisateurs')}>{isMobile?'👥':'👥 Utilisateurs'}</button>
-              )}
             </div>
             {grpOuvert && (
               <div style={{display:'flex',flexWrap:'wrap',gap:8,padding:'8px 12px',background:dark?'#0f0f0f':'#eef1f7',borderTop:`1px solid ${bdr}`}}>
-                {grpOuvert.enfants.filter(e=>vis.includes(e.id)).map(e=>(
+                {grpOuvert.enfants.filter((e:any)=>vis.includes(e.id)).map((e:any)=>(
                   <button key={e.id} onClick={()=>{setTab(e.id);setOpenMenu(null)}}
                     style={{padding:'8px 14px',borderRadius:8,cursor:'pointer',fontSize:13,fontWeight:tab===e.id?800:600,
                       border:`1px solid ${tab===e.id?C.blue:bdr}`,background:tab===e.id?(dark?'#1a233a':'#dbeafe'):(dark?'#141414':'#fff'),
