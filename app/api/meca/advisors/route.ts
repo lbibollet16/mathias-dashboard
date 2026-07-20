@@ -80,8 +80,30 @@ export async function GET() {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const { id, departement, actif, nom } = await req.json()
+    const { id, departement, actif, nom, transfererVers } = await req.json()
     if (!id) return NextResponse.json({ erreur: "Champ 'id' requis." }, { status: 400 })
+
+    // ── Transfert : donner tous les bons et la performance d'un aviseur à un
+    //    autre (ex. un employé part, ou on vide un "Aviseur #NN" placeholder).
+    //    advisor_assigned_manually=true pour que les imports ne re-attribuent pas
+    //    les bons transférés à la source.
+    if (transfererVers) {
+      if (transfererVers === id) return NextResponse.json({ erreur: 'Source et destination identiques.' }, { status: 400 })
+      const { data: dest } = await supabaseAdmin.from('meca_advisors').select('id, nom').eq('id', transfererVers).maybeSingle()
+      if (!dest) return NextResponse.json({ erreur: `Aucun aviseur destinataire ${transfererVers}.` }, { status: 400 })
+
+      const { data: bons, error: e1 } = await supabaseAdmin
+        .from('meca_work_orders')
+        .update({ advisor_id: transfererVers, advisor_assigned_manually: true, updated_at: new Date().toISOString() })
+        .eq('advisor_id', id).select('facture_no')
+      if (e1) throw e1
+      const { data: perf, error: e2 } = await supabaseAdmin
+        .from('meca_advisor_performance').update({ advisor_id: transfererVers }).eq('advisor_id', id).select('id')
+      if (e2) throw e2
+
+      return NextResponse.json({ success: true, transfere: { bons: bons?.length ?? 0, perf: perf?.length ?? 0, vers: dest.nom } })
+    }
+
     if (departement !== undefined && departement !== null && !['powersport', 'marine'].includes(departement)) {
       return NextResponse.json({ erreur: "'departement' doit être 'powersport', 'marine' ou null." }, { status: 400 })
     }
