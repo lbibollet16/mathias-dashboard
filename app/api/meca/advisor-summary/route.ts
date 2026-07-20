@@ -49,6 +49,21 @@ export async function GET(req: NextRequest) {
       'date_ouverture'
     )
 
+    // Historique du suivi pour ces bons.
+    const histParFacture = new Map<string, any[]>()
+    const facturesIds = workOrders.map(w => w.facture_no)
+    if (facturesIds.length) {
+      const hist = await chargerTout<any>('suivi_historique',
+        q => q.select('facture_no, statut, note, par, cree_le').eq('domaine', 'meca').in('facture_no', facturesIds), 'cree_le')
+      for (const h of hist) {
+        const l = histParFacture.get(h.facture_no) ?? []
+        l.push({ statut: h.statut, note: h.note, par: h.par, creeLe: h.cree_le })
+        histParFacture.set(h.facture_no, l)
+      }
+      // chargerTout trie ascendant : on inverse pour afficher le plus récent d'abord.
+      for (const l of histParFacture.values()) l.reverse()
+    }
+
     const workOrdersWithAge = workOrders.map(w => ({
       facture_no:   w.facture_no,
       client_nom:   w.client_nom,
@@ -64,6 +79,7 @@ export async function GET(req: NextRequest) {
       suiviNote:          w.suivi_note ?? null,
       suiviPar:           w.suivi_par ?? null,
       suiviMajAt:         w.suivi_maj_at ?? null,
+      suiviHistorique:    histParFacture.get(w.facture_no) ?? [],
     }))
 
     const ageMoyenJours = workOrdersWithAge.length > 0

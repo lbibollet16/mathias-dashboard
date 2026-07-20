@@ -16,6 +16,15 @@ function couleurTon(ton: ReturnType<typeof tonStatut>, C: Theme['C'], sub: strin
        : ton === 'blue' ? C.blue : ton === 'green' ? C.green : sub
 }
 
+// "2026-07-20T14:32:…" → "2026-07-20 14:32"
+function fmtDateHeure(iso: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return String(iso).slice(0, 16)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 export default function SuiviBonRow({ bon, editable, moiNom, onSaved, endpoint = '/api/meca/work-orders', masquerDate = false, ...t }:
   { bon: any, editable?: boolean, moiNom?: string, onSaved?: () => void, endpoint?: string, masquerDate?: boolean } & Theme) {
   const [statut, setStatut] = useState<string>(bon.suiviStatut ?? '')
@@ -157,6 +166,23 @@ export default function SuiviBonRow({ bon, editable, moiNom, onSaved, endpoint =
             {note && <span style={{ fontSize: 12, color: t.dark ? '#cfd2d6' : '#3c4043' }}>{note}</span>}
             {bon.suiviPar && <span style={{ fontSize: 10.5, color: t.sub }}>maj : {bon.suiviPar}</span>}
           </div>
+        )}
+        {Array.isArray(bon.suiviHistorique) && bon.suiviHistorique.length > 0 && (
+          <details style={{ marginTop: 6 }}>
+            <summary style={{ cursor: 'pointer', fontSize: 11, color: t.sub }}>
+              🕓 Historique ({bon.suiviHistorique.length})
+            </summary>
+            <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 3, borderLeft: `2px solid ${t.bdr}`, paddingLeft: 8 }}>
+              {bon.suiviHistorique.map((h: any, i: number) => (
+                <div key={i} style={{ fontSize: 11, color: t.sub, lineHeight: 1.4 }}>
+                  <span style={{ fontFamily: 'monospace' }}>{fmtDateHeure(h.creeLe)}</span>
+                  {h.par ? ` · ${h.par}` : ''}
+                  {h.statut ? <> · <span style={{ fontWeight: 700, color: couleurTon(tonStatut(h.statut), t.C, t.sub) }}>{h.statut}</span></> : ''}
+                  {h.note ? ` — ${h.note}` : ''}
+                </div>
+              ))}
+            </div>
+          </details>
         )}
       </td>
     </tr>

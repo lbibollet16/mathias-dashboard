@@ -48,6 +48,20 @@ export async function GET(req: NextRequest) {
       q => q.select('facture_no, client_nom, total, date_ouverture, suivi_statut, suivi_date_planifiee, suivi_note, suivi_par, suivi_maj_at')
             .eq('is_open', true).eq('clerk_id', id), 'facture_no')
 
+    // Historique du suivi pour ces factures.
+    const histParFacture = new Map<string, any[]>()
+    const facturesIds = ouvertes.map(f => f.facture_no)
+    if (facturesIds.length) {
+      const hist = await chargerTout<any>('suivi_historique',
+        q => q.select('facture_no, statut, note, par, cree_le').eq('domaine', 'pieces').in('facture_no', facturesIds), 'cree_le')
+      for (const h of hist) {
+        const l = histParFacture.get(h.facture_no) ?? []
+        l.push({ statut: h.statut, note: h.note, par: h.par, creeLe: h.cree_le })
+        histParFacture.set(h.facture_no, l)
+      }
+      for (const l of histParFacture.values()) l.reverse()
+    }
+
     const now = Date.now()
     const liste = ouvertes.map(f => ({
       factureNo: f.facture_no,
@@ -61,6 +75,7 @@ export async function GET(req: NextRequest) {
       suiviNote: f.suivi_note ?? null,
       suiviPar: f.suivi_par ?? null,
       suiviMajAt: f.suivi_maj_at ?? null,
+      suiviHistorique: histParFacture.get(f.facture_no) ?? [],
     })).sort((a, b) => b.ageJours - a.ageJours)
 
     return NextResponse.json({
