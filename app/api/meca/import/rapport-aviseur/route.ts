@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { parseRapportAviseur } from '@/lib/meca-parser-rapport-aviseur'
+import { cleNom } from '@/lib/noms'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -8,10 +9,6 @@ export const dynamic = 'force-dynamic'
 // POST multipart/form-data, champ "file" = l'export Excel (.xlsx) du
 // "Rapport des Aviseurs Technique - Détaillée".
 // Voir lib/meca-parser-rapport-aviseur.ts pour le détail du parsing.
-
-function normalizeNom(nom: string): string {
-  return nom.toLowerCase().trim().replace(/\s+/g, ' ')
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -40,11 +37,12 @@ export async function POST(req: NextRequest) {
     // nom aux aviseurs déjà connus (créés par l'import des bons de travail).
     const { data: knownAdvisors, error: errAdv } = await supabaseAdmin.from('meca_advisors').select('id, nom')
     if (errAdv) throw errAdv
-    const byNom = new Map((knownAdvisors ?? []).map(a => [normalizeNom(a.nom), a.id]))
+    // Rapprochement insensible à l'ordre des mots et aux accents (cleNom).
+    const byNom = new Map((knownAdvisors ?? []).map(a => [cleNom(a.nom), a.id]))
 
     const unmatchedNames = new Set<string>()
     const toInsert = rows.map(r => {
-      const advisorId = byNom.get(normalizeNom(r.advisor_nom)) ?? null
+      const advisorId = byNom.get(cleNom(r.advisor_nom)) ?? null
       if (!advisorId) unmatchedNames.add(r.advisor_nom)
       return {
         import_batch_id: batch.id,

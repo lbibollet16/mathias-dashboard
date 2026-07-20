@@ -168,7 +168,11 @@ export default function SuiviBonsDeTravail({ advisors, ...t }: { advisors: Advis
             {!loading && workOrders.length === 0 && (
               <tr><td colSpan={8} style={{ padding: 20, textAlign: 'center', color: t.sub }}>Aucun bon de travail ne correspond à ces filtres.</td></tr>
             )}
-            {!loading && workOrders.map(w => (
+            {/* Le tableau peut contenir >1000 bons ; chaque ligne a un menu de
+                réassignation (24 aviseurs). Sans plafond, le rendu DOM était très
+                lent. On affiche les 200 premiers (déjà triés du plus vieux au plus
+                gros) et on invite à filtrer pour le reste. */}
+            {!loading && workOrders.slice(0, 200).map(w => (
               <tr key={w.factureNo} style={{
                 borderBottom: `1px solid ${t.bdr}`,
                 background: w.enRetard ? (t.dark ? '#2a1512' : '#fdecea') : undefined,
@@ -209,6 +213,12 @@ export default function SuiviBonsDeTravail({ advisors, ...t }: { advisors: Advis
           </tbody>
         </table>
       </Carte>
+
+      {!loading && workOrders.length > 200 && (
+        <div style={{ fontSize: 12, color: t.C.yellow, background: `${t.C.yellow}14`, border: `1px solid ${t.C.yellow}55`, borderRadius: 8, padding: '8px 12px' }}>
+          Affichage limité aux 200 premiers bons (sur {workOrders.length}). Utilise les filtres (département, aviseur, recherche) pour cibler le reste.
+        </div>
+      )}
 
       <div style={{ fontSize: 11.5, color: t.sub, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
         <Point couleur={t.C.green}  label="0-14 j" />
