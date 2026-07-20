@@ -8,8 +8,9 @@ import { useEffect, useRef, useState } from 'react'
 import PartsClerkDashboard from './PartsClerkDashboard'
 import { Theme, Carte, SectionTitre, Th } from '@/components/meca/MecaUI'
 
+// Le numéro entre parenthèses = le numéro de rapport Traction à sortir.
 const IMPORTS: { kind: string, label: string }[] = [
-  { kind: 'rapport-vente', label: '📊 Rapport de vente de pièces par commis' },
+  { kind: 'rapport-vente', label: '📊 Rapport de vente de pièces (1684)' },
   { kind: 'factures',      label: '📋 Liste des factures de pièces' },
   { kind: 'estimes',       label: '🔁 Rapport estimé vs facture' },
   { kind: 'ouvertes',      label: '⏳ Liste des pièces (factures ouvertes)' },
