@@ -122,6 +122,7 @@ export default function PartsClerkDashboard({ clerkId, onClose, suiviEditable = 
                   editable={suiviEditable}
                   moiNom={moiNom}
                   endpoint="/api/pieces/open-invoices"
+                  masquerDate
                   onSaved={() => charger(true)}
                 />
               ))}

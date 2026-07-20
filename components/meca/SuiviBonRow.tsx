@@ -16,8 +16,8 @@ function couleurTon(ton: ReturnType<typeof tonStatut>, C: Theme['C'], sub: strin
        : ton === 'blue' ? C.blue : ton === 'green' ? C.green : sub
 }
 
-export default function SuiviBonRow({ bon, editable, moiNom, onSaved, endpoint = '/api/meca/work-orders', ...t }:
-  { bon: any, editable?: boolean, moiNom?: string, onSaved?: () => void, endpoint?: string } & Theme) {
+export default function SuiviBonRow({ bon, editable, moiNom, onSaved, endpoint = '/api/meca/work-orders', masquerDate = false, ...t }:
+  { bon: any, editable?: boolean, moiNom?: string, onSaved?: () => void, endpoint?: string, masquerDate?: boolean } & Theme) {
   const [statut, setStatut] = useState<string>(bon.suiviStatut ?? '')
   const [date, setDate]     = useState<string>(bon.suiviDatePlanifiee ?? '')
   const [note, setNote]     = useState<string>(bon.suiviNote ?? '')
@@ -124,13 +124,17 @@ export default function SuiviBonRow({ bon, editable, moiNom, onSaved, endpoint =
                 <option value="">— suivi —</option>
                 {SUIVI_STATUTS.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
-              <label style={{ fontSize: 11, color: t.sub }}>Planifié&nbsp;:</label>
-              <input
-                type="date"
-                value={date}
-                onChange={e => { setDate(e.target.value); enregistrer({ datePlanifiee: e.target.value }) }}
-                style={inputStyle}
-              />
+              {!masquerDate && (
+                <>
+                  <label style={{ fontSize: 11, color: t.sub }}>Planifié&nbsp;:</label>
+                  <input
+                    type="date"
+                    value={date}
+                    onChange={e => { setDate(e.target.value); enregistrer({ datePlanifiee: e.target.value }) }}
+                    style={inputStyle}
+                  />
+                </>
+              )}
               <span style={{ fontSize: 11, color: etat === 'err' ? t.C.red : etat === 'saved' ? t.C.green : t.sub, minWidth: 56 }}>
                 {etat === 'saving' ? '…' : etat === 'saved' ? '✓ enregistré' : etat === 'err' ? '⚠️ erreur' : ''}
               </span>
@@ -148,7 +152,7 @@ export default function SuiviBonRow({ bon, editable, moiNom, onSaved, endpoint =
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               {statut ? <Badge t={t} couleur={colStatut}>{statut}</Badge> : <span style={{ color: t.sub, fontSize: 12 }}>—</span>}
-              {date && <span style={{ fontSize: 12, color: t.sub }}>📅 {date}</span>}
+              {!masquerDate && date && <span style={{ fontSize: 12, color: t.sub }}>📅 {date}</span>}
             </div>
             {note && <span style={{ fontSize: 12, color: t.dark ? '#cfd2d6' : '#3c4043' }}>{note}</span>}
             {bon.suiviPar && <span style={{ fontSize: 10.5, color: t.sub }}>maj : {bon.suiviPar}</span>}
