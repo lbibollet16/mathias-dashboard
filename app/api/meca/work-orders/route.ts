@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { chargerTout } from '@/lib/meca-db'
 import { estStatutValide } from '@/lib/meca-suivi'
+import { loggerSuivi } from '@/lib/suivi-historique'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -131,13 +132,19 @@ export async function PATCH(req: NextRequest) {
       }
       const datePlan = s.datePlanifiee && /^\d{4}-\d{2}-\d{2}$/.test(s.datePlanifiee) ? s.datePlanifiee : null
       const par = typeof body.par === 'string' && body.par.trim() ? body.par.trim() : null
+      const nouveauStatut = s.statut || null
+      const nouvelleNote = (typeof s.note === 'string' && s.note.trim()) ? s.note.trim() : null
+
+      // Valeurs actuelles, pour ne journaliser que si ça change.
+      const { data: avant } = await supabaseAdmin
+        .from('meca_work_orders').select('suivi_statut, suivi_note').eq('facture_no', factureNo).maybeSingle()
 
       const { data, error } = await supabaseAdmin
         .from('meca_work_orders')
         .update({
-          suivi_statut:         s.statut || null,
+          suivi_statut:         nouveauStatut,
           suivi_date_planifiee: datePlan,
-          suivi_note:           (typeof s.note === 'string' && s.note.trim()) ? s.note.trim() : null,
+          suivi_note:           nouvelleNote,
           suivi_par:            par,
           suivi_maj_at:         new Date().toISOString(),
         })
@@ -145,6 +152,11 @@ export async function PATCH(req: NextRequest) {
         .select()
         .single()
       if (error) throw error
+
+      await loggerSuivi('meca', factureNo, {
+        oldStatut: avant?.suivi_statut ?? null, oldNote: avant?.suivi_note ?? null,
+        newStatut: nouveauStatut, newNote: nouvelleNote, par,
+      })
       return NextResponse.json({ success: true, workOrder: data })
     }
 
