@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { chargerTout } from '@/lib/meca-db'
+import { cleNom } from '@/lib/noms'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -97,19 +98,22 @@ export async function PATCH(req: NextRequest) {
     if (error) throw error
 
     // Renommage : on rattache aussi les lignes de performance déjà importées qui
-    // portaient ce nom sans aviseur. Sans ça, renommer ne servirait à rien tant
-    // qu'on n'a pas réimporté le rapport — le rattachement ne se fait qu'à
-    // l'import, et l'utilisateur ne peut pas le deviner.
+    // correspondent à ce nom sans aviseur. Le rapprochement est insensible à
+    // l'ordre des mots et aux accents (cleNom) — « Gental, Laura » du rapport
+    // matche un aviseur renommé « Laura Gental ». Sans ça, renommer ne servirait
+    // à rien tant qu'on n'a pas réimporté le rapport.
     let perfRattachees = 0
     if (patch.nom) {
-      const { data: liees, error: errLink } = await supabaseAdmin
-        .from('meca_advisor_performance')
-        .update({ advisor_id: id })
-        .eq('advisor_nom', patch.nom)
-        .is('advisor_id', null)
-        .select('id')
-      if (errLink) throw errLink
-      perfRattachees = liees?.length ?? 0
+      const cible = cleNom(patch.nom)
+      const orphelins = await chargerTout<any>('meca_advisor_performance',
+        q => q.select('id, advisor_nom').is('advisor_id', null), 'id')
+      const aRattacher = orphelins.filter(o => cleNom(o.advisor_nom) === cible).map(o => o.id)
+      for (let i = 0; i < aRattacher.length; i += 500) {
+        const { error: errLink } = await supabaseAdmin
+          .from('meca_advisor_performance').update({ advisor_id: id }).in('id', aRattacher.slice(i, i + 500))
+        if (errLink) throw errLink
+      }
+      perfRattachees = aRattacher.length
     }
 
     return NextResponse.json({ success: true, advisor: data, perfRattachees })
