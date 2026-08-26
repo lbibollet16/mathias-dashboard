@@ -10,6 +10,7 @@ export const SUIVI_STATUTS = [
   'En attente approbation',
   'En cours',
   'Prêt à facturer',
+  'Fermé',
 ] as const
 
 export type SuiviStatut = typeof SUIVI_STATUTS[number]
@@ -28,6 +29,7 @@ export function tonStatut(s: string | null | undefined): 'red' | 'yellow' | 'blu
     case 'Planifié':                 return 'blue'
     case 'En cours':                 return 'blue'
     case 'Prêt à facturer':          return 'green'
+    case 'Fermé':                    return 'green'
     default:                         return 'neutre'
   }
 }
