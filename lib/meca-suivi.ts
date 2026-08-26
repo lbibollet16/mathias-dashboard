@@ -8,6 +8,8 @@ export const SUIVI_STATUTS = [
   'Problème client',
   'En attente client',
   'En attente approbation',
+  'Garantie',
+  'Assurance',
   'En cours',
   'Prêt à facturer',
   'Fermé',
@@ -26,6 +28,8 @@ export function tonStatut(s: string | null | undefined): 'red' | 'yellow' | 'blu
     case 'Pièce en commande':        return 'yellow'
     case 'En attente client':        return 'yellow'
     case 'En attente approbation':   return 'yellow'
+    case 'Garantie':                 return 'yellow'
+    case 'Assurance':                return 'yellow'
     case 'Planifié':                 return 'blue'
     case 'En cours':                 return 'blue'
     case 'Prêt à facturer':          return 'green'
