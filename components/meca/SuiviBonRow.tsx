@@ -3,8 +3,11 @@
 // Une ligne de bon de travail avec son suivi.
 //
 // En mode éditable (onglet Aviseur) : statut, date planifiée et note se
-// modifient sur place et s'enregistrent tout seuls (le statut et la date au
-// changement, la note après une courte pause de frappe).
+// modifient sur place et s'enregistrent tout seuls — le statut et la date au
+// changement, la note quand on quitte le champ (ou sur Entrée). La note n'est
+// volontairement PAS débouncée : une sauvegarde par pause de frappe créait une
+// entrée d'historique par fragment de phrase, et le rechargement du parent
+// réécrivait le champ sous les doigts.
 // En lecture seule (drill-down directeur) : le suivi s'affiche sans contrôles.
 
 import { useEffect, useRef, useState } from 'react'
@@ -32,9 +35,14 @@ export default function SuiviBonRow({ bon, editable, moiNom, onSaved, endpoint =
   const [note, setNote]     = useState<string>(bon.suiviNote ?? '')
   const [etat, setEtat]     = useState<'' | 'saving' | 'saved' | 'err'>('')
 
+  // Note en cours de frappe : on ne laisse pas le parent écraser le champ.
+  const noteEnEdition = useRef(false)
+  const [noteSale, setNoteSale] = useState(false)
+
   // Resynchronise si le parent recharge (ex. après un import).
   useEffect(() => {
-    setStatut(bon.suiviStatut ?? ''); setDate(bon.suiviDatePlanifiee ?? ''); setNote(bon.suiviNote ?? '')
+    setStatut(bon.suiviStatut ?? ''); setDate(bon.suiviDatePlanifiee ?? '')
+    if (!noteEnEdition.current) setNote(bon.suiviNote ?? '')
   }, [bon.suiviStatut, bon.suiviDatePlanifiee, bon.suiviNote])
 
   const enregistrer = async (patch: { statut?: string, datePlanifiee?: string, note?: string }) => {
@@ -61,12 +69,12 @@ export default function SuiviBonRow({ bon, editable, moiNom, onSaved, endpoint =
     } catch { setEtat('err') }
   }
 
-  // La note est débouncée pour ne pas enregistrer à chaque caractère.
-  const noteTimer = useRef<any>(null)
-  const onNote = (v: string) => {
-    setNote(v)
-    if (noteTimer.current) clearTimeout(noteTimer.current)
-    noteTimer.current = setTimeout(() => enregistrer({ note: v }), 700)
+  // La note ne part qu'une fois la phrase finie : sortie du champ ou Entrée.
+  const validerNote = () => {
+    noteEnEdition.current = false
+    if (!noteSale) return
+    setNoteSale(false)
+    enregistrer({ note })
   }
 
   const ageJours = bon.ageJours ?? 0
@@ -144,17 +152,23 @@ export default function SuiviBonRow({ bon, editable, moiNom, onSaved, endpoint =
                   />
                 </>
               )}
-              <span style={{ fontSize: 11, color: etat === 'err' ? t.C.red : etat === 'saved' ? t.C.green : t.sub, minWidth: 56 }}>
-                {etat === 'saving' ? '…' : etat === 'saved' ? '✓ enregistré' : etat === 'err' ? '⚠️ erreur' : ''}
+              <span style={{
+                fontSize: 11, minWidth: 56,
+                color: etat === 'err' ? t.C.red : etat === 'saved' ? t.C.green : noteSale ? t.C.yellow : t.sub,
+              }}>
+                {etat === 'saving' ? '…' : etat === 'err' ? '⚠️ erreur'
+                  : noteSale ? '✎ note non enregistrée' : etat === 'saved' ? '✓ enregistré' : ''}
               </span>
             </div>
             <input
               type="text"
               value={note}
-              placeholder="Note (ex. attend roulement, commande LAUTOPAK…)"
-              onChange={e => onNote(e.target.value)}
-              onBlur={() => { if (noteTimer.current) { clearTimeout(noteTimer.current); enregistrer({ note }) } }}
-              style={{ ...inputStyle, width: '100%' }}
+              placeholder="Note (ex. attend roulement, commande LAUTOPAK…) — Entrée pour enregistrer"
+              onFocus={() => { noteEnEdition.current = true }}
+              onChange={e => { noteEnEdition.current = true; setNoteSale(true); setNote(e.target.value) }}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() } }}
+              onBlur={validerNote}
+              style={{ ...inputStyle, width: '100%', borderColor: noteSale ? t.C.yellow : t.bdr }}
             />
           </div>
         ) : (
