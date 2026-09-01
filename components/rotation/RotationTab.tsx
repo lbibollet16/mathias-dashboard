@@ -56,6 +56,7 @@ const STATUT_PAR_AGENT: Record<string, { statut: string; tri: string }> = {
   stock_mort: { statut: 'mort,jamais_vendue', tri: 'morte' },
   rupture:    { statut: 'rupture', tri: 'urgence' },
   service:    { statut: 'rupture,sous_stock', tri: 'urgence' },
+  saison:     { statut: '', tri: 'saison' },
   reception:  { statut: '', tri: 'valeur' },
   wilson:     { statut: '', tri: 'ventes' },
   rotation:   { statut: '', tri: 'valeur' },
@@ -71,6 +72,7 @@ const AGENTS: Record<string, { nom: string; icone: string; quoi: string }> = {
   surstock:   { nom: 'Surstock',       icone: '📈', quoi: 'Ce qui dépasse l\'horizon de couverture cible et immobilise de la trésorerie.' },
   stock_mort: { nom: 'Stock mort',     icone: '💀', quoi: 'Pièces sans aucun mouvement — capital gelé, à retourner ou liquider.' },
   rupture:    { nom: 'Ruptures',       icone: '⛔', quoi: 'Pièces à demande active tombées à zéro : ventes perdues.' },
+  saison:     { nom: 'Saison',         icone: '🌦️', quoi: `Ce qu'il faut avoir en stock AVANT que la saison démarre. L'activité oscille d'un facteur 4 sur l'année.` },
   reception:  { nom: 'Réceptions',     icone: '🚨', quoi: 'Commandes trop importantes entrées en inventaire.' },
   fiabilite:  { nom: 'Fiabilité',      icone: '🔍', quoi: 'Qualité des données : trous de ventes, coûts à zéro, pièces sans fournisseur.' },
 }
@@ -345,6 +347,22 @@ function VueActions({ t, kpis, data, fournisseurs, onVue, onPieces, onFinding }:
         filtre: { statut: 'surstock', tri: 'exces' },
       },
     ]
+
+    // Le geste que la moyenne plate ne pouvait pas suggérer : commander AVANT
+    // que la demande monte. Ces pièces ne sont pas encore sous leur seuil —
+    // elles y seront quand la saison démarrera, et il sera trop tard.
+    if (Number(kpis.nb_saison || 0) > 0) a.push({
+      cle: 'saison', icone: '🌦️', couleur: t.C.yellow,
+      titre: 'Préparer la saison',
+      quoi: `${n0(kpis.nb_saison)} pièces entrent en haute saison (${(kpis.saison_mois_a_venir || []).join(', ')}) `
+        + `sans le stock pour tenir.`,
+      pourquoi: "Elles ne sont pas encore sous leur seuil. Elles y seront quand la demande montera — "
+        + "avec le délai fournisseur, il sera trop tard pour commander.",
+      montant: Number(kpis.valeur_saison || 0),
+      libelleMontant: 'à commander en avance',
+      nb: Number(kpis.nb_saison || 0),
+      filtre: { tri: 'saison' },
+    })
 
     if (nbRecep > 0) a.push({
       cle: 'receptions', icone: '🚨', couleur: t.C.red,
@@ -940,7 +958,8 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
               </div>
             )}
             <div style={{ fontSize: 11, color: t.sub, marginTop: 4 }}>
-              PC = point de commande · SS = stock de sécurité · EOQ = quantité économique de Wilson
+              PC = point de commande · SS = stock de sécurité · EOQ = quantité économique de Wilson ·
+              Saison = ce qu'il faut prévoir pour les mois à venir (×indice saisonnier appliqué)
             </div>
           </div>
           <a href={`/api/rotation/export?${paramsExport}`} style={{ ...btnLien(t), textDecoration: 'none' }}>⬇ CSV</a>
@@ -993,15 +1012,16 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
               <Th t={t}>SS / PC</Th>
               <Th t={t}>EOQ</Th>
               <ThTriable t={t} label="À commander" colonne="commander" actif={tri} dir={sens} onSort={onSort} />
+              <ThTriable t={t} label="Saison" colonne="saison" actif={tri} dir={sens} onSort={onSort} />
               <Th t={t} align="left">Statut</Th>
             </tr>
           </thead>
           <tbody>
             {chargement && pieces.length === 0 && (
-              <tr><td colSpan={13} style={{ padding: 24, textAlign: 'center', color: t.sub }}>Chargement…</td></tr>
+              <tr><td colSpan={14} style={{ padding: 24, textAlign: 'center', color: t.sub }}>Chargement…</td></tr>
             )}
             {!chargement && pieces.length === 0 && (
-              <tr><td colSpan={13} style={{ padding: 24, textAlign: 'center', color: t.sub }}>Aucune pièce pour ces filtres.</td></tr>
+              <tr><td colSpan={14} style={{ padding: 24, textAlign: 'center', color: t.sub }}>Aucune pièce pour ces filtres.</td></tr>
             )}
             {pieces.map(p => {
               const st = STATUTS[p.statut] || { label: p.statut, couleur: 'blue' as const }
@@ -1033,6 +1053,12 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
                   <Td>{n0(p.stock_securite)} / {n0(p.point_commande)}</Td>
                   <Td>{p.eoq > 0 ? n0(p.eoq) : '—'}</Td>
                   <Td couleur={p.qte_a_commander > 0 ? t.C.blue : undefined}>{p.qte_a_commander > 0 ? n0(p.qte_a_commander) : '—'}</Td>
+                  <Td couleur={p.besoin_saison > 0 ? t.C.yellow : undefined}>
+                    {p.besoin_saison > 0 ? `${n0(p.besoin_saison)} u` : '—'}
+                    {p.indice_horizon != null && Math.abs(p.indice_horizon - 1) > 0.05 && (
+                      <div style={{ fontSize: 9.5, color: t.sub, fontWeight: 400 }}>×{n2(p.indice_horizon)}</div>
+                    )}
+                  </Td>
                   <td style={{ padding: '7px 12px' }}>
                     <Badge t={t} couleur={t.C[st.couleur]}>{st.label}</Badge>
                     {p.derniere_vente && <div style={{ fontSize: 10, color: t.sub, marginTop: 3 }}>dern. {p.derniere_vente}</div>}
@@ -1514,6 +1540,7 @@ const CHAMPS_CONFIG: { cle: string; label: string; aide: string; pas: number; su
   { cle: 'max_commandes_an', label: 'Commandes max par an', aide: 'Rythme de réapprovisionnement le plus rapide possible (26 = aux deux semaines). Borne le calcul : un max à 1 unité ne veut pas dire une commande par vente.', pas: 1, suffixe: '/an' },
   { cle: 'taux_possession', label: 'Taux de possession', aide: 'Coût annuel de détention en % du coût unitaire (Wilson : H). 0,25 = 25 %/an.', pas: 0.01 },
   { cle: 'horizon_surstock_mois', label: 'Horizon de couverture', aide: 'Au-delà de N mois de stock, l\'excédent est signalé comme surstock.', pas: 1, suffixe: 'mois' },
+  { cle: 'saison_horizon_mois', label: 'Horizon de préparation', aide: 'Sur combien de mois à venir on calcule le besoin de saison. 3 mois = on commande pour le trimestre qui arrive.', pas: 1, suffixe: 'mois' },
   { cle: 'mois_stock_mort', label: 'Seuil stock mort', aide: 'Aucune vente depuis N mois → la pièce est classée morte.', pas: 1, suffixe: 'mois' },
   { cle: 'seuil_abc_a', label: 'Seuil Pareto A', aide: 'Part cumulée du coût des ventes qui définit la classe A. 0,80 = les 80 % classiques.', pas: 0.01 },
   { cle: 'seuil_abc_b', label: 'Seuil Pareto B', aide: 'Part cumulée qui délimite B et C. 0,95 par convention.', pas: 0.01 },

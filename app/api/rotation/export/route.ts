@@ -107,6 +107,11 @@ const COLS_PIECE = [
   { cle: 'exces_valeur', titre: 'Excédent ($)' },
   { cle: 'valeur_morte', titre: 'Valeur morte ($)' },
   { cle: 'valeur_dormante', titre: 'Valeur dormante ($)' },
+  { cle: 'indice_saison', titre: 'Indice saison (delai)' },
+  { cle: 'indice_horizon', titre: 'Indice saison (horizon)' },
+  { cle: 'source_saison', titre: 'Source saison' },
+  { cle: 'demande_saison', titre: 'Demande saison a venir (u)' },
+  { cle: 'besoin_saison', titre: 'A prevoir pour la saison (u)' },
 ]
 
 export async function GET(req: NextRequest) {

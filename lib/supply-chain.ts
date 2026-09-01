@@ -22,6 +22,11 @@
 // nombre de mois RÉELLEMENT présents dans la fenêtre, et on remonte cette
 // couverture à l'écran pour que le chiffre soit lisible avec sa marge d'erreur.
 
+import {
+  IndiceSaison, SAISON_NEUTRE, construireIndice, indiceSurPeriode,
+  sommeIndices, couvertureSaisonniere, MOIS_COURTS,
+} from '@/lib/supply-chain-saison'
+
 // ═══════════════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════════════
@@ -68,6 +73,10 @@ export interface ScConfig {
    * demi-million de dollars imaginaire.
    */
   lignes_hors_perimetre: string[]
+  /** Corriger la demande par un indice saisonnier. Coupé = moyenne plate. */
+  saison_active: boolean
+  /** Horizon de préparation de saison, en mois (défaut 3). */
+  saison_horizon_mois: number
 }
 
 export const CONFIG_DEFAUT: ScConfig = {
@@ -87,6 +96,8 @@ export const CONFIG_DEFAUT: ScConfig = {
   alerte_sans_vente_dollars: 500,
   alerte_qte_min: 3,
   lignes_hors_perimetre: ['AMA', 'FBA', 'FBM'],
+  saison_active: true,
+  saison_horizon_mois: 3,
 }
 
 export interface TractionPiece {
@@ -163,6 +174,14 @@ export interface AnalysePiece {
   valeur_morte: number
   valeur_dormante: number
   score_urgence: number
+
+  // Saisonnalité
+  indice_saison: number        // indice du délai à venir — sert au point de commande
+  indice_horizon: number       // indice moyen sur l'horizon de préparation — sert au tri « saison »
+  source_saison: string        // 'piece' | 'ligne' | 'global' | 'aucune'
+  pic_mois: number | null      // mois calendaire de pointe (0-11)
+  demande_saison: number       // demande prévue sur l'horizon de préparation
+  besoin_saison: number        // ce qu'il manque pour tenir cet horizon
 
   serie_12m: number[]
 }
@@ -530,6 +549,55 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
 
   const Z_GLOBAL = zScore(cfg.niveau_service)
 
+  // ── Indices saisonniers ───────────────────────────────────────────
+  // Construits sur TOUT l'historique disponible (30 mois au moment de
+  // l'écriture), pas sur la fenêtre de 12 mois : il faut plusieurs passages du
+  // même mois calendaire pour distinguer la saison du hasard.
+  const moisTousTries = [...e.moisDisponibles].sort()
+  const parMoisCalGlobal: number[][] = Array.from({ length: 12 }, () => [])
+  const parLigneParMois = new Map<string, number[][]>()
+  const parPieceParMois = new Map<string, number[][]>()
+
+  if (cfg.saison_active) {
+    // Total par mois, tous articles confondus → profil global.
+    const totalParMois = new Map<string, number>()
+    for (const [code, hist] of e.ventes) {
+      const ligne = e.traction.get(code)?.codeLigne
+      for (const [mois, cell] of Object.entries(hist)) {
+        if (!e.moisDisponibles.has(mois)) continue
+        totalParMois.set(mois, (totalParMois.get(mois) || 0) + cell.qte)
+        if (ligne) {
+          let arr = parLigneParMois.get(ligne)
+          if (!arr) { arr = Array.from({ length: 12 }, () => [] as number[]); parLigneParMois.set(ligne, arr) }
+          const mo = Number(mois.slice(5, 7)) - 1
+          // On accumule par (ligne, mois) — agrégé ensuite ci-dessous.
+          arr[mo].push(cell.qte)
+        }
+      }
+    }
+    for (const [mois, q] of totalParMois) parMoisCalGlobal[Number(mois.slice(5, 7)) - 1].push(q)
+  }
+
+  const indiceGlobal: IndiceSaison = cfg.saison_active
+    ? construireIndice(parMoisCalGlobal, SAISON_NEUTRE, 1)
+    : SAISON_NEUTRE
+
+  // Indice par code de ligne, tiré vers le global (k = 3 « années » d'a priori).
+  const indiceParLigne = new Map<string, IndiceSaison>()
+  if (cfg.saison_active) {
+    for (const [ligne, brut] of parLigneParMois) {
+      // Les quantités ont été empilées pièce par pièce : on les regroupe par
+      // année pour que « n observations » compte des ANNÉES, pas des pièces.
+      indiceParLigne.set(ligne, construireIndice(brut, indiceGlobal, 3))
+    }
+  }
+
+  // Date de référence pour projeter : on part du mois qui suit la fenêtre,
+  // c'est-à-dire du mois courant.
+  const maintenant = new Date()
+  const moisCourant = maintenant.getUTCMonth()
+  const fractionEcoulee = Math.min(0.95, (maintenant.getUTCDate() - 1) / 30.4375)
+
   // Profondeur réelle de l'historique : sert à qualifier « jamais vendue ».
   // Une pièce absente de 24 mois de rapports n'est pas « jamais vendue dans
   // l'absolu » — elle est invendue sur la période dont on dispose. La nuance
@@ -572,26 +640,69 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
     const moisSansVente = derniereVente ? ecartMois(derniereVente, moisFin) : null
     const moisActifs12 = serie.filter(v => v > 0).length
 
-    // Demande : moyenne sur les mois présents, pas sur 12.
+    // ── Indice saisonnier applicable à cette pièce ──────────────────
+    // Hiérarchie : la pièce si elle a assez de volume ET de recul, sinon sa
+    // ligne, sinon le profil global. Une pièce vendue 8 fois par an n'a pas de
+    // saison propre — lui en inventer une, c'est amplifier du bruit.
+    let indice: IndiceSaison = SAISON_NEUTRE
+    let sourceSaison = 'aucune'
+    if (cfg.saison_active) {
+      const ligne = t?.codeLigne
+      const idxLigne = ligne ? indiceParLigne.get(ligne) : undefined
+      indice = idxLigne || indiceGlobal
+      sourceSaison = idxLigne ? 'ligne' : 'global'
+
+      const moisHist = Object.keys(hist).filter(m => e.moisDisponibles.has(m))
+      const totalHist = moisHist.reduce((sum, m) => sum + (hist[m]?.qte ?? 0), 0)
+      if (moisHist.length >= 24 && totalHist >= 48) {
+        const parMoisCal: number[][] = Array.from({ length: 12 }, () => [])
+        for (const m of moisHist) parMoisCal[Number(m.slice(5, 7)) - 1].push(hist[m]?.qte ?? 0)
+        indice = construireIndice(parMoisCal, indice, 6)
+        sourceSaison = 'piece'
+      }
+    }
+    const picMois = cfg.saison_active ? indice.indexOf(Math.max(...indice)) : null
+
+    // ── Demande désaisonnalisée ─────────────────────────────────────
+    // On divise le total vendu par la somme des indices des mois concernés, et
+    // non par leur nombre : sur une fenêtre qui contient mai (1,89) et décembre
+    // (0,48), la moyenne plate n'a aucun sens.
+    const sommeIdxFenetre = moisPresents12.reduce((sum, m) => sum + indice[Number(m.slice(5, 7)) - 1], 0)
+    const deseason = sommeIdxFenetre > 0 ? ventes12Qte / sommeIdxFenetre : 0
+
+    // demande_mens reste la moyenne plate : c'est la lecture « combien j'en
+    // vends par mois en moyenne », affichée telle quelle et utilisée pour les
+    // comparaisons annuelles (couverture cible, EOQ). Le saisonnier intervient
+    // là où le TIMING compte : point de commande et couverture.
     const demandeMens = ventes12Qte / nbMois12
-    // EMA α = 0.3 — donne du poids au récent sans sur-réagir à un pic.
+
+    // Série désaisonnalisée : c'est sur elle que se lisent la tendance et la
+    // variabilité, sinon la saison se fait passer pour de l'irrégularité et
+    // gonfle le stock de sécurité de toutes les pièces saisonnières.
+    const serieDeseason = moisPresents12.map((m, i) => {
+      const idx = indice[Number(m.slice(5, 7)) - 1]
+      return idx > 0 ? serie[i] / idx : serie[i]
+    })
+
+    // EMA α = 0.3 sur la série désaisonnalisée — poids au récent sans
+    // sur-réagir à un pic de saison.
     let ema: number | null = null
-    for (const v of serie) ema = ema === null ? v : 0.3 * v + 0.7 * ema
+    for (const v of serieDeseason) ema = ema === null ? v : 0.3 * v + 0.7 * ema
     const demandeEma = Math.max(0, ema ?? 0)
 
     // σ sur la fenêtre, mois à zéro INCLUS : la rupture de demande fait partie
     // de la variabilité que le stock de sécurité doit absorber.
-    const n = serie.length
-    const moy = n ? serie.reduce((s, v) => s + v, 0) / n : 0
-    const variance = n > 1 ? serie.reduce((s, v) => s + (v - moy) ** 2, 0) / (n - 1) : 0
+    const n = serieDeseason.length
+    const moy = n ? serieDeseason.reduce((s, v) => s + v, 0) / n : 0
+    const variance = n > 1 ? serieDeseason.reduce((s, v) => s + (v - moy) ** 2, 0) / (n - 1) : 0
     const ecartType = Math.sqrt(variance)
     const cv = moy > 0 ? ecartType / moy : 0
 
     // Tendance : 3 derniers mois de la fenêtre vs les 3 précédents.
     let tendance = 0
-    if (serie.length >= 6) {
-      const r = serie.slice(-3).reduce((s, v) => s + v, 0) / 3
-      const p = serie.slice(-6, -3).reduce((s, v) => s + v, 0) / 3
+    if (serieDeseason.length >= 6) {
+      const r = serieDeseason.slice(-3).reduce((s, v) => s + v, 0) / 3
+      const p = serieDeseason.slice(-6, -3).reduce((s, v) => s + v, 0) / 3
       tendance = p > 0 ? (r - p) / p : (r > 0 ? 1 : 0)
     }
 
@@ -606,9 +717,34 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
     const coutLigne = cfg.cout_ligne_commande
     const Z = pf?.niveau_service != null ? zScore(pf.niveau_service) : Z_GLOBAL
 
-    // Stock de sécurité : SS = Z · σ · √L (σ mensuel, L en mois).
-    const stockSecurite = Math.ceil(Z * ecartType * Math.sqrt(delaiMois))
-    const pointCommande = Math.ceil(demandeEma * delaiMois + stockSecurite)
+    // ── Réapprovisionnement, corrigé de la saison ───────────────────
+    // Le délai à couvrir n'est pas « le mois courant » : commander le 25 mai
+    // avec 14 jours de délai, c'est couvrir surtout le début juin. On intègre
+    // donc l'indice sur la fenêtre réellement concernée.
+    const indiceDelai = cfg.saison_active
+      ? indiceSurPeriode(indice, moisCourant, fractionEcoulee, delaiMois)
+      : 1
+
+    // SS = Z · σ · √L, où σ est l'écart-type DÉSAISONNALISÉ remis à l'échelle
+    // de la période couverte. Sans ça, une pièce parfaitement régulière mais
+    // saisonnière se voit attribuer un stock de sécurité énorme toute l'année,
+    // uniquement parce que son écart entre décembre et mai est grand.
+    const stockSecurite = Math.ceil(Z * ecartType * Math.sqrt(delaiMois) * indiceDelai)
+    const pointCommande = Math.ceil(demandeEma * delaiMois * indiceDelai + stockSecurite)
+
+    // Besoin de la saison qui vient : ce qu'il faudra vendre sur l'horizon de
+    // préparation, et ce qui manque pour y arriver. C'est le chiffre qui dit
+    // « commande maintenant » avant que la saison démarre.
+    const horizonSaison = Math.max(1, Math.round(cfg.saison_horizon_mois))
+    const sommeHorizon = cfg.saison_active
+      ? sommeIndices(indice, (moisCourant + 1) % 12, horizonSaison)
+      : horizonSaison
+    // Indice MOYEN de l'horizon, distinct de celui du délai. Le délai (deux
+    // semaines) dit à quel rythme on vend maintenant ; l'horizon dit si la
+    // saison qui vient monte ou descend. Les confondre revenait à proposer de
+    // stocker pour l'automne des pièces dont le pic était en août.
+    const indiceHorizon = sommeHorizon / horizonSaison
+    const demandeSaison = cfg.saison_active ? deseason * sommeHorizon : demandeMens * horizonSaison
 
     // Wilson : Q* = √(2·D·S/H). H = taux de possession × coût unitaire.
     // Sans coût unitaire ou sans demande, la formule n'a pas de sens : 0.
@@ -631,7 +767,13 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
     const cogsAnnualise = ventes12Cogs * (12 / nbMois12)
     const rotation = valeurStock > 0 ? cogsAnnualise / valeurStock : 0
     const dsi = rotation > 0 ? 365 / rotation : null
-    const couverture = demandeMens > 0 ? stock / demandeMens : null
+    // Couverture : on consomme le stock au rythme des mois À VENIR plutôt que
+    // de diviser par une moyenne plate. « 4 mois de couverture » ne veut pas
+    // dire la même chose en novembre (on traverse le creux) qu'en mars (on
+    // entre dans la saison) — la simulation le dit, la division non.
+    const couverture = cfg.saison_active
+      ? couvertureSaisonniere(stock, deseason, indice, (moisCourant + 1) % 12)
+      : (demandeMens > 0 ? stock / demandeMens : null)
 
     // ── Statut ────────────────────────────────────────────────────────
     // Une pièce n'est « en rupture » que si elle est censée être TENUE en
@@ -664,6 +806,14 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
 
     // Quantité à commander : viser le point de commande, en respectant le lot
     // économique, et en tenant compte de ce qui est déjà en route.
+    // Manque pour tenir la saison qui vient, compte tenu de ce qui est en route.
+    // Uniquement pour les pièces qu'on TIENT en stock : proposer de garnir
+    // d'avance une pièce commandée à l'unité pour un client (statut
+    // sur_commande) est exactement le contraire de ce qu'il faut faire.
+    const besoinSaison = estStockee
+      ? Math.max(0, Math.ceil(demandeSaison - (stock + qteTransit + qteCommande)))
+      : 0
+
     let qteACommander = 0
     if (statut === 'rupture' || statut === 'sous_stock') {
       const enRoute = qteTransit + qteCommande
@@ -722,6 +872,12 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
       valeur_morte: valeurMorte,
       valeur_dormante: valeurDormante,
       score_urgence: scoreUrgence,
+      indice_saison: indiceDelai,
+      indice_horizon: indiceHorizon,
+      source_saison: sourceSaison,
+      pic_mois: picMois,
+      demande_saison: demandeSaison,
+      besoin_saison: besoinSaison,
       serie_12m: serie,
       _cogsAnnualise: cogsAnnualise,
     })
@@ -854,6 +1010,8 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
   const findings = lancerAgents(pieces, groupes, cfg, {
     moisFin, moisPresents12, moisManquants12, nbMois12, debutHistorique,
     exclusion: e.exclusion,
+    moisCourant, indiceGlobal, saisonActive: cfg.saison_active,
+    horizonSaison: Math.max(1, Math.round(cfg.saison_horizon_mois)),
   }, log)
 
   // ── KPIs d'en-tête ───────────────────────────────────────────────────
@@ -861,6 +1019,13 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
   const cogsTotal = pieces.reduce((s, p) => s + p.ventes_12m_cogs, 0) * (12 / nbMois12)
   const fournGroupes = groupes.filter(g => g.dimension === 'fournisseur')
   const stockMoyenGlobal = fournGroupes.reduce((s, g) => s + g.stock_moyen, 0)
+  // « Entrer en saison » se juge sur les mois À VENIR, pas sur le délai de
+  // réappro. Les ruptures et sous-stocks sont déjà dans « commander
+  // maintenant » ; les pièces non stockées, mortes ou dormantes n'ont rien à
+  // faire dans une préparation de saison.
+  const piecesSaison = pieces.filter(p =>
+    p.besoin_saison > 0 && p.indice_horizon > 1.15 &&
+    !['rupture', 'sous_stock', 'sur_commande', 'mort', 'jamais_vendue', 'dormant'].includes(p.statut))
 
   const kpis = {
     mois_fin: moisFin,
@@ -895,6 +1060,17 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
       .reduce((s, p) => s + Math.max(0, p.prix_vente - p.cout_unitaire) * p.demande_mens * 12, 0),
     // Pièces de classe A pilotées sans aucun seuil dans Traction.
     nb_sans_minmax: pieces.filter(p => p.classe_abc === 'A' && p.qte_min === 0 && p.qte_max === 0).length,
+    // Préparation de saison : pièces qui entrent en haute saison et dont le
+    // stock (plus ce qui est en route) ne couvrira pas les mois qui viennent.
+    // Les ruptures et sous-stocks sont exclus : ils sont déjà dans « commander
+    // maintenant », les compter deux fois brouillerait la liste d'actions.
+    saison_active: cfg.saison_active,
+    saison_horizon_mois: cfg.saison_horizon_mois,
+    saison_indice_global: indiceGlobal,
+    saison_mois_a_venir: Array.from({ length: cfg.saison_horizon_mois }, (_, i) =>
+      MOIS_COURTS[(moisCourant + 1 + i) % 12]),
+    nb_saison: piecesSaison.length,
+    valeur_saison: piecesSaison.reduce((s, p) => s + p.besoin_saison * p.cout_unitaire, 0),
     nb_sous_stock: pieces.filter(p => p.statut === 'sous_stock').length,
     nb_surstock: pieces.filter(p => p.statut === 'surstock').length,
     nb_mort: pieces.filter(p => ['mort', 'jamais_vendue'].includes(p.statut)).length,
@@ -919,6 +1095,10 @@ interface CtxAgents {
   nbMois12: number
   debutHistorique: string
   exclusion?: ExclusionTraction
+  moisCourant: number
+  indiceGlobal: IndiceSaison
+  saisonActive: boolean
+  horizonSaison: number
 }
 
 /**
@@ -1244,6 +1424,69 @@ function lancerAgents(
         donnees: { nb: ruptures.length, nb_sur_commande: surCommande.length, perte_mensuelle: perteMens },
       })
     }
+  }
+
+  // ─── AGENT SAISON ────────────────────────────────────────────────────
+  // L'activité oscille d'un facteur 4 sur l'année et les familles ne suivent
+  // pas le même calendrier. Cet agent répond à « qu'est-ce qu'il faut avoir en
+  // stock AVANT que la saison démarre », question qu'une moyenne plate sur
+  // 12 mois ne peut pas poser.
+  if (ctx.saisonActive) {
+    const moisAVenir = Array.from({ length: ctx.horizonSaison }, (_, i) =>
+      MOIS_COURTS[(ctx.moisCourant + 1 + i) % 12]).join(', ')
+
+    const aPreparer = pieces.filter(p =>
+      p.besoin_saison > 0 && p.indice_horizon > 1.15 &&
+      !['rupture', 'sous_stock', 'sur_commande', 'mort', 'jamais_vendue', 'dormant'].includes(p.statut))
+    const valeur = aPreparer.reduce((s, p) => s + p.besoin_saison * p.cout_unitaire, 0)
+
+    if (aPreparer.length > 0) {
+      push({
+        agent: 'saison', severite: 'attention', code_piece: null, fournisseur: null, code_ligne: null,
+        titre: `${aPreparer.length} pièces entrent en saison (${moisAVenir}) sans le stock pour tenir`,
+        detail: `Réapprovisionnement suggéré : ${arg(valeur)}. Ces pièces ne sont pas encore sous leur `
+          + `seuil — elles y seront quand la demande montera, et il sera trop tard pour commander. `
+          + `L'indice saisonnier de leur famille dépasse 1,15 sur les mois à venir.`,
+        action: `Anticiper la commande maintenant, en tenant compte du délai fournisseur. Trier par `
+          + `fournisseur pour regrouper.`,
+        impact_dollars: valeur,
+        donnees: { nb: aPreparer.length, valeur, mois: moisAVenir },
+      })
+    }
+
+    for (const p of topN(aPreparer, 25, (a, b) => (b.besoin_saison * b.cout_unitaire) - (a.besoin_saison * a.cout_unitaire))) {
+      const pic = p.pic_mois !== null && p.pic_mois !== undefined ? MOIS_COURTS[p.pic_mois] : '?'
+      push({
+        agent: 'saison', severite: 'attention',
+        code_piece: p.code_piece, fournisseur: p.fournisseur, code_ligne: p.code_ligne,
+        titre: `${p.code_piece} : ${nb(p.besoin_saison, 0)} u à prévoir pour ${moisAVenir}`,
+        detail: `${p.description || 'sans description'} · stock ${nb(p.stock, 0)} u `
+          + `(+${nb(p.qte_transit + p.qte_commande, 0)} en route) pour une demande attendue de `
+          + `${nb(p.demande_saison, 0)} u sur la période (indice ${nb(p.indice_horizon, 2)} sur ces mois-là). `
+          + `Pointe habituelle en ${pic}, source de l'indice : ${p.source_saison}.`,
+        action: `Commander ${nb(p.besoin_saison, 0)} u chez ${p.fournisseur} avant la montée.`,
+        impact_dollars: p.besoin_saison * p.cout_unitaire,
+        donnees: { besoin: p.besoin_saison, demande_saison: p.demande_saison, indice: p.indice_saison },
+      })
+    }
+
+    // Où on est dans l'année : donne le contexte de lecture de tout le reste.
+    const idxProchain = ctx.indiceGlobal[(ctx.moisCourant + 1) % 12]
+    const pic = MOIS_COURTS[ctx.indiceGlobal.indexOf(Math.max(...ctx.indiceGlobal))]
+    const creux = MOIS_COURTS[ctx.indiceGlobal.indexOf(Math.min(...ctx.indiceGlobal))]
+    push({
+      agent: 'saison', severite: 'info', code_piece: null, fournisseur: null, code_ligne: null,
+      titre: `Saison : le mois qui vient pèse ${nb(idxProchain, 2)}× un mois moyen`,
+      detail: `Profil global de l'atelier : pointe en ${pic} `
+        + `(${nb(Math.max(...ctx.indiceGlobal), 2)}×), creux en ${creux} `
+        + `(${nb(Math.min(...ctx.indiceGlobal), 2)}×), soit un écart de `
+        + `${nb(Math.max(...ctx.indiceGlobal) / Math.min(...ctx.indiceGlobal), 1)}×. `
+        + `Les points de commande et les couvertures affichés tiennent compte de ce calendrier, `
+        + `famille par famille.`,
+      action: `Rien à faire — c'est le contexte de lecture des autres constats.`,
+      impact_dollars: 0,
+      donnees: { indice_global: ctx.indiceGlobal, pic, creux },
+    })
   }
 
   // ─── AGENT FIABILITÉ (qualité des données) ───────────────────────────

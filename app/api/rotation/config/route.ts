@@ -26,6 +26,7 @@ const BORNES: Record<string, [number, number]> = {
   alerte_multiple_eoq: [1, 50],
   alerte_sans_vente_dollars: [0, 1_000_000],
   alerte_qte_min: [1, 1000],
+  saison_horizon_mois: [1, 12],
 }
 
 export async function GET() {
@@ -80,6 +81,7 @@ export async function PATCH(req: NextRequest) {
       }
       patch[k] = v
     }
+    if ('saison_active' in body) patch.saison_active = !!body.saison_active
     if ('lignes_hors_perimetre' in body) {
       const brut = Array.isArray(body.lignes_hors_perimetre)
         ? body.lignes_hors_perimetre.join(',')

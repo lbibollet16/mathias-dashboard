@@ -71,6 +71,9 @@ export async function chargerConfig(): Promise<ScConfig> {
     lignes_hors_perimetre: typeof data.lignes_hors_perimetre === 'string'
       ? data.lignes_hors_perimetre.split(',').map((x: string) => x.trim().toUpperCase()).filter(Boolean)
       : CONFIG_DEFAUT.lignes_hors_perimetre,
+    saison_active: data.saison_active === undefined || data.saison_active === null
+      ? CONFIG_DEFAUT.saison_active : !!data.saison_active,
+    saison_horizon_mois: n(data.saison_horizon_mois, CONFIG_DEFAUT.saison_horizon_mois),
   }
 }
 
