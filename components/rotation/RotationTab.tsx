@@ -20,18 +20,48 @@ import {
   fmtArgentCourt,
 } from '@/components/meca/MecaUI'
 
-type Vue = 'synthese' | 'fournisseurs' | 'lignes' | 'pieces' | 'agents' | 'receptions' | 'archives' | 'reglages'
+type Vue = 'actions' | 'fournisseurs' | 'lignes' | 'pieces' | 'agents' | 'receptions' | 'archives' | 'reglages'
 
+// « À faire » d'abord : c'est la seule vue qu'on doit avoir besoin d'ouvrir un
+// jour normal. Les autres sont là pour creuser quand on a une question précise.
 const VUES: { id: Vue; label: string }[] = [
-  { id: 'synthese', label: '📊 Synthèse' },
+  { id: 'actions', label: '🎯 À faire' },
+  { id: 'pieces', label: '🔩 Pièces' },
   { id: 'fournisseurs', label: '🏭 Fournisseurs' },
   { id: 'lignes', label: '🏷️ Codes de ligne' },
-  { id: 'pieces', label: '🔩 Pièces' },
-  { id: 'agents', label: '🤖 Agents' },
   { id: 'receptions', label: '🚨 Réceptions' },
+  { id: 'agents', label: '🔬 Analyse détaillée' },
   { id: 'archives', label: '🗄️ Archives' },
   { id: 'reglages', label: '⚙️ Réglages' },
 ]
+
+/** Filtre partagé : cliquer n'importe où dans l'onglet ouvre la liste de pièces
+ *  correspondante. C'est ce qui relie « 1 364 320 $ de stock mort » aux 12 986
+ *  pièces qui composent ce montant. */
+export interface FiltrePieces {
+  fournisseur: string | null
+  ligne: string | null
+  statut: string
+  abc: string
+  q: string
+  tri: string
+}
+
+const FILTRE_VIDE: FiltrePieces = { fournisseur: null, ligne: null, statut: '', abc: '', q: '', tri: 'valeur' }
+
+/** Chaque agent pointe vers les pièces qu'il a jugées : un constat sans la liste
+ *  derrière n'est qu'une opinion. */
+const STATUT_PAR_AGENT: Record<string, { statut: string; tri: string }> = {
+  surstock:   { statut: 'surstock', tri: 'exces' },
+  stock_mort: { statut: 'mort,jamais_vendue', tri: 'morte' },
+  rupture:    { statut: 'rupture', tri: 'urgence' },
+  service:    { statut: 'rupture,sous_stock', tri: 'urgence' },
+  reception:  { statut: '', tri: 'valeur' },
+  wilson:     { statut: '', tri: 'ventes' },
+  rotation:   { statut: '', tri: 'valeur' },
+  pareto:     { statut: '', tri: 'valeur' },
+  fiabilite:  { statut: '', tri: 'valeur' },
+}
 
 const AGENTS: Record<string, { nom: string; icone: string; quoi: string }> = {
   pareto:     { nom: 'Pareto / ABC',   icone: '📐', quoi: 'Où se concentre le capital : 80 % de la consommation vient d\'une poignée de pièces.' },
@@ -76,15 +106,13 @@ export default function RotationTab(props: Theme & { profil?: any }) {
   const t: Theme = props
   const email = props.profil?.email || props.profil?.nom || null
 
-  const [vue, setVue] = useState<Vue>('synthese')
+  const [vue, setVue] = useState<Vue>('actions')
   const [data, setData] = useState<any>(null)
   const [chargement, setChargement] = useState(true)
   const [recalcul, setRecalcul] = useState(false)
   const [msg, setMsg] = useState<{ type: 'info' | 'ok' | 'err'; texte: string } | null>(null)
 
-  // Filtre transverse : cliquer un fournisseur bascule sur les pièces filtrées.
-  const [filtreFournisseur, setFiltreFournisseur] = useState<string | null>(null)
-  const [filtreLigne, setFiltreLigne] = useState<string | null>(null)
+  const [filtre, setFiltre] = useState<FiltrePieces>(FILTRE_VIDE)
 
   const charger = useCallback(async () => {
     setChargement(true)
@@ -125,10 +153,23 @@ export default function RotationTab(props: Theme & { profil?: any }) {
   const fournisseurs = useMemo(() => groupes.filter((g: any) => g.dimension === 'fournisseur'), [groupes])
   const lignes = useMemo(() => groupes.filter((g: any) => g.dimension === 'ligne'), [groupes])
 
-  function ouvrirPieces(fournisseur: string | null, ligne: string | null) {
-    setFiltreFournisseur(fournisseur)
-    setFiltreLigne(ligne)
+  /** Point d'entrée unique du drill-down : tout montant affiché mène à ses pièces. */
+  function ouvrirPieces(p: Partial<FiltrePieces>) {
+    setFiltre({ ...FILTRE_VIDE, ...p })
     setVue('pieces')
+  }
+
+  /** Drill-down depuis un constat d'agent : on croise le fournisseur (ou le code)
+   *  du constat avec le statut que cet agent surveille. */
+  function ouvrirDepuisFinding(f: any) {
+    const map = STATUT_PAR_AGENT[f.agent] || { statut: '', tri: 'valeur' }
+    if (f.code_piece) { ouvrirPieces({ q: f.code_piece, tri: map.tri }); return }
+    ouvrirPieces({
+      fournisseur: f.fournisseur || null,
+      ligne: f.code_ligne || null,
+      statut: map.statut,
+      tri: map.tri,
+    })
   }
 
   if (chargement && !data) {
@@ -213,13 +254,13 @@ export default function RotationTab(props: Theme & { profil?: any }) {
         </Message>
       )}
 
-      {vue === 'synthese' && <VueSynthese t={t} kpis={kpis} data={data} fournisseurs={fournisseurs} onVue={setVue} />}
-      {vue === 'fournisseurs' && <VueGroupes t={t} titre="Stock par fournisseur" dimension="fournisseur" groupes={fournisseurs} onDrill={c => ouvrirPieces(c, null)} />}
-      {vue === 'lignes' && <VueGroupes t={t} titre="Stock par code de ligne" dimension="ligne" groupes={lignes} onDrill={c => ouvrirPieces(null, c)} />}
-      {vue === 'pieces' && <VuePieces t={t} fournisseur={filtreFournisseur} ligne={filtreLigne}
-        setFournisseur={setFiltreFournisseur} setLigne={setFiltreLigne}
+      {vue === 'actions' && <VueActions t={t} kpis={kpis} data={data} fournisseurs={fournisseurs}
+        onVue={setVue} onPieces={ouvrirPieces} onFinding={ouvrirDepuisFinding} />}
+      {vue === 'fournisseurs' && <VueGroupes t={t} titre="Stock par fournisseur" dimension="fournisseur" groupes={fournisseurs} onDrill={c => ouvrirPieces({ fournisseur: c })} />}
+      {vue === 'lignes' && <VueGroupes t={t} titre="Stock par code de ligne" dimension="ligne" groupes={lignes} onDrill={c => ouvrirPieces({ ligne: c })} />}
+      {vue === 'pieces' && <VuePieces t={t} filtre={filtre} setFiltre={setFiltre}
         listeFournisseurs={fournisseurs.map((g: any) => g.cle)} listeLignes={lignes.map((g: any) => g.cle)} />}
-      {vue === 'agents' && <VueAgents t={t} resume={data?.findings_par_agent || []} />}
+      {vue === 'agents' && <VueAgents t={t} resume={data?.findings_par_agent || []} onFinding={ouvrirDepuisFinding} />}
       {vue === 'receptions' && <VueReceptions t={t} email={email} onMaj={charger} />}
       {vue === 'archives' && <VueArchives t={t} snapshots={data?.snapshots || []} onMaj={charger} />}
       {vue === 'reglages' && <VueReglages t={t} config={data?.config} email={email} onMaj={charger} />}
@@ -228,101 +269,231 @@ export default function RotationTab(props: Theme & { profil?: any }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Synthèse
+// « À faire » — la vue par défaut
 // ═══════════════════════════════════════════════════════════════════════
 
-function VueSynthese({ t, kpis, data, fournisseurs, onVue }: {
-  t: Theme; kpis: any; data: any; fournisseurs: any[]; onVue: (v: Vue) => void
+/**
+ * Une action = un geste concret, son montant, et la liste des pièces derrière.
+ *
+ * Le reste de l'onglet répond à « qu'est-ce qui se passe ? ». Cette vue-ci
+ * répond à « qu'est-ce que je fais aujourd'hui ? », et c'est la seule question
+ * qui se pose un jour normal. Les blocs sont triés par argent en jeu : le
+ * premier de la liste est toujours celui qui rapporte le plus.
+ */
+interface Action {
+  cle: string
+  titre: string          // un verbe : ce qu'on fait
+  quoi: string           // ce que le système a vu
+  pourquoi: string       // pourquoi ça coûte
+  montant: number
+  libelleMontant: string
+  nb: number
+  couleur: string
+  icone: string
+  filtre?: Partial<FiltrePieces>
+  vue?: Vue
+}
+
+function VueActions({ t, kpis, data, fournisseurs, onVue, onPieces, onFinding }: {
+  t: Theme; kpis: any; data: any; fournisseurs: any[]
+  onVue: (v: Vue) => void
+  onPieces: (p: Partial<FiltrePieces>) => void
+  onFinding: (f: any) => void
 }) {
   const [findings, setFindings] = useState<any[]>([])
+  const [detailsOuverts, setDetailsOuverts] = useState(false)
+
   useEffect(() => {
-    fetch('/api/rotation/findings?severite=critique,attention&limite=15')
+    fetch('/api/rotation/findings?severite=critique,attention&limite=12')
       .then(r => r.json()).then(j => setFindings(j.findings || [])).catch(() => {})
   }, [data?.run?.run_id])
 
+  const nbRecep = data?.nb_receptions_nouvelles || 0
+  const sansMinMax = Number(kpis.nb_sans_minmax || 0)
+  const moisManquants: string[] = kpis.mois_manquants || []
+
+  const actions: Action[] = useMemo(() => {
+    const a: Action[] = [
+      {
+        cle: 'commander', icone: '🔴', couleur: t.C.red,
+        titre: 'Commander maintenant',
+        quoi: `${n0(kpis.nb_rupture)} pièces tenues en stock sont tombées à zéro, ${n0(kpis.nb_sous_stock)} sont sous leur point de commande.`,
+        pourquoi: 'Chaque jour sans stock est une vente qui part chez le concurrent.',
+        montant: Number(kpis.marge_exposee || 0),
+        libelleMontant: 'de marge exposée par an',
+        nb: Number(kpis.nb_rupture || 0) + Number(kpis.nb_sous_stock || 0),
+        filtre: { statut: 'rupture,sous_stock', tri: 'urgence' },
+      },
+      {
+        cle: 'liquider', icone: '💀', couleur: t.C.red,
+        titre: 'Retourner ou liquider',
+        quoi: `${n0(kpis.nb_mort)} pièces n'ont eu aucune vente depuis au moins 24 mois.`,
+        pourquoi: `Ce capital est gelé et coûte environ ${argCourt(Number(kpis.valeur_morte || 0) * 0.25)}/an rien qu'à être entreposé.`,
+        montant: Number(kpis.valeur_morte || 0),
+        libelleMontant: 'de capital immobilisé',
+        nb: Number(kpis.nb_mort || 0),
+        filtre: { statut: 'mort,jamais_vendue', tri: 'morte' },
+      },
+      {
+        cle: 'stopper', icone: '🟠', couleur: t.C.yellow,
+        titre: 'Arrêter de commander',
+        quoi: `${n0(kpis.nb_surstock)} pièces dépassent 12 mois de couverture.`,
+        pourquoi: "L'excédent bloque de la trésorerie sur des pièces qui se vendent déjà lentement.",
+        montant: Number(kpis.valeur_exces || 0),
+        libelleMontant: 'au-delà de la couverture cible',
+        nb: Number(kpis.nb_surstock || 0),
+        filtre: { statut: 'surstock', tri: 'exces' },
+      },
+    ]
+
+    if (nbRecep > 0) a.push({
+      cle: 'receptions', icone: '🚨', couleur: t.C.red,
+      titre: 'Justifier des réceptions',
+      quoi: `${n0(nbRecep)} entrées en inventaire ont déclenché une alerte et personne ne les a encore regardées.`,
+      pourquoi: 'Plus on attend, plus la fenêtre de retour au fournisseur se referme.',
+      montant: Number(kpis.exces_receptions || 0),
+      libelleMontant: "d'excédent reçu",
+      nb: nbRecep,
+      vue: 'receptions',
+    })
+
+    if (Number(kpis.valeur_dormante || 0) > 0) a.push({
+      cle: 'surveiller', icone: '👁️', couleur: t.C.yellow,
+      titre: 'Surveiller les dormantes',
+      quoi: `${n0(kpis.nb_dormant)} pièces sans vente sur 12 mois, mais qui bougeaient encore il y a moins de 24 mois.`,
+      pourquoi: "Elles ne sont pas mortes, elles y vont. C'est le dernier moment pour les retourner.",
+      montant: Number(kpis.valeur_dormante || 0),
+      libelleMontant: 'à surveiller',
+      nb: Number(kpis.nb_dormant || 0),
+      filtre: { statut: 'dormant', tri: 'valeur' },
+    })
+
+    if (sansMinMax > 0) a.push({
+      cle: 'parametrer', icone: '🔧', couleur: t.C.blue,
+      titre: 'Paramétrer les min/max',
+      quoi: `${n0(sansMinMax)} pièces de classe A sont réapprovisionnées sans aucun seuil dans Traction.`,
+      pourquoi: 'Sans seuil, le réappro se fait au jugé : on rate des ventes ou on surcommande.',
+      montant: 0,
+      libelleMontant: '',
+      nb: sansMinMax,
+      filtre: { abc: 'A', tri: 'ventes' },
+    })
+
+    if (moisManquants.length > 0) a.push({
+      cle: 'donnees', icone: '📥', couleur: t.C.blue,
+      titre: 'Importer les ventes manquantes',
+      quoi: `${moisManquants.length} mois absents de l'historique : ${moisManquants.join(', ')}.`,
+      pourquoi: 'Chaque trou dégrade la demande calculée, donc tous les seuils ci-dessus.',
+      montant: 0,
+      libelleMontant: '',
+      nb: moisManquants.length,
+      vue: 'reglages',
+    })
+
+    return a.filter(x => x.nb > 0).sort((x, y) => y.montant - x.montant)
+  }, [kpis, nbRecep, sansMinMax, moisManquants, t])
+
   const top = useMemo(() =>
-    [...fournisseurs].sort((a, b) => b.valeur_stock - a.valeur_stock).slice(0, 12), [fournisseurs])
-  const maxVal = Math.max(1, ...top.map(g => g.valeur_stock))
+    [...fournisseurs]
+      .sort((a, b) => (b.valeur_morte + b.valeur_exces) - (a.valeur_morte + a.valeur_exces))
+      .slice(0, 10),
+    [fournisseurs])
+  const maxFige = Math.max(1, ...top.map(g => g.valeur_morte + g.valeur_exces))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <GrilleKpi min={190}>
-        <KpiCard t={t} label="Valeur d'inventaire" value={argCourt(kpis.valeur_stock)} />
-        <KpiCard t={t} label="Roulement (fois/an)" value={n2(kpis.rotation_globale)} warn={kpis.rotation_globale < 2} />
-        <KpiCard t={t} label="Jours de stock" value={kpis.dsi_global ? n0(kpis.dsi_global) + ' j' : '—'} warn={kpis.dsi_global > 180} />
-        <KpiCard t={t} label="Stock mort" value={argCourt(kpis.valeur_morte)} warn={kpis.valeur_morte > 0} />
-        <KpiCard t={t} label="Dormant (à surveiller)" value={argCourt(kpis.valeur_dormante)} />
-        <KpiCard t={t} label="Excédent" value={argCourt(kpis.valeur_exces)} warn={kpis.valeur_exces > 0} />
-        <KpiCard t={t} label="Ruptures actives" value={n0(kpis.nb_rupture)} warn={kpis.nb_rupture > 0} />
-      </GrilleKpi>
 
-      <Carte t={t}>
-        <SectionTitre t={t} titre="Comment lire le roulement"
-          aide={
-            kpis.nb_snapshots > 0
-              ? `Rotation = coût des ventes annualisé ÷ stock moyen. ${kpis.nb_snapshots} photo(s) mensuelle(s) archivée(s) alimentent le stock moyen ; la précision augmente à chaque 1er du mois.`
-              : `Aucune photo mensuelle archivée pour l'instant : le stock moyen est approché par le stock du jour. Le premier snapshot automatique tombera le 1er du mois prochain.`
-          } />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginTop: 14 }}>
-          <Mini t={t} label="Coût des ventes (12 m annualisé)" valeur={argCourt(kpis.cogs_annualise)} />
-          <Mini t={t} label="Stock moyen" valeur={argCourt(kpis.stock_moyen)} />
-          <Mini t={t} label="Couverture des données" valeur={kpis.couverture_donnees || '—'} />
-          <Mini t={t} label="Fournisseurs / codes de ligne" valeur={`${n0(kpis.nb_fournisseurs)} / ${n0(kpis.nb_lignes)}`} />
-          <Mini t={t} label="Pièces suivies" valeur={`${n0(kpis.nb_pieces_stock)} en stock / ${n0(kpis.nb_pieces)}`} />
-          <Mini t={t} label="Argent en jeu (constats)" valeur={argCourt(kpis.impact_total)} />
-          <Mini t={t} label={`Écarté du calcul (${(kpis.exclusion?.lignes || []).join(', ') || '—'})`}
-            valeur={kpis.exclusion ? `${n0(kpis.exclusion.nb_en_stock)} pcs · ${argCourt(kpis.exclusion.valeur)}` : '—'} />
-          <Mini t={t} label="Historique disponible depuis" valeur={kpis.profondeur_historique || '—'} />
-          <Mini t={t} label="Pièces sur commande (non stockées)" valeur={n0(kpis.nb_sur_commande)} />
-          <Mini t={t} label="Pièces mortes / dormantes" valeur={`${n0(kpis.nb_mort)} / ${n0(kpis.nb_dormant)}`} />
-        </div>
-      </Carte>
+      {/* Les trois seuls chiffres à retenir. Cliquables. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
+        <Tuile t={t} label="Valeur d'inventaire" valeur={argCourt(kpis.valeur_stock)}
+          note={`${n0(kpis.nb_pieces_stock)} pièces en stock`}
+          onClick={() => onPieces({ tri: 'valeur' })} />
+        <Tuile t={t} label="Roulement" valeur={`${n2(kpis.rotation_globale)}×/an`}
+          note={kpis.dsi_global ? `${n0(kpis.dsi_global)} jours de stock` : ''}
+          couleur={kpis.rotation_globale < 1 ? t.C.red : kpis.rotation_globale < 2 ? t.C.yellow : t.C.green} />
+        <Tuile t={t} label="Capital qui ne tourne pas"
+          valeur={argCourt(Number(kpis.valeur_morte || 0) + Number(kpis.valeur_exces || 0))}
+          note={`${n0(Number(kpis.nb_mort || 0) + Number(kpis.nb_surstock || 0))} pièces`}
+          couleur={t.C.red}
+          onClick={() => onPieces({ statut: 'mort,jamais_vendue,surstock', tri: 'morte' })} />
+      </div>
 
-      <Carte t={t}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <SectionTitre t={t} titre="Verdict des agents" aide="Chaque agent regarde le même stock sous un angle différent. Trié par argent en jeu." />
-          <button onClick={() => onVue('agents')} style={btnLien(t)}>Tout voir →</button>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginTop: 14 }}>
-          {(data?.findings_par_agent || []).map((a: any) => {
-            const meta = AGENTS[a.agent] || { nom: a.agent, icone: '•', quoi: '' }
-            const couleur = a.nb_critique > 0 ? t.C.red : a.nb_attention > 0 ? t.C.yellow : t.C.green
-            return (
-              <div key={a.agent} onClick={() => onVue('agents')}
-                style={{ border: `1px solid ${t.bdr}`, borderLeft: `4px solid ${couleur}`, borderRadius: 10, padding: 14, cursor: 'pointer', background: t.card }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 800 }}>{meta.icone} {meta.nom}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: couleur }}>{argCourt(a.impact)}</span>
+      {/* La liste d'actions. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {actions.map((a, i) => (
+          <div key={a.cle} style={{
+            background: t.card, border: `1px solid ${t.bdr}`, borderLeft: `5px solid ${a.couleur}`,
+            borderRadius: 12, padding: '16px 18px',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 18, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+              <div style={{ flex: 1, minWidth: 260 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                  <span style={{
+                    width: 24, height: 24, borderRadius: '50%', background: a.couleur, color: '#fff',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 12.5, fontWeight: 800, flexShrink: 0,
+                  }}>{i + 1}</span>
+                  <span style={{ fontSize: 16.5, fontWeight: 800 }}>{a.icone} {a.titre}</span>
                 </div>
-                <div style={{ fontSize: 11.5, color: t.sub, marginTop: 6, lineHeight: 1.45 }}>{meta.quoi}</div>
-                <div style={{ fontSize: 11.5, marginTop: 8, display: 'flex', gap: 8 }}>
-                  {a.nb_critique > 0 && <Badge t={t} couleur={t.C.red}>{a.nb_critique} critique{a.nb_critique > 1 ? 's' : ''}</Badge>}
-                  {a.nb_attention > 0 && <Badge t={t} couleur={t.C.yellow}>{a.nb_attention} à voir</Badge>}
-                  {a.nb_critique === 0 && a.nb_attention === 0 && <Badge t={t} couleur={t.C.green}>RAS</Badge>}
-                </div>
+                <div style={{ fontSize: 13, marginTop: 8, lineHeight: 1.55 }}>{a.quoi}</div>
+                <div style={{ fontSize: 12, color: t.sub, marginTop: 4, lineHeight: 1.5 }}>{a.pourquoi}</div>
               </div>
-            )
-          })}
-        </div>
-      </Carte>
+              <div style={{ textAlign: 'right', minWidth: 170 }}>
+                {a.montant > 0 && (
+                  <>
+                    <div style={{ fontSize: 26, fontWeight: 800, color: a.couleur, lineHeight: 1.1 }}>
+                      {argCourt(a.montant)}
+                    </div>
+                    <div style={{ fontSize: 11, color: t.sub, marginTop: 2 }}>{a.libelleMontant}</div>
+                  </>
+                )}
+                <button
+                  onClick={() => a.vue ? onVue(a.vue) : onPieces(a.filtre || {})}
+                  style={{
+                    marginTop: 10, padding: '9px 15px', borderRadius: 8, border: 'none',
+                    background: a.couleur, color: '#fff', fontWeight: 700, fontSize: 12.5,
+                    cursor: 'pointer', whiteSpace: 'nowrap',
+                  }}>
+                  {a.vue === 'receptions'
+                    ? `Voir les ${n0(a.nb)} alertes →`
+                    : a.vue === 'reglages'
+                      ? 'Aller à l’import →'
+                      : `Voir les ${n0(a.nb)} pièces →`}
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+        {actions.length === 0 && (
+          <Carte t={t}>
+            <div style={{ textAlign: 'center', color: t.C.green, fontWeight: 700, padding: 20 }}>
+              ✅ Rien à traiter — aucun seuil franchi.
+            </div>
+          </Carte>
+        )}
+      </div>
 
+      {/* Chez qui le capital dort : de quoi préparer un appel ou un retour groupé. */}
       <Carte t={t}>
-        <SectionTitre t={t} titre="Où dort le capital" aide="Les 12 fournisseurs qui immobilisent le plus. La barre claire est la part qui ne tourne pas (stock mort + excédent)." />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 11, marginTop: 14 }}>
+        <SectionTitre t={t} titre="Chez qui le capital dort"
+          aide="Les 10 fournisseurs qui immobilisent le plus de stock mort et d'excédent. Clique une barre pour voir leurs pièces concernées." />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
           {top.map(g => {
             const fige = (g.valeur_morte || 0) + (g.valeur_exces || 0)
+            if (fige <= 0) return null
             return (
-              <div key={g.cle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3, fontSize: 12.5 }}>
+              <div key={g.cle}
+                onClick={() => onPieces({ fournisseur: g.cle, statut: 'mort,jamais_vendue,surstock', tri: 'morte' })}
+                style={{ cursor: 'pointer' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3, fontSize: 12.5, gap: 12 }}>
                   <span style={{ fontWeight: 600 }}>{g.cle}</span>
-                  <span style={{ color: t.sub, fontFamily: 'monospace' }}>
-                    {argCourt(g.valeur_stock)} · rotation {n2(g.rotation)}×
-                    {fige > 0 && <span style={{ color: t.C.red }}> · {argCourt(fige)} figés</span>}
+                  <span style={{ color: t.sub, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                    <strong style={{ color: t.C.red }}>{argCourt(fige)} figés</strong>
+                    {' '}sur {argCourt(g.valeur_stock)} · rotation {n2(g.rotation)}×
                   </span>
                 </div>
-                <div style={{ height: 12, borderRadius: 6, background: t.dark ? '#111' : '#eef1f5', border: `1px solid ${t.bdr}`, overflow: 'hidden', display: 'flex' }}>
-                  <div style={{ width: `${((g.valeur_stock - fige) / maxVal) * 100}%`, background: t.C.blue }} />
-                  <div style={{ width: `${(fige / maxVal) * 100}%`, background: t.C.red, opacity: 0.65 }} />
+                <div style={{ height: 11, borderRadius: 6, background: t.dark ? '#111' : '#eef1f5', border: `1px solid ${t.bdr}`, overflow: 'hidden' }}>
+                  <div style={{ width: `${(fige / maxFige) * 100}%`, height: '100%', background: t.C.red, opacity: .75 }} />
                 </div>
               </div>
             )
@@ -330,13 +501,67 @@ function VueSynthese({ t, kpis, data, fournisseurs, onVue }: {
         </div>
       </Carte>
 
+      {/* Les cas nominatifs, sous la liste d'actions. */}
       <Carte t={t}>
-        <SectionTitre t={t} titre="Les 15 constats les plus lourds" aide="Toutes catégories confondues, triés par sévérité puis par argent en jeu." />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <SectionTitre t={t} titre="Les cas les plus lourds, nommément"
+            aide="Clique un constat pour ouvrir les pièces qu'il désigne." />
+          <button onClick={() => onVue('agents')} style={btnLien(t)}>Tous les constats →</button>
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
-          {findings.length === 0 && <div style={{ color: t.sub, fontSize: 13 }}>Aucun constat critique. </div>}
-          {findings.map((f, i) => <CarteFinding key={i} t={t} f={f} />)}
+          {findings.length === 0 && <div style={{ color: t.sub, fontSize: 13 }}>Aucun constat critique.</div>}
+          {findings.map((f, i) => <CarteFinding key={i} t={t} f={f} onVoir={onFinding} />)}
         </div>
       </Carte>
+
+      {/* Le détail technique, replié : il ne doit pas encombrer la lecture. */}
+      <Carte t={t}>
+        <div onClick={() => setDetailsOuverts(o => !o)}
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', gap: 12 }}>
+          <SectionTitre t={t} titre="Comment ces chiffres sont calculés"
+            aide={kpis.nb_snapshots > 0
+              ? `Roulement = coût des ventes annualisé ÷ stock moyen, sur ${kpis.nb_snapshots} photo(s) mensuelle(s) archivée(s).`
+              : `Aucune photo mensuelle archivée : le stock moyen est approché par le stock du jour.`} />
+          <span style={{ fontSize: 13, color: t.sub }}>{detailsOuverts ? '▲' : '▼'}</span>
+        </div>
+        {detailsOuverts && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 14, marginTop: 16 }}>
+            <Mini t={t} label="Coût des ventes (12 m annualisé)" valeur={argCourt(kpis.cogs_annualise)} />
+            <Mini t={t} label="Stock moyen" valeur={argCourt(kpis.stock_moyen)} />
+            <Mini t={t} label="Photos mensuelles archivées" valeur={n0(kpis.nb_snapshots)} />
+            <Mini t={t} label="Couverture des ventes" valeur={kpis.couverture_donnees || '—'} />
+            <Mini t={t} label="Historique depuis" valeur={kpis.profondeur_historique || '—'} />
+            <Mini t={t} label="Fournisseurs / codes de ligne" valeur={`${n0(kpis.nb_fournisseurs)} / ${n0(kpis.nb_lignes)}`} />
+            <Mini t={t} label="Pièces suivies" valeur={`${n0(kpis.nb_pieces_stock)} en stock / ${n0(kpis.nb_pieces)}`} />
+            <Mini t={t} label="Sur commande (non stockées)" valeur={n0(kpis.nb_sur_commande)} />
+            <Mini t={t} label={`Écarté du calcul (${(kpis.exclusion?.lignes || []).join(', ') || '—'})`}
+              valeur={kpis.exclusion ? `${n0(kpis.exclusion.nb_en_stock)} pcs · ${argCourt(kpis.exclusion.valeur)}` : '—'} />
+          </div>
+        )}
+      </Carte>
+    </div>
+  )
+}
+
+/** Tuile de KPI cliquable. Celle de MecaUI ne gère pas le clic — et c'est
+ *  justement le clic qui manquait : un montant sans sa liste ne sert à rien. */
+function Tuile({ t, label, valeur, note, couleur, onClick }: {
+  t: Theme; label: string; valeur: string; note?: string; couleur?: string; onClick?: () => void
+}) {
+  return (
+    <div onClick={onClick}
+      style={{
+        background: t.card, border: `1px solid ${couleur || t.bdr}`, borderRadius: 10,
+        padding: '14px 16px', cursor: onClick ? 'pointer' : 'default',
+      }}>
+      <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', color: t.sub }}>{label}</div>
+      <div style={{ fontSize: 25, fontWeight: 800, marginTop: 4, color: couleur || (t.dark ? '#e8eaed' : '#202124') }}>
+        {valeur}
+      </div>
+      <div style={{ fontSize: 11.5, color: t.sub, marginTop: 3 }}>
+        {note}
+        {onClick && <span style={{ color: t.C.blue, fontWeight: 700 }}>{note ? ' · ' : ''}voir →</span>}
+      </div>
     </div>
   )
 }
@@ -355,10 +580,14 @@ const btnLien = (t: Theme): any => ({
   background: 'transparent', color: t.C.blue, cursor: 'pointer', fontSize: 12, fontWeight: 700,
 })
 
-function CarteFinding({ t, f }: { t: Theme; f: any }) {
+function CarteFinding({ t, f, onVoir }: { t: Theme; f: any; onVoir?: (f: any) => void }) {
   const [ouvert, setOuvert] = useState(false)
   const couleur = f.severite === 'critique' ? t.C.red : f.severite === 'attention' ? t.C.yellow : t.C.blue
   const meta = AGENTS[f.agent] || { nom: f.agent, icone: '•' }
+  // Un constat qui ne désigne ni pièce ni fournisseur (une synthèse globale)
+  // n'a pas de liste propre à ouvrir : on n'affiche pas de bouton mort.
+  const cliquable = !!onVoir && (f.code_piece || f.fournisseur || f.code_ligne
+    || ['surstock', 'stock_mort', 'rupture', 'service'].includes(f.agent))
   return (
     <div style={{ border: `1px solid ${t.bdr}`, borderLeft: `4px solid ${couleur}`, borderRadius: 10, padding: '11px 14px', background: t.card }}>
       <div onClick={() => setOuvert(o => !o)} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, cursor: 'pointer', alignItems: 'flex-start' }}>
@@ -381,6 +610,15 @@ function CarteFinding({ t, f }: { t: Theme; f: any }) {
           <div style={{ marginTop: 8, padding: '8px 11px', borderRadius: 8, background: `${t.C.blue}12`, border: `1px solid ${t.C.blue}44` }}>
             <strong style={{ color: t.C.blue }}>À faire :</strong> {f.action}
           </div>
+          {cliquable && (
+            <button onClick={e => { e.stopPropagation(); onVoir!(f) }}
+              style={{
+                marginTop: 10, padding: '8px 14px', borderRadius: 8, border: 'none',
+                background: t.C.blue, color: '#fff', fontWeight: 700, fontSize: 12.5, cursor: 'pointer',
+              }}>
+              🔩 Voir les pièces concernées →
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -391,6 +629,64 @@ function CarteFinding({ t, f }: { t: Theme; f: any }) {
 // Fournisseurs / codes de ligne
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * Colonnes déclarées en données plutôt qu'en JSX.
+ *
+ * L'ancienne version alignait quatorze colonnes en dur dans l'en-tête, le corps
+ * ET le pied du tableau — illisible à l'écran comme dans le code. Ici, six
+ * colonnes sont marquées `cle: true` et s'affichent par défaut : celles qui
+ * répondent à « où est mon argent et est-ce qu'il tourne ». Le reste s'ouvre
+ * d'un clic pour qui veut creuser.
+ */
+interface ColonneGroupe {
+  id: string
+  titre: string
+  cle?: boolean                                  // visible par défaut
+  fournisseurSeul?: boolean
+  rendu: (g: any, t: Theme) => any
+  couleur?: (g: any, t: Theme) => string | undefined
+  total?: (tot: any) => any
+}
+
+const COLONNES_GROUPE: ColonneGroupe[] = [
+  { id: 'valeur_stock', titre: 'Valeur stock', cle: true,
+    rendu: g => argCourt(g.valeur_stock), total: tot => argCourt(tot.valeur) },
+  { id: 'rotation', titre: 'Rotation', cle: true,
+    rendu: g => n2(g.rotation) + '×',
+    couleur: (g, t) => g.rotation < 1 ? t.C.red : g.rotation < 2 ? t.C.yellow : t.C.green,
+    total: tot => n2(tot.valeur > 0 ? tot.cogs / tot.valeur : 0) + '×' },
+  { id: 'valeur_morte', titre: 'Stock mort', cle: true,
+    rendu: g => g.valeur_morte > 0 ? argCourt(g.valeur_morte) : '—',
+    couleur: (g, t) => g.valeur_morte > 0 ? t.C.red : undefined,
+    total: tot => argCourt(tot.morte) },
+  { id: 'valeur_exces', titre: 'Excédent', cle: true,
+    rendu: g => g.valeur_exces > 0 ? argCourt(g.valeur_exces) : '—',
+    couleur: (g, t) => g.valeur_exces > 0 ? t.C.yellow : undefined,
+    total: tot => argCourt(tot.exces) },
+  { id: 'nb_rupture', titre: 'Ruptures', cle: true,
+    rendu: g => g.nb_rupture || '—',
+    couleur: (g, t) => g.nb_rupture > 0 ? t.C.red : undefined,
+    total: () => '—' },
+
+  { id: 'nb_pieces_stock', titre: 'Pièces', rendu: g => n0(g.nb_pieces_stock), total: () => '—' },
+  { id: 'ventes_12m_cogs', titre: 'Coût ventes 12 m', rendu: g => argCourt(g.ventes_12m_cogs), total: tot => argCourt(tot.cogs) },
+  { id: 'marge_pct', titre: 'Marge', rendu: g => pct(g.marge_pct), total: () => '—' },
+  { id: 'dsi_jours', titre: 'Jours stock', rendu: g => g.dsi_jours ? n0(g.dsi_jours) : '—', total: () => '—' },
+  { id: 'valeur_dormante', titre: 'Dormant',
+    rendu: g => g.valeur_dormante > 0 ? argCourt(g.valeur_dormante) : '—',
+    couleur: (g, t) => g.valeur_dormante > 0 ? t.C.yellow : undefined,
+    total: tot => argCourt(tot.dormante) },
+  { id: 'valeur_retournable', titre: 'Retournable', fournisseurSeul: true,
+    rendu: g => g.valeur_retournable > 0 ? argCourt(g.valeur_retournable) : '—',
+    couleur: (g, t) => g.valeur_retournable > 0 ? t.C.green : undefined,
+    total: tot => argCourt(tot.retournable) },
+  { id: 'part_cumulee', titre: '% cumulé', rendu: g => pct(g.part_cumulee), total: () => '—' },
+  { id: 'variation_pct', titre: 'Var. mois',
+    rendu: g => g.variation_pct == null ? '—' : (g.variation_pct > 0 ? '+' : '') + pct(g.variation_pct),
+    couleur: (g, t) => g.variation_pct == null ? undefined : g.variation_pct > 0 ? t.C.yellow : t.C.green,
+    total: () => '—' },
+]
+
 function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
   t: Theme; titre: string; dimension: 'fournisseur' | 'ligne'; groupes: any[]; onDrill: (cle: string) => void
 }) {
@@ -399,6 +695,12 @@ function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
   const [q, setQ] = useState('')
   const [pareto, setPareto] = useState<string>('')
   const [sansStock, setSansStock] = useState(false)
+  const [tout, setTout] = useState(false)
+
+  const colonnes = useMemo(() =>
+    COLONNES_GROUPE.filter(c =>
+      (tout || c.cle) && !(c.fournisseurSeul && dimension !== 'fournisseur')),
+    [tout, dimension])
 
   const filtres = useMemo(() => {
     let l = groupes
@@ -430,19 +732,28 @@ function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
     else { setTri(k); setSens('desc') }
   }
 
+  const nom = dimension === 'fournisseur' ? 'fournisseurs' : 'codes de ligne'
+
   return (
     <Carte t={t} style={{ padding: 0, overflow: 'hidden' }}>
       <div style={{ padding: 16, borderBottom: `1px solid ${t.bdr}` }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
-          <SectionTitre t={t} titre={titre}
-            aide={`${filtres.length} ${dimension === 'fournisseur' ? 'fournisseurs' : 'codes de ligne'} · ${argCourt(totaux.valeur)} de stock · dont ${argCourt(totaux.morte + totaux.exces)} qui ne tournent pas. Clique une ligne pour voir ses pièces.`} />
+          <div>
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: t.C.blue, margin: 0 }}>{titre}</h3>
+            <div style={{ fontSize: 12.5, color: t.sub, marginTop: 5, lineHeight: 1.6 }}>
+              {filtres.length} {nom} · <strong>{argCourt(totaux.valeur)}</strong> de stock, dont{' '}
+              <strong style={{ color: t.C.red }}>{argCourt(totaux.morte + totaux.exces)}</strong> qui ne tournent pas.
+            </div>
+            <div style={{ fontSize: 11, color: t.sub, marginTop: 3 }}>
+              Clique une ligne pour ouvrir ses pièces.
+            </div>
+          </div>
           <a href={`/api/rotation/export?type=${dimension === 'fournisseur' ? 'fournisseurs' : 'lignes'}`}
             style={{ ...btnLien(t), textDecoration: 'none' }}>⬇ CSV</a>
         </div>
 
         <div className="rot-nocopy" style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Rechercher…"
-            style={champ(t, 220)} />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Rechercher…" style={champ(t, 220)} />
           <select value={pareto} onChange={e => setPareto(e.target.value)} style={champ(t, 200)}>
             <option value="">Toutes classes Pareto</option>
             <option value="A">A — 80 % de la valeur</option>
@@ -453,6 +764,9 @@ function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
             <input type="checkbox" checked={sansStock} onChange={e => setSansStock(e.target.checked)} />
             Inclure ceux sans stock
           </label>
+          <button onClick={() => setTout(o => !o)} style={btnLien(t)}>
+            {tout ? '← Colonnes essentielles' : 'Toutes les colonnes →'}
+          </button>
         </div>
       </div>
 
@@ -460,20 +774,11 @@ function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
           <thead style={{ background: t.thBg, position: 'sticky', top: 0 }}>
             <tr>
-              <ThTriable t={t} label={dimension === 'fournisseur' ? 'Fournisseur' : 'Code de ligne'} colonne="cle" actif={tri} dir={sens} onSort={onSort} align="left" />
-              <ThTriable t={t} label="Valeur stock" colonne="valeur_stock" actif={tri} dir={sens} onSort={onSort} />
-              <ThTriable t={t} label="% cumulé" colonne="part_cumulee" actif={tri} dir={sens} onSort={onSort} />
-              <ThTriable t={t} label="Pièces" colonne="nb_pieces_stock" actif={tri} dir={sens} onSort={onSort} />
-              <ThTriable t={t} label="Coût ventes 12 m" colonne="ventes_12m_cogs" actif={tri} dir={sens} onSort={onSort} />
-              <ThTriable t={t} label="Marge" colonne="marge_pct" actif={tri} dir={sens} onSort={onSort} />
-              <ThTriable t={t} label="Rotation" colonne="rotation" actif={tri} dir={sens} onSort={onSort} />
-              <ThTriable t={t} label="Jours stock" colonne="dsi_jours" actif={tri} dir={sens} onSort={onSort} />
-              <ThTriable t={t} label="Mort" colonne="valeur_morte" actif={tri} dir={sens} onSort={onSort} />
-              <ThTriable t={t} label="Dormant" colonne="valeur_dormante" actif={tri} dir={sens} onSort={onSort} />
-              <ThTriable t={t} label="Excédent" colonne="valeur_exces" actif={tri} dir={sens} onSort={onSort} />
-              {dimension === 'fournisseur' && <ThTriable t={t} label="Retournable" colonne="valeur_retournable" actif={tri} dir={sens} onSort={onSort} />}
-              <ThTriable t={t} label="Rupt." colonne="nb_rupture" actif={tri} dir={sens} onSort={onSort} />
-              <ThTriable t={t} label="Var. mois" colonne="variation_pct" actif={tri} dir={sens} onSort={onSort} />
+              <ThTriable t={t} label={dimension === 'fournisseur' ? 'Fournisseur' : 'Code de ligne'}
+                colonne="cle" actif={tri} dir={sens} onSort={onSort} align="left" />
+              {colonnes.map(c => (
+                <ThTriable key={c.id} t={t} label={c.titre} colonne={c.id} actif={tri} dir={sens} onSort={onSort} />
+              ))}
               <ThTriable t={t} label="Santé" colonne="score_sante" actif={tri} dir={sens} onSort={onSort} />
             </tr>
           </thead>
@@ -486,45 +791,29 @@ function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
                 <td style={{ padding: '8px 12px' }}>
                   <div style={{ fontWeight: 600 }}>{g.cle}</div>
                   <div style={{ fontSize: 10.5, color: t.sub }}>
-                    classe {g.classe_pareto}
+                    classe {g.classe_pareto} · {n0(g.nb_pieces_stock)} pièces
                     {g.nb_snapshots > 0 ? ` · ${g.nb_snapshots} snapshot(s)` : ' · rotation estimée'}
                   </div>
                 </td>
-                <Td>{argCourt(g.valeur_stock)}</Td>
-                <Td>{pct(g.part_cumulee)}</Td>
-                <Td>{n0(g.nb_pieces_stock)}</Td>
-                <Td>{argCourt(g.ventes_12m_cogs)}</Td>
-                <Td>{pct(g.marge_pct)}</Td>
-                <Td couleur={g.rotation < 1 ? t.C.red : g.rotation < 2 ? t.C.yellow : t.C.green}>{n2(g.rotation)}</Td>
-                <Td>{g.dsi_jours ? n0(g.dsi_jours) : '—'}</Td>
-                <Td couleur={g.valeur_morte > 0 ? t.C.red : undefined}>{g.valeur_morte > 0 ? argCourt(g.valeur_morte) : '—'}</Td>
-                <Td couleur={g.valeur_dormante > 0 ? t.C.yellow : undefined}>{g.valeur_dormante > 0 ? argCourt(g.valeur_dormante) : '—'}</Td>
-                <Td couleur={g.valeur_exces > 0 ? t.C.yellow : undefined}>{g.valeur_exces > 0 ? argCourt(g.valeur_exces) : '—'}</Td>
-                {dimension === 'fournisseur' && <Td couleur={g.valeur_retournable > 0 ? t.C.green : undefined}>{g.valeur_retournable > 0 ? argCourt(g.valeur_retournable) : '—'}</Td>}
-                <Td couleur={g.nb_rupture > 0 ? t.C.red : undefined}>{g.nb_rupture || '—'}</Td>
-                <Td couleur={g.variation_pct == null ? undefined : g.variation_pct > 0 ? t.C.yellow : t.C.green}>
-                  {g.variation_pct == null ? '—' : (g.variation_pct > 0 ? '+' : '') + pct(g.variation_pct)}
-                </Td>
+                {colonnes.map(c => (
+                  <Td key={c.id} couleur={c.couleur?.(g, t)}>{c.rendu(g, t)}</Td>
+                ))}
                 <td style={{ padding: '8px 12px', textAlign: 'right' }}>
                   <BarreSante t={t} score={g.score_sante} />
                 </td>
               </tr>
             ))}
+            {filtres.length === 0 && (
+              <tr><td colSpan={colonnes.length + 2} style={{ padding: 24, textAlign: 'center', color: t.sub }}>
+                Aucun résultat pour ces filtres.
+              </td></tr>
+            )}
           </tbody>
           <tfoot>
             <tr style={{ borderTop: `2px solid ${t.bdr}`, fontWeight: 800, background: t.thBg }}>
               <td style={{ padding: '9px 12px' }}>Total ({filtres.length})</td>
-              <Td>{argCourt(totaux.valeur)}</Td>
-              <Td>—</Td><Td>—</Td>
-              <Td>{argCourt(totaux.cogs)}</Td>
+              {colonnes.map(c => <Td key={c.id}>{c.total ? c.total(totaux) : '—'}</Td>)}
               <Td>—</Td>
-              <Td>{n2(totaux.valeur > 0 ? totaux.cogs / totaux.valeur : 0)}</Td>
-              <Td>—</Td>
-              <Td>{argCourt(totaux.morte)}</Td>
-              <Td>{argCourt(totaux.dormante)}</Td>
-              <Td>{argCourt(totaux.exces)}</Td>
-              {dimension === 'fournisseur' && <Td>{argCourt(totaux.retournable)}</Td>}
-              <Td>—</Td><Td>—</Td><Td>—</Td>
             </tr>
           </tfoot>
         </table>
@@ -559,19 +848,20 @@ const champ = (t: Theme, largeur?: number): any => ({
 // Pièces
 // ═══════════════════════════════════════════════════════════════════════
 
-function VuePieces({ t, fournisseur, ligne, setFournisseur, setLigne, listeFournisseurs, listeLignes }: {
-  t: Theme; fournisseur: string | null; ligne: string | null
-  setFournisseur: (v: string | null) => void; setLigne: (v: string | null) => void
+function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
+  t: Theme
+  filtre: FiltrePieces
+  setFiltre: (f: FiltrePieces) => void
   listeFournisseurs: string[]; listeLignes: string[]
 }) {
+  const { fournisseur, ligne, statut, abc, q, tri } = filtre
+  const maj = (p: Partial<FiltrePieces>) => setFiltre({ ...filtre, ...p })
+
   const [pieces, setPieces] = useState<any[]>([])
   const [total, setTotal] = useState(0)
+  const [totaux, setTotaux] = useState<any>(null)
   const [page, setPage] = useState(0)
   const [chargement, setChargement] = useState(false)
-  const [q, setQ] = useState('')
-  const [statut, setStatut] = useState('')
-  const [abc, setAbc] = useState('')
-  const [tri, setTri] = useState('valeur')
   const [sens, setSens] = useState<'asc' | 'desc'>('desc')
   const debounce = useRef<any>(null)
 
@@ -588,6 +878,7 @@ function VuePieces({ t, fournisseur, ligne, setFournisseur, setLigne, listeFourn
       const j = await r.json()
       setPieces(j.pieces || [])
       setTotal(j.total || 0)
+      setTotaux(j.totaux || null)
     } finally { setChargement(false) }
   }, [fournisseur, ligne, statut, abc, q, tri, sens, page])
 
@@ -602,8 +893,30 @@ function VuePieces({ t, fournisseur, ligne, setFournisseur, setLigne, listeFourn
 
   const onSort = (k: string) => {
     if (k === tri) setSens(s => (s === 'asc' ? 'desc' : 'asc'))
-    else { setTri(k); setSens('desc') }
+    else { maj({ tri: k }); setSens('desc') }
   }
+
+  // Bandeau de contexte : quand on arrive ici depuis « Voir les 1 149 pièces »,
+  // il faut savoir d'un coup d'œil ce qu'on regarde, et combien ça pèse.
+  const LIBELLE_STATUT: Record<string, string> = {
+    'rupture,sous_stock': 'à commander',
+    'rupture': 'en rupture',
+    'sous_stock': 'sous le seuil',
+    'surstock': 'en surstock',
+    'mort,jamais_vendue': 'en stock mort',
+    'mort,jamais_vendue,surstock': 'qui ne tournent pas',
+    'dormant': 'dormantes',
+    'sur_commande': 'sur commande',
+    'ok': 'au vert',
+  }
+  const contexte = [
+    LIBELLE_STATUT[statut] || (statut ? statut.replace(/,/g, ' / ') : ''),
+    fournisseur ? `chez ${fournisseur}` : '',
+    ligne ? `ligne ${ligne}` : '',
+    abc ? `classe ${abc}` : '',
+    q ? `recherche « ${q} »` : '',
+  ].filter(Boolean).join(' · ')
+  const filtreActif = !!(fournisseur || ligne || statut || abc || q)
 
   const paramsExport = new URLSearchParams({ type: 'pieces' })
   if (fournisseur) paramsExport.set('fournisseur', fournisseur)
@@ -614,22 +927,36 @@ function VuePieces({ t, fournisseur, ligne, setFournisseur, setLigne, listeFourn
     <Carte t={t} style={{ padding: 0, overflow: 'hidden' }}>
       <div style={{ padding: 16, borderBottom: `1px solid ${t.bdr}` }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
-          <SectionTitre t={t} titre="Détail par pièce"
-            aide={`${n0(total)} pièces${fournisseur ? ` · ${fournisseur}` : ''}${ligne ? ` · ligne ${ligne}` : ''}. PC = point de commande, SS = stock de sécurité, EOQ = quantité économique de Wilson.`} />
+          <div>
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: t.C.blue, margin: 0 }}>
+              {n0(total)} pièces {contexte || '— toutes'}
+            </h3>
+            {totaux && (
+              <div style={{ fontSize: 12.5, color: t.sub, marginTop: 5, lineHeight: 1.6 }}>
+                <strong>{argCourt(totaux.valeur_stock)}</strong> de stock
+                {totaux.exces_valeur > 0 && <> · <strong style={{ color: t.C.yellow }}>{argCourt(totaux.exces_valeur)}</strong> d'excédent</>}
+                {totaux.valeur_morte > 0 && <> · <strong style={{ color: t.C.red }}>{argCourt(totaux.valeur_morte)}</strong> de stock mort</>}
+                {totaux.qte_a_commander > 0 && <> · <strong style={{ color: t.C.blue }}>{n0(totaux.qte_a_commander)} u</strong> à commander ({argCourt(totaux.valeur_a_commander)})</>}
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: t.sub, marginTop: 4 }}>
+              PC = point de commande · SS = stock de sécurité · EOQ = quantité économique de Wilson
+            </div>
+          </div>
           <a href={`/api/rotation/export?${paramsExport}`} style={{ ...btnLien(t), textDecoration: 'none' }}>⬇ CSV</a>
         </div>
 
         <div className="rot-nocopy" style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Code ou description…" style={champ(t, 240)} />
-          <select value={fournisseur || ''} onChange={e => setFournisseur(e.target.value || null)} style={champ(t, 230)}>
+          <input value={q} onChange={e => maj({ q: e.target.value })} placeholder="Code ou description…" style={champ(t, 240)} />
+          <select value={fournisseur || ''} onChange={e => maj({ fournisseur: e.target.value || null })} style={champ(t, 230)}>
             <option value="">Tous les fournisseurs</option>
             {listeFournisseurs.map(f => <option key={f} value={f}>{f}</option>)}
           </select>
-          <select value={ligne || ''} onChange={e => setLigne(e.target.value || null)} style={champ(t, 180)}>
+          <select value={ligne || ''} onChange={e => maj({ ligne: e.target.value || null })} style={champ(t, 180)}>
             <option value="">Tous les codes de ligne</option>
             {listeLignes.map(l => <option key={l} value={l}>{l}</option>)}
           </select>
-          <select value={statut} onChange={e => setStatut(e.target.value)} style={champ(t, 190)}>
+          <select value={statut} onChange={e => maj({ statut: e.target.value })} style={champ(t, 190)}>
             <option value="">Tous les statuts</option>
             <option value="rupture">Rupture</option>
             <option value="sous_stock">Sous le seuil</option>
@@ -640,13 +967,12 @@ function VuePieces({ t, fournisseur, ligne, setFournisseur, setLigne, listeFourn
             <option value="sur_commande">Sur commande (non stockée)</option>
             <option value="ok">OK</option>
           </select>
-          <select value={abc} onChange={e => setAbc(e.target.value)} style={champ(t, 130)}>
+          <select value={abc} onChange={e => maj({ abc: e.target.value })} style={champ(t, 130)}>
             <option value="">ABC : tout</option>
             <option value="A">A</option><option value="B">B</option><option value="C">C</option>
           </select>
-          {(fournisseur || ligne || statut || abc || q) && (
-            <button onClick={() => { setFournisseur(null); setLigne(null); setStatut(''); setAbc(''); setQ('') }}
-              style={btnLien(t)}>✕ Réinitialiser</button>
+          {filtreActif && (
+            <button onClick={() => setFiltre({ ...FILTRE_VIDE, tri })} style={btnLien(t)}>✕ Tout afficher</button>
           )}
         </div>
       </div>
@@ -735,7 +1061,7 @@ function VuePieces({ t, fournisseur, ligne, setFournisseur, setLigne, listeFourn
 // Agents
 // ═══════════════════════════════════════════════════════════════════════
 
-function VueAgents({ t, resume }: { t: Theme; resume: any[] }) {
+function VueAgents({ t, resume, onFinding }: { t: Theme; resume: any[]; onFinding: (f: any) => void }) {
   const [agent, setAgent] = useState('')
   const [severite, setSeverite] = useState('')
   const [findings, setFindings] = useState<any[]>([])
@@ -788,7 +1114,7 @@ function VueAgents({ t, resume }: { t: Theme; resume: any[] }) {
         {!chargement && findings.length === 0 && (
           <Carte t={t}><div style={{ textAlign: 'center', color: t.sub }}>Aucun constat pour ce filtre.</div></Carte>
         )}
-        {findings.map((f, i) => <CarteFinding key={i} t={t} f={f} />)}
+        {findings.map((f, i) => <CarteFinding key={i} t={t} f={f} onVoir={onFinding} />)}
       </div>
     </div>
   )
