@@ -7,6 +7,7 @@ import AviseurTechniqueTab from '@/components/meca/AviseurTechniqueTab'
 import CommisPiecesTab from '@/components/pieces/CommisPiecesTab'
 import PartsCounterDashboard from '@/components/pieces/PartsCounterDashboard'
 import PiecesConfigTab from '@/components/pieces/PiecesConfigTab'
+import RotationTab from '@/components/rotation/RotationTab'
 
 const supabaseCli = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,8 +15,8 @@ const supabaseCli = createClient(
 )
 
 const ROLES_ONGLETS: Record<string, string[]> = {
-  admin:        ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','verification','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config','utilisateurs'],
-  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config'],
+  admin:        ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','rotation','verification','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config','utilisateurs'],
+  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','rotation','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config'],
   commis:       ['commandes','commandes_attente','fournitures','retours','aviseur','commis_pieces'],
   employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours','aviseur','commis_pieces'],
 }
@@ -418,6 +419,7 @@ export default function Dashboard() {
           {id:'commandes_attente',l:isMobile?'⏳':'⏳ Commandes en attente'},
           {id:'fournitures',l:isMobile?'💡':'💡 Suggestions'},
           {id:'inventaire',l:'📦 Inventaire'},
+          {id:'rotation',l:isMobile?'🔄 Rotation':'🔄 Rotation & Fournisseurs'},
           {id:'verification',l:isMobile?'🔍':'🔍 Vérification'},
           {id:'comptabilite',l:isMobile?'💰':'💰 Comptabilité'},
           {id:'amazon',l:isMobile?'📦 AMZ':'📦 Amazon'},
@@ -874,6 +876,7 @@ export default function Dashboard() {
         {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts} negsVerifies={negsVerifies} setNegsVerifies={setNegsVerifies} profil={profil} data={data} lancerSync={lancerSync} syncing={syncing} syncLog={syncLog} validationsCompta={validationsCompta} retoursActifs={retoursActifsGlobal} setRetoursActifs={setRetoursActifsGlobal} verifsDoubles={verifsDoubles}/>}
         {tab==='commandes' && <CommandesTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} altsMap={alts} fournituresData={fournituresData} setFournituresData={setFournituresData} profil={profil} validationsCompta={validationsCompta}/>}
         {tab==='commandes_attente' && <CommandesAttenteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} forceMesSuivis={forceMesSuivis} setForceMesSuivis={setForceMesSuivis}/>}
+        {tab==='rotation' && <RotationTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} hvr={hvr} C={C} profil={profil}/>}
         {tab==='inventaire' && <InventaireTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} validationsCompta={validationsCompta} retoursActifs={retoursActifsGlobal} setRetoursActifs={setRetoursActifsGlobal}/>}
         {tab==='comptabilite' && <ComptabiliteTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} validationsCompta={validationsCompta} setValidationsCompta={setValidationsCompta} verifsDoubles={verifsDoubles} setVerifsDoubles={setVerifsDoubles}/>}
         {tab==='verification' && <VerificationTab dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} profil={profil} negsVerifies={negsVerifies} verifsDoubles={verifsDoubles} setVerifsDoubles={setVerifsDoubles} validationsCompta={validationsCompta}/>}
@@ -4423,6 +4426,7 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
     { id: 'commandes_attente', label: '⏳ Commandes en attente', desc: 'Suivi des commandes Traction non reçues' },
     { id: 'fournitures', label: '💡 Suggestions',         desc: 'Suggestions de réapprovisionnement' },
     { id: 'inventaire',  label: '📦 Inventaire',          desc: 'Inventaire cyclique et comptage' },
+    { id: 'rotation',    label: '🔄 Rotation & Fournisseurs', desc: 'Stock par fournisseur, roulement, agents supply chain' },
     { id: 'comptabilite',label: '💰 Comptabilité',        desc: 'Validation comptable et historique' },
     { id: 'amazon',      label: '📦 Amazon',              desc: 'Réconciliation FBA/FBM et LAUTOPAK' },
     { id: 'aviseur',            label: '🔧 Aviseur',            desc: 'Tableau de bord personnel + suivi de ses bons de travail' },
@@ -4435,8 +4439,8 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
   ]
 
   const ROLES_LEGACY: Record<string, string[]> = {
-    admin:         ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','verification','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config','utilisateurs'],
-    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config'],
+    admin:         ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','rotation','verification','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config','utilisateurs'],
+    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','rotation','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config'],
     commis:        ['commandes','commandes_attente','fournitures','retours','aviseur','commis_pieces'],
     employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours','aviseur','commis_pieces'],
   }
