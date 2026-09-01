@@ -868,6 +868,87 @@ const champ = (t: Theme, largeur?: number): any => ({
 // Pièces
 // ═══════════════════════════════════════════════════════════════════════
 
+// ── Le chiffre de la décision ───────────────────────────────────────────
+//
+// Une ligne de liste doit porter UN chiffre dominant, pas vingt équivalents.
+// Lequel ? Celui qui a fait venir ici — donc celui sur lequel la liste est
+// triée. Arriver par « les 297 pièces à commander » et lire d'abord la rotation
+// ou l'EOQ, c'est chercher son information au milieu du bruit.
+
+type ColonneDecision = 'commander' | 'morte' | 'exces' | 'saison' | 'valeur' | 'ventes'
+
+/** Déduit du tri (et du filtre) ce que la ligne doit mettre en avant. */
+function colonneDepuisTri(tri: string, saison: boolean, statut: string): ColonneDecision {
+  if (saison || tri === 'saison') return 'saison'
+  if (tri === 'commander' || tri === 'urgence') return 'commander'
+  if (tri === 'morte') return 'morte'
+  if (tri === 'exces') return 'exces'
+  if (tri === 'ventes') return 'ventes'
+  // Sans tri explicite, le statut dit ce qui compte.
+  if (/rupture|sous_stock/.test(statut)) return 'commander'
+  if (/mort|jamais_vendue/.test(statut)) return 'morte'
+  if (/surstock/.test(statut)) return 'exces'
+  return 'valeur'
+}
+
+function decision(p: any, col: ColonneDecision, t: Theme): { valeur: string; sous?: string; libelle: string; couleur: string } {
+  const $ = (v: any) => argCourt(v)
+  switch (col) {
+    case 'commander':
+      return p.qte_a_commander > 0
+        ? { valeur: `${n0(p.qte_a_commander)} u`, sous: $(p.qte_a_commander * p.cout_unitaire), libelle: 'à commander', couleur: t.C.blue }
+        : { valeur: '—', libelle: 'rien à commander', couleur: t.sub }
+    case 'saison':
+      return p.besoin_saison > 0
+        ? { valeur: `${n0(p.besoin_saison)} u`, sous: $(p.besoin_saison * p.cout_unitaire), libelle: 'à prévoir', couleur: t.C.yellow }
+        : { valeur: '—', libelle: 'rien à prévoir', couleur: t.sub }
+    case 'morte':
+      return { valeur: $(p.valeur_morte || p.valeur_stock), sous: `${n0(p.stock)} u`, libelle: 'capital gelé', couleur: t.C.red }
+    case 'exces':
+      return p.exces_valeur > 0
+        ? { valeur: $(p.exces_valeur), sous: `${n0(p.exces_unites)} u en trop`, libelle: 'excédent', couleur: t.C.yellow }
+        : { valeur: '—', libelle: 'pas d’excédent', couleur: t.sub }
+    case 'ventes':
+      return { valeur: $(p.ventes_12m_cogs), sous: `${n0(p.ventes_12m_qte)} u`, libelle: 'coût des ventes 12 m', couleur: t.C.blue }
+    default:
+      return { valeur: $(p.valeur_stock), sous: `${n0(p.stock)} u`, libelle: 'valeur en stock', couleur: t.dark ? '#e8eaed' : '#202124' }
+  }
+}
+
+/**
+ * La situation, en phrase. Le contenu suit la question posée : on ne raconte
+ * pas la même chose pour une pièce à commander et pour une pièce morte.
+ */
+function situation(p: any, col: ColonneDecision): string {
+  const stock = `${n0(p.stock)} en stock`
+  const enRoute = (p.qte_transit + p.qte_commande) > 0
+    ? ` (+${n0(p.qte_transit + p.qte_commande)} en route)` : ''
+  const vend = p.demande_mens > 0 ? `vend ${n1(p.demande_mens)}/m` : 'aucune vente sur 12 mois'
+  const couv = p.couverture_mois != null ? `couvre ${n1(p.couverture_mois)} mois` : null
+  const pic = p.pic_mois != null && p.pic_mois !== undefined ? `pic en ${MOIS[p.pic_mois]}` : null
+
+  const bouts: (string | null)[] = (() => {
+    switch (col) {
+      case 'commander':
+        return [stock + enRoute, vend, `seuil ${n0(p.point_commande)}`, p.eoq > 0 ? `lot éco. ${n0(p.eoq)}` : null]
+      case 'saison':
+        return [stock + enRoute, vend, `${n0(p.demande_saison)} u attendues`, pic]
+      case 'morte':
+        return [stock, p.derniere_vente ? `dernière vente ${p.derniere_vente}` : 'jamais vendue',
+                p.mois_sans_vente != null ? `${n0(p.mois_sans_vente)} mois sans mouvement` : null]
+      case 'exces':
+        return [stock, vend, couv, `cible ${n0(p.demande_mens * 12 + p.stock_securite)} u`]
+      default:
+        return [stock + enRoute, vend, couv, `rotation ${n2(p.rotation)}×`]
+    }
+  })()
+  return bouts.filter(Boolean).join(' · ')
+}
+
+const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+              'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+
+
 function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
   t: Theme
   filtre: FiltrePieces
@@ -883,7 +964,9 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
   const [page, setPage] = useState(0)
   const [chargement, setChargement] = useState(false)
   const [sens, setSens] = useState<'asc' | 'desc'>('desc')
+  const [mode, setMode] = useState<'lecture' | 'detail'>('lecture')
   const debounce = useRef<any>(null)
+  const colonneDecision = colonneDepuisTri(tri, saison, statut)
 
   const charger = useCallback(async () => {
     setChargement(true)
@@ -998,10 +1081,94 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
           {filtreActif && (
             <button onClick={() => setFiltre({ ...FILTRE_VIDE, tri })} style={btnLien(t)}>✕ Tout afficher</button>
           )}
+          <span style={{ flex: 1 }} />
+          {/* En lecture, les en-têtes de colonnes ont disparu : le tri passe
+              par un sélecteur explicite plutôt que par un clic invisible. */}
+          {mode === 'lecture' && (
+            <select value={tri} onChange={e => maj({ tri: e.target.value })} style={champ(t, 200)}>
+              <option value="valeur">Trier par valeur en stock</option>
+              <option value="commander">Trier par quantité à commander</option>
+              <option value="saison">Trier par besoin de saison</option>
+              <option value="morte">Trier par capital gelé</option>
+              <option value="exces">Trier par excédent</option>
+              <option value="ventes">Trier par coût des ventes</option>
+              <option value="urgence">Trier par urgence</option>
+            </select>
+          )}
+          <button onClick={() => setMode(m => (m === 'lecture' ? 'detail' : 'lecture'))} style={btnLien(t)}>
+            {mode === 'lecture' ? '⊞ Tableau détaillé' : '☰ Vue lecture'}
+          </button>
         </div>
       </div>
 
-      <div style={{ overflowX: 'auto', maxHeight: '70vh' }}>
+      {/* ── Liste ────────────────────────────────────────────────────
+          Deux lectures du même jeu de données :
+
+          « lecture » (par défaut) — trois colonnes. À gauche l'identité, au
+          milieu la situation en toutes lettres, à droite LE chiffre de la
+          décision, en gros. C'est le chiffre sur lequel la liste est triée,
+          donc celui qui a fait venir ici. « 45 en stock · vend 70,5/m » se lit
+          d'un coup d'œil ; « 45 | 70,5 | 51 | 0,6 » aligné dans quatre cellules
+          identiques, non.
+
+          « détail » — les quatorze colonnes, pour comparer finement. Elles
+          restent disponibles, elles ne sont simplement plus imposées. */}
+      {mode === 'lecture' ? (
+        <div style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+          {chargement && pieces.length === 0 && (
+            <div style={{ padding: 28, textAlign: 'center', color: t.sub }}>Chargement…</div>
+          )}
+          {!chargement && pieces.length === 0 && (
+            <div style={{ padding: 28, textAlign: 'center', color: t.sub }}>Aucune pièce pour ces filtres.</div>
+          )}
+          {pieces.map(p => {
+            const st = STATUTS[p.statut] || { label: p.statut, couleur: 'blue' as const }
+            const d = decision(p, colonneDecision, t)
+            return (
+              <div key={p.code_piece}
+                style={{
+                  display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap',
+                  padding: '11px 16px', borderTop: `1px solid ${t.bdr}`,
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = t.hvr)}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+
+                {/* Identité */}
+                <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: 13.5 }}>{p.code_piece}</span>
+                    <Badge t={t} couleur={t.C[st.couleur]}>{st.label}</Badge>
+                    <span style={{ fontFamily: 'monospace', fontSize: 11, color: t.sub, fontWeight: 700 }}>
+                      {p.classe_abc}{p.classe_xyz}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {p.description || '—'}
+                  </div>
+                  <div style={{ fontSize: 11, color: t.sub, marginTop: 1 }}>
+                    {p.fournisseur} · ligne {p.code_ligne}
+                  </div>
+                </div>
+
+                {/* Situation, en toutes lettres */}
+                <div style={{ flex: '1 1 260px', minWidth: 0, fontSize: 12, color: t.sub, lineHeight: 1.65, paddingTop: 1 }}>
+                  {situation(p, colonneDecision)}
+                </div>
+
+                {/* La décision : le seul chiffre en gros de la ligne */}
+                <div style={{ flex: '0 0 150px', textAlign: 'right' }}>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: d.couleur, lineHeight: 1.15 }}>{d.valeur}</div>
+                  {d.sous && <div style={{ fontSize: 12, color: t.sub, marginTop: 1 }}>{d.sous}</div>}
+                  <div style={{ fontSize: 10, color: t.sub, textTransform: 'uppercase', letterSpacing: '.05em', marginTop: 2 }}>
+                    {d.libelle}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div style={{ overflowX: 'auto', maxHeight: '70vh' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
           <thead style={{ background: t.thBg, position: 'sticky', top: 0, zIndex: 1 }}>
             <tr>
@@ -1073,7 +1240,8 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
             })}
           </tbody>
         </table>
-      </div>
+        </div>
+      )}
 
       {total > 100 && (
         <div className="rot-nocopy" style={{ padding: 12, display: 'flex', justifyContent: 'center', gap: 10, alignItems: 'center', borderTop: `1px solid ${t.bdr}` }}>
