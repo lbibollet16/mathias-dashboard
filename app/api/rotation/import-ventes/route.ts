@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { parserVente2891 } from '@/lib/parser-vente-2891'
+import { moisPrecedent, fenetreMois } from '@/lib/supply-chain'
 import { insererParLots, lireTout } from '@/lib/supply-chain-db'
 
 export const maxDuration = 300
@@ -138,21 +139,42 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/** Liste des mois présents / manquants, pour guider l'utilisateur. */
+/**
+ * Liste des mois présents / manquants, pour guider l'utilisateur.
+ *
+ * Les trous ne se valent pas, et les confondre rend l'avertissement inutile :
+ *
+ *  · dans la FENÊTRE DE CALCUL (12 derniers mois) — c'est là que se calculent
+ *    la demande, la saisonnalité, l'écart-type et donc le stock de sécurité.
+ *    Un trou ici fausse tous les seuils ;
+ *  · dans les 24 mois — sert à distinguer une pièce « dormante » (vue bouger
+ *    récemment) d'une pièce « morte ». Un trou ici peut classer morte une pièce
+ *    dont la seule vente tombait dans le mois manquant ;
+ *  · plus ancien — n'entre dans aucun calcul. Bon à combler pour l'historique,
+ *    mais ça ne change aucun chiffre affiché aujourd'hui.
+ */
 export async function GET() {
   try {
     const rows = await lireTout<any>('historique_ventes', 'mois')
     const presents = new Set(rows.map(r => r.mois))
     const tries = [...presents].sort()
-    if (tries.length === 0) return NextResponse.json({ mois_presents: [], mois_manquants: [] })
+    if (tries.length === 0) {
+      return NextResponse.json({
+        mois_presents: [], mois_manquants: [],
+        manquants_fenetre: [], manquants_24m: [], manquants_anciens: [],
+      })
+    }
 
-    // Trous entre le premier mois connu et le mois précédent.
-    const fin = new Date().toISOString().slice(0, 7)
+    const moisFin = moisPrecedent(new Date())
+    const fenetre12 = fenetreMois(moisFin, 12)
+    const fenetre24 = fenetreMois(moisFin, 24)
+
+    // Trous entre le premier mois connu et le dernier mois clos.
     const manquants: string[] = []
     let [a, m] = tries[0].split('-').map(Number)
     while (true) {
       const cle = `${a}-${String(m).padStart(2, '0')}`
-      if (cle >= fin) break
+      if (cle > moisFin) break
       if (!presents.has(cle)) manquants.push(cle)
       m++; if (m > 12) { m = 1; a++ }
     }
@@ -163,6 +185,11 @@ export async function GET() {
     return NextResponse.json({
       mois_presents: tries,
       mois_manquants: manquants,
+      manquants_fenetre: manquants.filter(x => fenetre12.includes(x)),
+      manquants_24m: manquants.filter(x => fenetre24.includes(x) && !fenetre12.includes(x)),
+      manquants_anciens: manquants.filter(x => !fenetre24.includes(x)),
+      fenetre: { debut: fenetre12[0], fin: moisFin },
+      couverture: `${fenetre12.filter(x => presents.has(x)).length}/12`,
       premier_mois: tries[0],
       dernier_mois: tries[tries.length - 1],
       imports: imports || [],
