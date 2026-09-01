@@ -14,6 +14,8 @@ const BORNES: Record<string, [number, number]> = {
   delai_jours: [1, 365],
   niveau_service: [0.5, 0.999],
   cout_commande: [0, 5000],
+  cout_ligne_commande: [0, 500],
+  max_commandes_an: [1, 365],
   taux_possession: [0.01, 2],
   horizon_surstock_mois: [1, 60],
   mois_stock_mort: [3, 120],

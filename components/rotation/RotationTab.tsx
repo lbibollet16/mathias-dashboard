@@ -1189,7 +1189,9 @@ function VueArchives({ t, snapshots, onMaj }: { t: Theme; snapshots: any[]; onMa
 const CHAMPS_CONFIG: { cle: string; label: string; aide: string; pas: number; suffixe?: string }[] = [
   { cle: 'delai_jours', label: 'Délai fournisseur', aide: 'Jours entre la commande et la réception. Entre dans le point de commande et le stock de sécurité.', pas: 1, suffixe: 'jours' },
   { cle: 'niveau_service', label: 'Niveau de service', aide: 'Probabilité de ne pas être en rupture pendant le délai. 0,95 = 95 % (Z ≈ 1,645).', pas: 0.01 },
-  { cle: 'cout_commande', label: 'Coût de passation', aide: 'Coût administratif d\'une commande (Wilson : S). Plus il est élevé, plus on commande gros.', pas: 5, suffixe: '$' },
+  { cle: 'cout_commande', label: 'Coût d\'un bon de commande', aide: 'Coût administratif d\'émettre un bon complet chez un fournisseur, tous articles confondus.', pas: 5, suffixe: '$' },
+  { cle: 'cout_ligne_commande', label: 'Coût d\'une ligne de commande', aide: 'Coût d\'ajouter une référence à un bon déjà émis. C\'est CE coût qui entre dans Wilson au niveau de la pièce : le bon part de toute façon pour d\'autres références.', pas: 1, suffixe: '$' },
+  { cle: 'max_commandes_an', label: 'Commandes max par an', aide: 'Rythme de réapprovisionnement le plus rapide possible (26 = aux deux semaines). Borne le calcul : un max à 1 unité ne veut pas dire une commande par vente.', pas: 1, suffixe: '/an' },
   { cle: 'taux_possession', label: 'Taux de possession', aide: 'Coût annuel de détention en % du coût unitaire (Wilson : H). 0,25 = 25 %/an.', pas: 0.01 },
   { cle: 'horizon_surstock_mois', label: 'Horizon de couverture', aide: 'Au-delà de N mois de stock, l\'excédent est signalé comme surstock.', pas: 1, suffixe: 'mois' },
   { cle: 'mois_stock_mort', label: 'Seuil stock mort', aide: 'Aucune vente depuis N mois → la pièce est classée morte.', pas: 1, suffixe: 'mois' },

@@ -31,7 +31,15 @@ CREATE TABLE IF NOT EXISTS sc_config (
   -- Paramètres de réapprovisionnement
   delai_jours               NUMERIC NOT NULL DEFAULT 14,     -- délai fournisseur moyen
   niveau_service            NUMERIC NOT NULL DEFAULT 0.95,   -- 95 % → Z = 1.645
-  cout_commande             NUMERIC NOT NULL DEFAULT 45,     -- $ par commande passée (Wilson : S)
+  cout_commande             NUMERIC NOT NULL DEFAULT 45,     -- $ pour emettre un bon complet
+  -- Cout d'AJOUTER UNE LIGNE a un bon deja emis. C'est ce cout-la qui entre
+  -- dans Wilson au niveau de la piece : le bon part de toute facon chez le
+  -- fournisseur pour vingt autres references. Attribuer les 45 $ du bon a
+  -- chaque ligne fait dire au modele qu'on economiserait 8 000 $/an en
+  -- changeant le max d'une bougie a 3 $.
+  cout_ligne_commande       NUMERIC NOT NULL DEFAULT 5,
+  -- Frequence de reapprovisionnement maximale realiste (26 = aux 2 semaines).
+  max_commandes_an          NUMERIC NOT NULL DEFAULT 26,
   taux_possession           NUMERIC NOT NULL DEFAULT 0.25,   -- 25 %/an du coût unitaire (Wilson : H)
 
   -- Seuils de classification
@@ -59,6 +67,12 @@ CREATE TABLE IF NOT EXISTS sc_config (
 );
 
 INSERT INTO sc_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- Rattrapage pour une base ou sc_config existait deja avant ces colonnes.
+-- Idempotent : sans effet sur une base fraiche.
+ALTER TABLE sc_config ADD COLUMN IF NOT EXISTS cout_ligne_commande   NUMERIC NOT NULL DEFAULT 5;
+ALTER TABLE sc_config ADD COLUMN IF NOT EXISTS max_commandes_an      NUMERIC NOT NULL DEFAULT 26;
+ALTER TABLE sc_config ADD COLUMN IF NOT EXISTS lignes_hors_perimetre TEXT    NOT NULL DEFAULT 'AMA,FBA,FBM';
 
 -- Surcharges par fournisseur (délai réel, franco de port, exclusion du suivi).
 -- Clé = nom du fournisseur tel que résolu par le feed Traction + FOURNISSEURS_URL.

@@ -29,7 +29,26 @@
 export interface ScConfig {
   delai_jours: number
   niveau_service: number
+  /** Coût administratif d'ÉMETTRE un bon de commande (une commande, tous articles confondus). */
   cout_commande: number
+  /**
+   * Coût marginal d'AJOUTER UNE LIGNE à un bon de commande déjà émis.
+   *
+   * C'est ce coût-là, et non celui du bon complet, qui entre dans Wilson au
+   * niveau de la pièce : quand on réapprovisionne une bougie, le bon part de
+   * toute façon chez le fournisseur pour vingt autres références. Attribuer les
+   * 45 $ du bon à chaque ligne fait dire au modèle qu'on économiserait 8 000 $/an
+   * en changeant le max d'une bougie à 3 $ — un chiffre qui décrédibilise tout
+   * le reste.
+   */
+  cout_ligne_commande: number
+  /**
+   * Fréquence de réapprovisionnement maximale réaliste (commandes/an). Un
+   * fournisseur livré aux deux semaines plafonne à 26, quoi que dise la formule.
+   * Sert à borner le coût de la pratique actuelle : sans cette borne, un max
+   * à 1 unité sur une pièce vendue 185 fois par an compte 185 commandes.
+   */
+  max_commandes_an: number
   taux_possession: number
   horizon_surstock_mois: number
   mois_stock_mort: number
@@ -55,6 +74,8 @@ export const CONFIG_DEFAUT: ScConfig = {
   delai_jours: 14,
   niveau_service: 0.95,
   cout_commande: 45,
+  cout_ligne_commande: 5,
+  max_commandes_an: 26,
   taux_possession: 0.25,
   horizon_surstock_mois: 12,
   mois_stock_mort: 24,
@@ -539,7 +560,8 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
     const pf = t ? e.paramsFournisseur.get(t.fournisseur) : undefined
     const delaiJours = pf?.delai_jours ?? cfg.delai_jours
     const delaiMois = delaiJours / JOURS_PAR_MOIS
-    const coutCommande = pf?.cout_commande ?? cfg.cout_commande
+    // Wilson au niveau de la pièce se joue sur le coût de la LIGNE de commande.
+    const coutLigne = cfg.cout_ligne_commande
     const Z = pf?.niveau_service != null ? zScore(pf.niveau_service) : Z_GLOBAL
 
     // Stock de sécurité : SS = Z · σ · √L (σ mensuel, L en mois).
@@ -552,11 +574,13 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
     const H = cfg.taux_possession * cout
     let eoq = 0
     if (D > 0 && H > 0) {
-      eoq = Math.sqrt((2 * D * coutCommande) / H)
+      eoq = Math.sqrt((2 * D * coutLigne) / H)
       // Borne haute : commander plus d'un an de demande d'un coup n'est jamais
       // « économique » en pratique, même si la formule le dit (elle ignore
       // l'obsolescence et la place en entrepôt).
       eoq = Math.min(eoq, D)
+      // Plancher : la quantité qui tient dans le rythme de commande réaliste.
+      eoq = Math.max(eoq, D / cfg.max_commandes_an)
       eoq = Math.max(1, Math.round(eoq))
     }
     const nbCommandesAn = eoq > 0 ? D / eoq : 0
@@ -984,11 +1008,20 @@ function lancerAgents(
       p.eoq > 0 && p.classe_abc !== 'C' && p.cout_unitaire > 0 && p.qte_max > 0)
 
     const ecarts = candidats.map(p => {
-      // Coût total annuel = (D/Q)·S + (Q/2)·H, évalué à la pratique vs à l'optimum.
+      // Coût total annuel = nb_commandes · S + (Q/2) · H.
+      //
+      // Deux garde-fous, sans lesquels le modèle raconte n'importe quoi :
+      //  · S est le coût d'une LIGNE de commande, pas d'un bon complet — le bon
+      //    part de toute façon chez le fournisseur pour d'autres références ;
+      //  · le nombre de commandes est plafonné au rythme de livraison réaliste.
+      //    Un max à 1 unité sur une pièce vendue 185 fois par an ne veut pas
+      //    dire 185 commandes : le commis en met plusieurs à la fois quand il
+      //    voit le trou.
       const D = p.demande_mens * 12
       const H = cfg.taux_possession * p.cout_unitaire
-      const S = cfg.cout_commande
-      const coutTotal = (Q: number) => Q > 0 ? (D / Q) * S + (Q / 2) * H : Infinity
+      const S = cfg.cout_ligne_commande
+      const coutTotal = (Q: number) =>
+        Q > 0 ? Math.min(D / Q, cfg.max_commandes_an) * S + (Q / 2) * H : Infinity
       const qPratique = p.qte_max
       const surcout = coutTotal(qPratique) - coutTotal(p.eoq)
       return { p, surcout, qPratique }
@@ -1001,9 +1034,10 @@ function lancerAgents(
         code_piece: p.code_piece, fournisseur: p.fournisseur, code_ligne: p.code_ligne,
         titre: `${p.code_piece} : commandes ${sens} — optimum ${p.eoq} u au lieu de ${qPratique}`,
         detail: `Demande ${nb(p.demande_mens * 12, 0)} u/an, coût unitaire ${arg(p.cout_unitaire)}. `
-          + `Wilson : Q* = √(2 × ${nb(p.demande_mens * 12, 0)} × ${cfg.cout_commande} ÷ `
+          + `Wilson : Q* = √(2 × ${nb(p.demande_mens * 12, 0)} × ${cfg.cout_ligne_commande} ÷ `
           + `(${nb(cfg.taux_possession * 100, 0)} % × ${nb(p.cout_unitaire, 2)})) = ${p.eoq} u, `
-          + `soit ${nb(p.nb_commandes_an, 1)} commandes/an.`,
+          + `soit ${nb(p.nb_commandes_an, 1)} commandes/an. Le ${nb(cfg.cout_ligne_commande, 0)} $ est le coût `
+          + `d'une ligne sur un bon déjà émis, pas celui du bon complet.`,
         action: qPratique > p.eoq
           ? `Baisser le max Traction à ${p.eoq} : ${arg(surcout)}/an de frais de possession en moins.`
           : `Monter le max Traction à ${p.eoq} : ${arg(surcout)}/an de frais de commande en moins.`,

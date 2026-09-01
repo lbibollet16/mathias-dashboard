@@ -54,6 +54,8 @@ export async function chargerConfig(): Promise<ScConfig> {
     delai_jours: n(data.delai_jours, CONFIG_DEFAUT.delai_jours),
     niveau_service: n(data.niveau_service, CONFIG_DEFAUT.niveau_service),
     cout_commande: n(data.cout_commande, CONFIG_DEFAUT.cout_commande),
+    cout_ligne_commande: n(data.cout_ligne_commande, CONFIG_DEFAUT.cout_ligne_commande),
+    max_commandes_an: n(data.max_commandes_an, CONFIG_DEFAUT.max_commandes_an),
     taux_possession: n(data.taux_possession, CONFIG_DEFAUT.taux_possession),
     horizon_surstock_mois: n(data.horizon_surstock_mois, CONFIG_DEFAUT.horizon_surstock_mois),
     mois_stock_mort: n(data.mois_stock_mort, CONFIG_DEFAUT.mois_stock_mort),
