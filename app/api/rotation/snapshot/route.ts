@@ -16,7 +16,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { moisPrecedent } from '@/lib/supply-chain'
-import { chargerTraction, insererParLots } from '@/lib/supply-chain-db'
+import { chargerConfig, chargerTraction, insererParLots } from '@/lib/supply-chain-db'
 
 export const maxDuration = 300
 export const dynamic = 'force-dynamic'
@@ -57,8 +57,17 @@ export async function POST(req: NextRequest) {
       .from('sc_snapshots').select('nb_pieces').neq('mois', mois)
       .order('mois', { ascending: false }).limit(1).maybeSingle()
 
-    const traction = await chargerTraction()
-    log.push(`Feed Traction : ${traction.size} pièces au catalogue`)
+    // Même exclusion que l'analyse : les lignes Amazon ne doivent pas entrer
+    // dans l'archive non plus, sinon le stock moyen des snapshots ne serait pas
+    // comparable au coût des ventes et la rotation repartirait de travers.
+    const cfg = await chargerConfig()
+    const { pieces: traction, exclusion } = await chargerTraction(0, cfg.lignes_hors_perimetre)
+    log.push(`Feed Traction : ${traction.size} pièces retenues au catalogue`)
+    if (exclusion.nb_catalogue > 0) {
+      log.push(`${exclusion.nb_catalogue} références écartées (${exclusion.lignes.join(', ')}) : `
+        + `${exclusion.nb_en_stock} en stock pour ${Math.round(exclusion.valeur).toLocaleString('fr-CA')} $ `
+        + `— suivies dans le module Amazon, hors de cette archive`)
+    }
 
     // Une pièce à stock nul n'a pas sa place dans un inventaire ; une pièce à
     // stock négatif, si — c'est un écart à documenter, et l'exclure fausserait
@@ -156,6 +165,7 @@ export async function POST(req: NextRequest) {
         pieces: lignes.length, fournisseurs: fournisseurs.size,
         qte_totale: qteTotale, valeur_totale: valeurTotale,
       },
+      exclusion,
       recalcul, log,
     })
 

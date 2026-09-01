@@ -54,7 +54,6 @@ const STATUTS: Record<string, { label: string; couleur: keyof Theme['C'] }> = {
   mort:          { label: 'Stock mort',     couleur: 'red' },
   jamais_vendue: { label: 'Jamais vendue',  couleur: 'red' },
   sur_commande:  { label: 'Sur commande',   couleur: 'blue' },
-  hors_perimetre:{ label: 'Hors périmètre', couleur: 'blue' },
 }
 
 // ── Formatage ────────────────────────────────────────────────────────────
@@ -271,8 +270,8 @@ function VueSynthese({ t, kpis, data, fournisseurs, onVue }: {
           <Mini t={t} label="Fournisseurs / codes de ligne" valeur={`${n0(kpis.nb_fournisseurs)} / ${n0(kpis.nb_lignes)}`} />
           <Mini t={t} label="Pièces suivies" valeur={`${n0(kpis.nb_pieces_stock)} en stock / ${n0(kpis.nb_pieces)}`} />
           <Mini t={t} label="Argent en jeu (constats)" valeur={argCourt(kpis.impact_total)} />
-          <Mini t={t} label={`Hors périmètre (${(kpis.lignes_hors_perimetre || []).join(', ')})`}
-            valeur={argCourt(kpis.valeur_hors_perimetre)} />
+          <Mini t={t} label={`Écarté du calcul (${(kpis.exclusion?.lignes || []).join(', ') || '—'})`}
+            valeur={kpis.exclusion ? `${n0(kpis.exclusion.nb_en_stock)} pcs · ${argCourt(kpis.exclusion.valeur)}` : '—'} />
           <Mini t={t} label="Historique disponible depuis" valeur={kpis.profondeur_historique || '—'} />
           <Mini t={t} label="Pièces sur commande (non stockées)" valeur={n0(kpis.nb_sur_commande)} />
           <Mini t={t} label="Pièces mortes / dormantes" valeur={`${n0(kpis.nb_mort)} / ${n0(kpis.nb_dormant)}`} />
@@ -424,7 +423,6 @@ function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
     dormante: filtres.reduce((s, g) => s + (g.valeur_dormante || 0), 0),
     exces: filtres.reduce((s, g) => s + g.valeur_exces, 0),
     retournable: filtres.reduce((s, g) => s + (g.valeur_retournable || 0), 0),
-    hors: filtres.reduce((s, g) => s + (g.valeur_hors_perimetre || 0), 0),
   }), [filtres])
 
   const onSort = (k: string) => {
@@ -473,7 +471,6 @@ function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
               <ThTriable t={t} label="Mort" colonne="valeur_morte" actif={tri} dir={sens} onSort={onSort} />
               <ThTriable t={t} label="Dormant" colonne="valeur_dormante" actif={tri} dir={sens} onSort={onSort} />
               <ThTriable t={t} label="Excédent" colonne="valeur_exces" actif={tri} dir={sens} onSort={onSort} />
-              <ThTriable t={t} label="Hors périm." colonne="valeur_hors_perimetre" actif={tri} dir={sens} onSort={onSort} />
               {dimension === 'fournisseur' && <ThTriable t={t} label="Retournable" colonne="valeur_retournable" actif={tri} dir={sens} onSort={onSort} />}
               <ThTriable t={t} label="Rupt." colonne="nb_rupture" actif={tri} dir={sens} onSort={onSort} />
               <ThTriable t={t} label="Var. mois" colonne="variation_pct" actif={tri} dir={sens} onSort={onSort} />
@@ -503,7 +500,6 @@ function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
                 <Td couleur={g.valeur_morte > 0 ? t.C.red : undefined}>{g.valeur_morte > 0 ? argCourt(g.valeur_morte) : '—'}</Td>
                 <Td couleur={g.valeur_dormante > 0 ? t.C.yellow : undefined}>{g.valeur_dormante > 0 ? argCourt(g.valeur_dormante) : '—'}</Td>
                 <Td couleur={g.valeur_exces > 0 ? t.C.yellow : undefined}>{g.valeur_exces > 0 ? argCourt(g.valeur_exces) : '—'}</Td>
-                <Td>{g.valeur_hors_perimetre > 0 ? argCourt(g.valeur_hors_perimetre) : '—'}</Td>
                 {dimension === 'fournisseur' && <Td couleur={g.valeur_retournable > 0 ? t.C.green : undefined}>{g.valeur_retournable > 0 ? argCourt(g.valeur_retournable) : '—'}</Td>}
                 <Td couleur={g.nb_rupture > 0 ? t.C.red : undefined}>{g.nb_rupture || '—'}</Td>
                 <Td couleur={g.variation_pct == null ? undefined : g.variation_pct > 0 ? t.C.yellow : t.C.green}>
@@ -527,7 +523,6 @@ function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
               <Td>{argCourt(totaux.morte)}</Td>
               <Td>{argCourt(totaux.dormante)}</Td>
               <Td>{argCourt(totaux.exces)}</Td>
-              <Td>{argCourt(totaux.hors)}</Td>
               {dimension === 'fournisseur' && <Td>{argCourt(totaux.retournable)}</Td>}
               <Td>—</Td><Td>—</Td><Td>—</Td>
             </tr>
@@ -643,7 +638,6 @@ function VuePieces({ t, fournisseur, ligne, setFournisseur, setLigne, listeFourn
             <option value="mort,jamais_vendue">Stock mort</option>
             <option value="dormant">Dormant</option>
             <option value="sur_commande">Sur commande (non stockée)</option>
-            <option value="hors_perimetre">Hors périmètre (Amazon)</option>
             <option value="ok">OK</option>
           </select>
           <select value={abc} onChange={e => setAbc(e.target.value)} style={champ(t, 130)}>
@@ -1259,10 +1253,11 @@ function VueReglages({ t, config, email, onMaj }: { t: Theme; config: any; email
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 12, marginTop: 14 }}>
           {CHAMPS_CONFIG.map(champNum)}
           <div style={{ border: `1px solid ${t.bdr}`, borderRadius: 10, padding: 13 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700 }}>Codes de ligne hors périmètre</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700 }}>Codes de ligne écartés</div>
             <div style={{ fontSize: 11, color: t.sub, marginTop: 4, lineHeight: 1.5, minHeight: 32 }}>
-              Lignes dont les ventes ne passent pas par le rapport 2891 (Amazon). Leur stock reste compté
-              dans la valeur d'inventaire, mais il est exclu de la rotation et du stock mort.
+              Ces lignes sont retirées dès la lecture du feed Traction : elles n'entrent ni dans les tableaux,
+              ni dans les snapshots mensuels, ni dans les alertes de réception. AMA est la ligne Amazon,
+              dont les ventes passent par les settlements et non par le rapport 2891.
             </div>
             <input type="text"
               value={Array.isArray(cfg.lignes_hors_perimetre) ? cfg.lignes_hors_perimetre.join(',') : (cfg.lignes_hors_perimetre ?? '')}

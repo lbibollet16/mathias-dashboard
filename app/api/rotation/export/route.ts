@@ -67,7 +67,6 @@ const COLS_GROUPE = [
   { cle: 'valeur_exces', titre: 'Valeur excédent ($)' },
   { cle: 'valeur_morte', titre: 'Valeur morte ($)' },
   { cle: 'valeur_dormante', titre: 'Valeur dormante ($)' },
-  { cle: 'valeur_hors_perimetre', titre: 'Hors périmètre ($)' },
   { cle: 'valeur_retournable', titre: 'Retournable ($)' },
   { cle: 'nb_negatifs', titre: 'Négatifs' },
   { cle: 'nb_alertes_recep', titre: 'Alertes réception' },
