@@ -12,7 +12,7 @@ const TRIS: Record<string, string> = {
   valeur: 'valeur_stock', exces: 'exces_valeur', morte: 'valeur_morte',
   urgence: 'score_urgence', rotation: 'rotation', couverture: 'couverture_mois',
   demande: 'demande_mens', stock: 'stock', ventes: 'ventes_12m_cogs',
-  code: 'code_piece', commander: 'qte_a_commander',
+  code: 'code_piece', commander: 'qte_a_commander', saison: 'besoin_saison',
 }
 
 export async function GET(req: NextRequest) {
