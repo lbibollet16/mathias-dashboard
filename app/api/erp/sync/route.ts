@@ -573,6 +573,13 @@ async function enregistrerReceptions(
   const cfg = await chargerConfig()
   const run = await dernierRun()
 
+  // Les lignes écartées du module (AMA…) n'ont pas à générer d'alerte : leurs
+  // ventes passent par Amazon, donc la demande calculée ici serait nulle et
+  // CHAQUE réception ressortirait en « pièce sans vente ».
+  const exclues = new Set((cfg.lignes_hors_perimetre || []).map(l => l.trim().toUpperCase()))
+  receptions = receptions.filter(r => !exclues.has(String(r.info.ligne || '').toUpperCase()))
+  if (receptions.length === 0) return { total: 0, alertes: 0 }
+
   const moisFin = run?.kpis?.mois_fin || moisPrecedent(new Date())
   const fenetre = fenetreMois(moisFin, 12)
   // Mois réellement importés : sans cette liste on diviserait par 12 alors que

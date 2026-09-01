@@ -55,11 +55,12 @@ CREATE TABLE IF NOT EXISTS sc_config (
   alerte_sans_vente_dollars NUMERIC NOT NULL DEFAULT 500,    -- réception sur pièce sans vente 12 m
   alerte_qte_min            NUMERIC NOT NULL DEFAULT 3,      -- sous ce nb d'unites, jamais d'alerte
 
-  -- Codes de ligne dont les ventes ne passent PAS par le rapport 2891.
-  -- AMA/FBA/FBM sont les lignes Amazon : 694 000 $ de stock bien reel, mais
-  -- dont les ventes vivent dans les settlements. Sans cette exclusion, ces
-  -- pieces seraient toutes classees « jamais vendues » et le stock mort
-  -- afficherait un demi-million de dollars imaginaire.
+  -- Codes de ligne ECARTES des la lecture du feed Traction : ils n'entrent ni
+  -- dans les tableaux, ni dans les snapshots mensuels, ni dans les alertes de
+  -- reception. AMA est la ligne Amazon : 1 696 references, 694 000 $ de stock
+  -- (24 % de la valeur d'inventaire), mais ses ventes passent par les
+  -- settlements et non par le rapport 2891. Les laisser entrer les ferait
+  -- toutes classer « jamais vendues » et fausserait rotation et stock mort.
   lignes_hors_perimetre     TEXT NOT NULL DEFAULT 'AMA,FBA,FBM',
 
   maj_le                    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -254,12 +255,11 @@ CREATE TABLE IF NOT EXISTS sc_analyse_pieces (
   -- Classification
   classe_abc        TEXT NOT NULL DEFAULT 'C',
   classe_xyz        TEXT NOT NULL DEFAULT 'Z',
-  -- sur_commande   : vendue une seule fois et sans min/max -> commande speciale,
-  --                  son stock a zero n'est pas une rupture
-  -- hors_perimetre : ligne Amazon, ventes suivies dans un autre module
+  -- sur_commande : vendue une seule fois et sans min/max -> commande speciale,
+  --                son stock a zero n'est pas une rupture
   statut            TEXT NOT NULL DEFAULT 'ok'
                     CHECK (statut IN ('rupture','sous_stock','ok','surstock','mort',
-                                      'dormant','jamais_vendue','sur_commande','hors_perimetre')),
+                                      'dormant','jamais_vendue','sur_commande')),
 
   -- Métriques supply chain
   rotation          NUMERIC NOT NULL DEFAULT 0,   -- COGS 12 m ÷ stock moyen $
@@ -308,7 +308,6 @@ CREATE TABLE IF NOT EXISTS sc_analyse_groupes (
   ventes_12m_cogs   NUMERIC NOT NULL DEFAULT 0,
   marge_pct         NUMERIC,
   stock_moyen       NUMERIC NOT NULL DEFAULT 0,   -- moyenne des snapshots (ou stock actuel)
-  valeur_hors_perimetre NUMERIC NOT NULL DEFAULT 0,  -- stock Amazon, hors rotation
   nb_snapshots      INT NOT NULL DEFAULT 0,       -- fiabilité du stock moyen
   rotation          NUMERIC NOT NULL DEFAULT 0,
   dsi_jours         NUMERIC,
@@ -318,7 +317,6 @@ CREATE TABLE IF NOT EXISTS sc_analyse_groupes (
   nb_sous_stock     INT NOT NULL DEFAULT 0,
   nb_surstock       INT NOT NULL DEFAULT 0,
   nb_mort           INT NOT NULL DEFAULT 0,
-  nb_hors_perimetre INT NOT NULL DEFAULT 0,
   nb_dormant        INT NOT NULL DEFAULT 0,
   valeur_exces      NUMERIC NOT NULL DEFAULT 0,
   valeur_morte      NUMERIC NOT NULL DEFAULT 0,

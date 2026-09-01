@@ -34,11 +34,13 @@ export async function POST(req: NextRequest) {
         chargerSnapshots(), chargerRetournables(), chargerNegatifs(), chargerAlertesRecep(),
       ])
 
-    const traction = await chargerTraction()
+    // Les codes de ligne configurés (AMA…) sont écartés dès la lecture du feed :
+    // rien en aval n'a plus à s'en soucier.
+    const { pieces: traction, exclusion } = await chargerTraction(0, cfg.lignes_hors_perimetre)
 
     const res = analyser({
       traction, ventes, moisDisponibles, cfg, paramsFournisseur,
-      snapshots, moisSnapshots, retournables, negatifs, alertesRecep,
+      snapshots, moisSnapshots, retournables, negatifs, alertesRecep, exclusion,
     })
 
     // ── Agent réception ────────────────────────────────────────────────
