@@ -55,11 +55,73 @@ export async function GET(req: NextRequest) {
       .range(page * taille, page * taille + taille - 1)
     if (error) throw new Error(error.message)
 
+    // Totaux sur TOUT le filtre, pas seulement la page affichée : quand on
+    // arrive ici depuis « Voir les 1 149 pièces », la première question est
+    // « ça représente combien ? ». Sans ça, l'écran ne montre que 100 lignes
+    // sans jamais dire ce que pèse l'ensemble.
+    const totaux = await totauxFiltre(run.run_id, { fournisseur, ligne, statut, abc, xyz, q }, count || 0)
+
     return NextResponse.json({
-      pret: true, pieces: data || [], total: count || 0, page, taille,
+      pret: true, pieces: data || [], total: count || 0, page, taille, totaux,
     })
 
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message }, { status: 500 })
   }
+}
+
+/**
+ * Somme les colonnes qui comptent sur l'ensemble du filtre.
+ *
+ * PostgREST ne garantit pas les fonctions d'agrégation (elles dépendent d'un
+ * réglage Supabase souvent désactivé), donc on additionne côté serveur en
+ * relisant uniquement les six colonnes numériques utiles — jamais les lignes
+ * complètes. Au-delà de 25 000 pièces on renonce : l'utilisateur n'a de toute
+ * façon pas de filtre utile à ce niveau, et ça éviterait 25 allers-retours
+ * pour un total qu'il ne lira pas.
+ */
+async function totauxFiltre(
+  runId: string,
+  f: { fournisseur: string | null; ligne: string | null; statut: string | null
+       abc: string | null; xyz: string | null; q: string },
+  nbLignes: number,
+) {
+  if (nbLignes === 0 || nbLignes > 25_000) return null
+
+  const COLS = 'valeur_stock, exces_valeur, valeur_morte, valeur_dormante, qte_a_commander, cout_unitaire, ventes_12m_cogs'
+  const t = {
+    nb: 0, valeur_stock: 0, exces_valeur: 0, valeur_morte: 0, valeur_dormante: 0,
+    qte_a_commander: 0, valeur_a_commander: 0, ventes_12m_cogs: 0,
+  }
+
+  let from = 0
+  while (from < nbLignes) {
+    let q = supabaseAdmin.from('sc_analyse_pieces').select(COLS).eq('run_id', runId)
+    if (f.fournisseur) q = q.eq('fournisseur', f.fournisseur)
+    if (f.ligne) q = q.eq('code_ligne', f.ligne)
+    if (f.statut) q = q.in('statut', f.statut.split(','))
+    if (f.abc) q = q.in('classe_abc', f.abc.split(','))
+    if (f.xyz) q = q.in('classe_xyz', f.xyz.split(','))
+    if (f.q) {
+      const s = f.q.replace(/[,()%\\]/g, ' ').trim()
+      if (s) q = q.or(`code_piece.ilike.%${s}%,description.ilike.%${s}%`)
+    }
+
+    const { data, error } = await q.range(from, from + 999)
+    if (error || !data || data.length === 0) break
+    for (const r of data as any[]) {
+      t.nb++
+      t.valeur_stock += Number(r.valeur_stock) || 0
+      t.exces_valeur += Number(r.exces_valeur) || 0
+      t.valeur_morte += Number(r.valeur_morte) || 0
+      t.valeur_dormante += Number(r.valeur_dormante) || 0
+      t.ventes_12m_cogs += Number(r.ventes_12m_cogs) || 0
+      const aCmd = Number(r.qte_a_commander) || 0
+      t.qte_a_commander += aCmd
+      t.valeur_a_commander += aCmd * (Number(r.cout_unitaire) || 0)
+    }
+    if (data.length < 1000) break
+    from += 1000
+  }
+  return t
 }

@@ -47,7 +47,13 @@ export async function POST(req: NextRequest) {
     // Les réceptions sont détectées en continu par le sync ERP (diff de stock
     // jour à jour) ; l'agent ne fait que remonter celles qui ont déclenché une
     // alerte et qui n'ont pas encore été traitées.
-    res.findings.push(...await findingsReceptions())
+    const fRecep = await findingsReceptions()
+    // Le montant d'excédent reçu vient des findings « réception » (agrégat de
+    // tête), pas du moteur : les réceptions vivent en base, pas dans le feed.
+    res.kpis.exces_receptions = fRecep
+      .filter(f => !f.code_piece && !f.fournisseur)
+      .reduce((s, f) => s + f.impact_dollars, 0)
+    res.findings.push(...fRecep)
     res.findings.sort((a, b) => {
       const rang = { critique: 0, attention: 1, info: 2 } as const
       return rang[a.severite] - rang[b.severite] || b.impact_dollars - a.impact_dollars

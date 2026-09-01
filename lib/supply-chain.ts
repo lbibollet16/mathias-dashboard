@@ -887,6 +887,14 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
     valeur_exces: pieces.reduce((s, p) => s + p.exces_valeur, 0),
     nb_rupture: pieces.filter(p => p.statut === 'rupture').length,
     nb_sur_commande: pieces.filter(p => p.statut === 'sur_commande').length,
+    // Marge annuelle exposée par les pièces à réapprovisionner : marge unitaire
+    // × demande. C'est le montant que la vue « À faire » met en face du premier
+    // bloc — sans lui, « commander » n'a pas de prix.
+    marge_exposee: pieces
+      .filter(p => p.statut === 'rupture' || p.statut === 'sous_stock')
+      .reduce((s, p) => s + Math.max(0, p.prix_vente - p.cout_unitaire) * p.demande_mens * 12, 0),
+    // Pièces de classe A pilotées sans aucun seuil dans Traction.
+    nb_sans_minmax: pieces.filter(p => p.classe_abc === 'A' && p.qte_min === 0 && p.qte_max === 0).length,
     nb_sous_stock: pieces.filter(p => p.statut === 'sous_stock').length,
     nb_surstock: pieces.filter(p => p.statut === 'surstock').length,
     nb_mort: pieces.filter(p => ['mort', 'jamais_vendue'].includes(p.statut)).length,
