@@ -1671,12 +1671,40 @@ function ImportVentes({ t, email, onMaj }: { t: Theme; email: string | null; onM
       <SectionTitre t={t} titre="📥 Import mensuel des ventes (rapport Traction 2891)"
         aide="Chaque début de mois, télécharge le rapport 2891 et charge-le ici. Seul le bloc de gauche (mois en cours) est importé ; le bloc comparatif de droite est ignoré. Ré-importer un mois le remplace au lieu de le doubler." />
 
-      {couverture?.mois_manquants?.length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          <Message t={t} type="err">
-            <strong>Mois absents de l'historique :</strong> {couverture.mois_manquants.join(', ')}.
-            {' '}Chaque trou réduit la précision de la demande, de la saisonnalité et du stock de sécurité.
-          </Message>
+      {/* Tous les trous ne se valent pas. Traiter « un mois de 2025 manquant »
+          comme « trois mois manquants dans la fenêtre de calcul » rendait
+          l'avertissement crier au loup en permanence. */}
+      {couverture && (
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {couverture.manquants_fenetre?.length > 0 ? (
+            <Message t={t} type="err">
+              <strong>{couverture.manquants_fenetre.length} mois manquants dans la fenêtre de calcul</strong>
+              {' '}({couverture.fenetre?.debut} → {couverture.fenetre?.fin}) : {couverture.manquants_fenetre.join(', ')}.
+              {' '}C'est là que se calculent la demande, la saisonnalité et le stock de sécurité —
+              ces trous faussent tous les seuils. À importer en priorité.
+            </Message>
+          ) : (
+            <Message t={t} type="ok">
+              <strong>Fenêtre de calcul complète ({couverture.couverture})</strong> — {couverture.fenetre?.debut} →
+              {' '}{couverture.fenetre?.fin}. La demande, la saisonnalité et les stocks de sécurité reposent
+              sur douze mois pleins.
+            </Message>
+          )}
+
+          {couverture.manquants_24m?.length > 0 && (
+            <Message t={t} type="info">
+              <strong>Manquant sur 24 mois :</strong> {couverture.manquants_24m.join(', ')}.
+              {' '}Hors de la fenêtre de calcul, donc sans effet sur les seuils. Sert uniquement à
+              distinguer une pièce « dormante » d'une pièce « morte » : une pièce dont la seule vente
+              tombait dans ce mois est comptée comme morte à tort.
+            </Message>
+          )}
+
+          {couverture.manquants_anciens?.length > 0 && (
+            <div style={{ fontSize: 11.5, color: t.sub }}>
+              Plus anciens et sans effet sur aucun calcul actuel : {couverture.manquants_anciens.join(', ')}.
+            </div>
+          )}
         </div>
       )}
 
