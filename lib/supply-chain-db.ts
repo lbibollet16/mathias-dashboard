@@ -5,7 +5,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import {
   CONFIG_DEFAUT, ScConfig, ParamsFournisseur, TractionPiece,
   parseTractionCSV, parseFournisseursTSV,
-  AnalysePiece, AnalyseGroupe, Finding,
+  AnalysePiece, AnalyseGroupe, Finding, TractionCharge,
 } from '@/lib/supply-chain'
 
 /**
@@ -96,7 +96,7 @@ export async function chargerParamsFournisseurs(): Promise<Map<string, ParamsFou
  * (incident réseau côté Traction) produirait un « inventaire » amputé qu'on
  * archiverait ensuite pour toujours dans un snapshot mensuel.
  */
-export async function chargerTraction(minAttendu = 0): Promise<Map<string, TractionPiece>> {
+export async function chargerTraction(minAttendu = 0, exclureLignes: string[] = []): Promise<TractionCharge> {
   const [tRes, fRes] = await Promise.all([
     fetch(process.env.TRACTION_URL!, { signal: AbortSignal.timeout(120_000) }),
     fetch(process.env.FOURNISSEURS_URL!, { signal: AbortSignal.timeout(60_000) }),
@@ -105,17 +105,20 @@ export async function chargerTraction(minAttendu = 0): Promise<Map<string, Tract
   if (!fRes.ok) throw new Error(`Fournisseurs HTTP ${fRes.status}`)
 
   const dictFourn = parseFournisseursTSV(await fRes.text())
-  const traction = parseTractionCSV(await tRes.text(), dictFourn)
+  const charge = parseTractionCSV(await tRes.text(), dictFourn, exclureLignes)
 
-  if (traction.size < 1000) {
-    throw new Error(`Feed Traction suspect : ${traction.size} pièces seulement`)
+  // Le garde-fou compte les lignes RETENUES + les écartées : un feed tronqué
+  // doit être détecté même si la troncature tombe sur les lignes exclues.
+  const total = charge.pieces.size + charge.exclusion.nb_catalogue
+  if (total < 1000) {
+    throw new Error(`Feed Traction suspect : ${total} pièces seulement`)
   }
-  if (minAttendu > 0 && traction.size < 0.8 * minAttendu) {
+  if (minAttendu > 0 && total < 0.8 * minAttendu) {
     throw new Error(
-      `Feed Traction tronqué : ${traction.size} pièces vs ${minAttendu} attendues (< 80 %). ` +
+      `Feed Traction tronqué : ${total} pièces vs ${minAttendu} attendues (< 80 %). ` +
       `Opération annulée pour ne pas archiver un inventaire incomplet.`)
   }
-  return traction
+  return charge
 }
 
 export interface VentesChargees {

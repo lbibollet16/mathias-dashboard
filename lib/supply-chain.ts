@@ -182,7 +182,6 @@ export interface AnalyseGroupe {
   ventes_12m_cogs: number
   marge_pct: number | null
   stock_moyen: number
-  valeur_hors_perimetre: number
   nb_snapshots: number
   rotation: number
   dsi_jours: number | null
@@ -192,7 +191,6 @@ export interface AnalyseGroupe {
   nb_surstock: number
   nb_mort: number
   nb_dormant: number
-  nb_hors_perimetre: number
   valeur_exces: number
   valeur_morte: number
   valeur_dormante: number
@@ -306,7 +304,27 @@ export function parseFournisseursTSV(tsv: string): Map<string, string> {
  * QteCommande, QteMin/QteMax servent aux agents et n'étaient exploités nulle
  * part ailleurs dans le dashboard.
  */
-export function parseTractionCSV(csv: string, dictFourn: Map<string, string>): Map<string, TractionPiece> {
+export interface ExclusionTraction {
+  /** Codes de ligne écartés, tels que configurés. */
+  lignes: string[]
+  nb_catalogue: number
+  nb_en_stock: number
+  qte: number
+  valeur: number
+  /** Détail par code de ligne, pour pouvoir le montrer à l'écran. */
+  parLigne: Record<string, { nb_catalogue: number; nb_en_stock: number; qte: number; valeur: number }>
+}
+
+export interface TractionCharge {
+  pieces: Map<string, TractionPiece>
+  exclusion: ExclusionTraction
+}
+
+export function parseTractionCSV(
+  csv: string,
+  dictFourn: Map<string, string>,
+  exclureLignes: string[] = [],
+): TractionCharge {
   const lines = csv.split(/\r?\n/)
   const hdrs = (lines[0] || '').split(';')
   const idx = (n: string) => hdrs.findIndex(h => h.trim().toLowerCase() === n.toLowerCase())
@@ -318,6 +336,16 @@ export function parseTractionCSV(csv: string, dictFourn: Map<string, string>): M
   const iMin = idx('QteMin'), iMax = idx('QteMax'), iLoc = idx('Location1')
 
   if (iP < 0) throw new Error('Feed Traction : colonne PKCode introuvable')
+
+  // Codes de ligne écartés dès la lecture du feed. AMA est la ligne Amazon :
+  // 1 696 références, 694 000 $ de stock — mais ses ventes passent par les
+  // settlements Amazon, pas par le rapport 2891. Les garder fausse tout ce qui
+  // se calcule ici (rotation, stock mort, valeur d'inventaire suivie), donc on
+  // ne les fait pas entrer du tout plutôt que de les neutraliser au cas par cas.
+  const exclues = new Set(exclureLignes.map(l => l.trim().toUpperCase()).filter(Boolean))
+  const exclusion: ExclusionTraction = {
+    lignes: [...exclues], nb_catalogue: 0, nb_en_stock: 0, qte: 0, valeur: 0, parLigne: {},
+  }
 
   const out = new Map<string, TractionPiece>()
   for (let i = 1; i < lines.length; i++) {
@@ -331,15 +359,30 @@ export function parseTractionCSV(csv: string, dictFourn: Map<string, string>): M
     const idF = clean(iF)
     const qtyDispo = num(clean(iD))
     const qteReserve = num(clean(iR))
+    const codeLigne = clean(iL) || 'N/A'
+    const qty = iQ >= 0 ? num(clean(iQ)) : qtyDispo + qteReserve
+
+    if (exclues.has(codeLigne.toUpperCase())) {
+      const cout = num(clean(iC))
+      const e = exclusion.parLigne[codeLigne] ||
+        (exclusion.parLigne[codeLigne] = { nb_catalogue: 0, nb_en_stock: 0, qte: 0, valeur: 0 })
+      e.nb_catalogue++; exclusion.nb_catalogue++
+      if (qty !== 0) {
+        e.nb_en_stock++; e.qte += qty; e.valeur += qty * cout
+        exclusion.nb_en_stock++; exclusion.qte += qty; exclusion.valeur += qty * cout
+      }
+      continue
+    }
+
     out.set(pk, {
       pk,
       desc: clean(iDesc),
       idFournisseur: idF,
       fournisseur: idF ? (dictFourn.get(idF) || `ID:${idF}`) : 'Non assigné',
-      codeLigne: clean(iL) || 'N/A',
+      codeLigne,
       cout: num(clean(iC)),
       prix: num(clean(iPrix)),
-      qty: iQ >= 0 ? num(clean(iQ)) : qtyDispo + qteReserve,
+      qty,
       qtyDispo,
       qteReserve,
       qteTransit: num(clean(iT)),
@@ -349,7 +392,7 @@ export function parseTractionCSV(csv: string, dictFourn: Map<string, string>): M
       localisation: clean(iLoc),
     })
   }
-  return out
+  return { pieces: out, exclusion }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -456,6 +499,8 @@ export interface EntreeAnalyse {
   alertesRecep: Map<string, number>
   /** Mois de référence (fin de fenêtre). Défaut : mois précédent. */
   moisFin?: string
+  /** Ce que le parsing du feed a écarté (lignes Amazon). Pour l'afficher. */
+  exclusion?: ExclusionTraction
 }
 
 export interface ResultatAnalyse {
@@ -484,9 +529,6 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
   if (moisManquants12.length) log.push(`Mois manquants : ${moisManquants12.join(', ')}`)
 
   const Z_GLOBAL = zScore(cfg.niveau_service)
-
-  // Lignes dont les ventes ne transitent pas par le rapport 2891 (Amazon).
-  const horsPerimetre = new Set((cfg.lignes_hors_perimetre || []).map(l => l.trim().toUpperCase()).filter(Boolean))
 
   // Profondeur réelle de l'historique : sert à qualifier « jamais vendue ».
   // Une pièce absente de 24 mois de rapports n'est pas « jamais vendue dans
@@ -598,16 +640,11 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
     // signaler en rupture noierait les vraies ruptures — 5 300 fausses alertes
     // sur les données réelles.
     const estStockee = moisActifs12 >= 2 || (t?.qteMin ?? 0) > 0 || (t?.qteMax ?? 0) > 0
-    const estHorsPerimetre = horsPerimetre.has((t?.codeLigne ?? '').toUpperCase())
 
     const cibleHaute = demandeMens * cfg.horizon_surstock_mois + stockSecurite
     let statut = 'ok'
     let exces = 0, valeurMorte = 0, valeurDormante = 0
-    if (estHorsPerimetre) {
-      // Stock réel, mais dont les ventes sont suivies ailleurs : on l'affiche
-      // sans porter de jugement dessus.
-      statut = 'hors_perimetre'
-    } else if (stock > 0 && derniereVente === null) {
+    if (stock > 0 && derniereVente === null) {
       statut = 'jamais_vendue'; valeurMorte = valeurStock
     } else if (stock > 0 && moisSansVente !== null && moisSansVente >= cfg.mois_stock_mort) {
       statut = 'mort'; valeurMorte = valeurStock
@@ -690,7 +727,11 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
     })
   }
 
-  log.push(`${bruts.length} pièces suivies (sur ${e.traction.size} au catalogue)`)
+  log.push(`${bruts.length} pièces suivies (sur ${e.traction.size} au catalogue après exclusion)`)
+  if (e.exclusion && e.exclusion.nb_catalogue > 0) {
+    log.push(`${e.exclusion.nb_catalogue} références écartées (${e.exclusion.lignes.join(', ')}) : `
+      + `${e.exclusion.nb_en_stock} en stock pour ${Math.round(e.exclusion.valeur).toLocaleString('fr-CA')} $`)
+  }
 
   // ── Pareto / ABC sur le coût des ventes ──────────────────────────────
   // Loi de Pareto appliquée à la CONSOMMATION (coût des ventes annualisé) :
@@ -721,15 +762,7 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
 
     const lignes: AnalyseGroupe[] = []
     for (const [cle, list] of par) {
-      // Le stock hors périmètre (Amazon) compte dans la VALEUR d'inventaire —
-      // il est bien là — mais pas dans la rotation ni le score de santé, dont
-      // le dénominateur serait sinon gonflé par du stock dont on ne voit pas
-      // les ventes.
-      const dansPerimetre = list.filter(p => p.statut !== 'hors_perimetre')
-      const valeurHorsPerimetre = list.reduce((s, p) => s + (p.statut === 'hors_perimetre' ? p.valeur_stock : 0), 0)
-
       const valeurStock = list.reduce((s, p) => s + p.valeur_stock, 0)
-      const valeurSuivie = dansPerimetre.reduce((s, p) => s + p.valeur_stock, 0)
       const cogs12 = list.reduce((s, p) => s + p.ventes_12m_cogs, 0)
       const ca12 = list.reduce((s, p) => s + p.ventes_12m_ca, 0)
       const cogsAnnualise = cogs12 * (12 / nbMois12)
@@ -748,12 +781,7 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
       const stockMoyen = valeursSnap.length > 0
         ? (valeursSnap.reduce((s, v) => s + v, 0) + valeurStock) / (valeursSnap.length + 1)
         : valeurStock
-      // Le stock moyen issu des snapshots inclut le hors-périmètre : on en
-      // retire la part pour que la rotation reste comparable au coût des ventes.
-      const partSuivie = valeurStock > 0 ? valeurSuivie / valeurStock : 1
-      const stockMoyenSuivi = stockMoyen * partSuivie
-
-      const rotation = stockMoyenSuivi > 0 ? cogsAnnualise / stockMoyenSuivi : 0
+      const rotation = stockMoyen > 0 ? cogsAnnualise / stockMoyen : 0
       const moisPrec = e.moisSnapshots.length ? e.moisSnapshots[e.moisSnapshots.length - 1] : null
       const valeurPrec = moisPrec ? (e.snapshots.get(`${dimension}|${cle}|${moisPrec}`) ?? null) : null
 
@@ -766,9 +794,9 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
       // Score de santé 0-100 : rotation (35 %), absence de stock mort (25 %),
       // absence d'excédent (25 %), absence de rupture (15 %). Un fournisseur à
       // 100 fait tourner tout son stock sans rien immobiliser ni manquer.
-      const pctMort = valeurSuivie > 0 ? (valeurMorte + valeurDormante * 0.5) / valeurSuivie : 0
-      const pctExces = valeurSuivie > 0 ? valeurExces / valeurSuivie : 0
-      const pctRupture = dansPerimetre.length > 0 ? nbRupture / dansPerimetre.length : 0
+      const pctMort = valeurStock > 0 ? (valeurMorte + valeurDormante * 0.5) / valeurStock : 0
+      const pctExces = valeurStock > 0 ? valeurExces / valeurStock : 0
+      const pctRupture = list.length > 0 ? nbRupture / list.length : 0
       const scoreRot = Math.min(1, rotation / 4)
       const score = 100 * (0.35 * scoreRot + 0.25 * (1 - pctMort) + 0.25 * (1 - pctExces) + 0.15 * (1 - pctRupture))
 
@@ -785,18 +813,16 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
         ventes_12m_ca: caAnnualise,
         ventes_12m_cogs: cogsAnnualise,
         marge_pct: caAnnualise > 0 ? ((caAnnualise - cogsAnnualise) / caAnnualise) * 100 : null,
-        stock_moyen: stockMoyenSuivi,
-        valeur_hors_perimetre: valeurHorsPerimetre,
+        stock_moyen: stockMoyen,
         nb_snapshots: valeursSnap.length,
         rotation,
         dsi_jours: rotation > 0 ? 365 / rotation : null,
-        couverture_mois: cogsAnnualise > 0 ? valeurSuivie / (cogsAnnualise / 12) : null,
+        couverture_mois: cogsAnnualise > 0 ? valeurStock / (cogsAnnualise / 12) : null,
         nb_rupture: nbRupture,
         nb_sous_stock: list.filter(p => p.statut === 'sous_stock').length,
         nb_surstock: list.filter(p => p.statut === 'surstock').length,
         nb_mort: list.filter(p => ['mort', 'jamais_vendue'].includes(p.statut)).length,
         nb_dormant: list.filter(p => p.statut === 'dormant').length,
-        nb_hors_perimetre: list.filter(p => p.statut === 'hors_perimetre').length,
         valeur_exces: valeurExces,
         valeur_morte: valeurMorte,
         valeur_dormante: valeurDormante,
@@ -827,11 +853,11 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
   // ── Agents ───────────────────────────────────────────────────────────
   const findings = lancerAgents(pieces, groupes, cfg, {
     moisFin, moisPresents12, moisManquants12, nbMois12, debutHistorique,
+    exclusion: e.exclusion,
   }, log)
 
   // ── KPIs d'en-tête ───────────────────────────────────────────────────
   const valeurTotale = pieces.reduce((s, p) => s + p.valeur_stock, 0)
-  const valeurHorsPerimetre = pieces.reduce((s, p) => s + (p.statut === 'hors_perimetre' ? p.valeur_stock : 0), 0)
   const cogsTotal = pieces.reduce((s, p) => s + p.ventes_12m_cogs, 0) * (12 / nbMois12)
   const fournGroupes = groupes.filter(g => g.dimension === 'fournisseur')
   const stockMoyenGlobal = fournGroupes.reduce((s, g) => s + g.stock_moyen, 0)
@@ -846,9 +872,10 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
     nb_fournisseurs: fournGroupes.length,
     nb_lignes: groupes.filter(g => g.dimension === 'ligne').length,
     valeur_stock: valeurTotale,
-    valeur_hors_perimetre: valeurHorsPerimetre,
-    valeur_suivie: valeurTotale - valeurHorsPerimetre,
-    lignes_hors_perimetre: cfg.lignes_hors_perimetre,
+    // Ce qui a été écarté à la lecture du feed (ligne Amazon) : la valeur ne
+    // figure nulle part ailleurs dans l'onglet, on la garde ici pour que le
+    // total reste rapprochable de l'inventaire Traction complet.
+    exclusion: e.exclusion || null,
     profondeur_historique: debutHistorique,
     cogs_annualise: cogsTotal,
     stock_moyen: stockMoyenGlobal,
@@ -860,7 +887,6 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
     valeur_exces: pieces.reduce((s, p) => s + p.exces_valeur, 0),
     nb_rupture: pieces.filter(p => p.statut === 'rupture').length,
     nb_sur_commande: pieces.filter(p => p.statut === 'sur_commande').length,
-    nb_hors_perimetre: pieces.filter(p => p.statut === 'hors_perimetre').length,
     nb_sous_stock: pieces.filter(p => p.statut === 'sous_stock').length,
     nb_surstock: pieces.filter(p => p.statut === 'surstock').length,
     nb_mort: pieces.filter(p => ['mort', 'jamais_vendue'].includes(p.statut)).length,
@@ -884,6 +910,7 @@ interface CtxAgents {
   moisManquants12: string[]
   nbMois12: number
   debutHistorique: string
+  exclusion?: ExclusionTraction
 }
 
 /**
@@ -1227,19 +1254,24 @@ function lancerAgents(
       })
     }
 
-    const hors = pieces.filter(p => p.statut === 'hors_perimetre')
-    if (hors.length > 0) {
-      const val = hors.reduce((s, p) => s + p.valeur_stock, 0)
+    const ex = ctx.exclusion
+    if (ex && ex.nb_catalogue > 0) {
+      const detailLignes = Object.entries(ex.parLigne)
+        .sort((a, b) => b[1].valeur - a[1].valeur)
+        .map(([l, v]) => `${l} : ${v.nb_en_stock} pièces en stock, ${arg(v.valeur)}`)
+        .join(' · ')
       push({
         agent: 'fiabilite', severite: 'info', code_piece: null, fournisseur: null, code_ligne: null,
-        titre: `${arg(val)} de stock exclu de l'analyse (lignes ${cfg.lignes_hors_perimetre.join(', ')})`,
-        detail: `${hors.length} pièces sur ces codes de ligne. Leur stock est bien réel et compte dans la `
-          + `valeur d'inventaire, mais leurs ventes passent par Amazon et non par le rapport 2891 : les `
-          + `inclure les ferait toutes classer « jamais vendues » et gonflerait le stock mort d'autant.`,
-        action: `Suivre la rotation de ces pièces dans l'onglet Amazon. La liste des lignes exclues se règle `
-          + `dans les paramètres du module.`,
+        titre: `${ex.nb_catalogue} références écartées à la lecture du feed (${ex.lignes.join(', ')}) — ${arg(ex.valeur)} de stock`,
+        detail: `${detailLignes}. Ce sont les lignes Amazon : le stock existe, mais ses ventes passent par `
+          + `les settlements et non par le rapport 2891. Les laisser entrer les ferait toutes classer `
+          + `« jamais vendues » et fausserait la rotation, le stock mort et la valeur d'inventaire suivie. `
+          + `Elles n'apparaissent donc ni dans les tableaux, ni dans les snapshots mensuels, ni dans les `
+          + `alertes de réception.`,
+        action: `Suivre ces pièces dans l'onglet Amazon. La liste des codes de ligne écartés se règle dans `
+          + `les paramètres du module.`,
         impact_dollars: 0,
-        donnees: { nb: hors.length, valeur: val, lignes: cfg.lignes_hors_perimetre },
+        donnees: ex,
       })
     }
 
