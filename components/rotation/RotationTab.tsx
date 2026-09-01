@@ -45,9 +45,11 @@ export interface FiltrePieces {
   abc: string
   q: string
   tri: string
+  /** Restreint aux pièces de l'action « Préparer la saison ». */
+  saison: boolean
 }
 
-const FILTRE_VIDE: FiltrePieces = { fournisseur: null, ligne: null, statut: '', abc: '', q: '', tri: 'valeur' }
+const FILTRE_VIDE: FiltrePieces = { fournisseur: null, ligne: null, statut: '', abc: '', q: '', tri: 'valeur', saison: false }
 
 /** Chaque agent pointe vers les pièces qu'il a jugées : un constat sans la liste
  *  derrière n'est qu'une opinion. */
@@ -56,7 +58,7 @@ const STATUT_PAR_AGENT: Record<string, { statut: string; tri: string }> = {
   stock_mort: { statut: 'mort,jamais_vendue', tri: 'morte' },
   rupture:    { statut: 'rupture', tri: 'urgence' },
   service:    { statut: 'rupture,sous_stock', tri: 'urgence' },
-  saison:     { statut: '', tri: 'saison' },
+  saison:     { statut: '', tri: 'saison' },   // le filtre saison est posé par ouvrirDepuisFinding
   reception:  { statut: '', tri: 'valeur' },
   wilson:     { statut: '', tri: 'ventes' },
   rotation:   { statut: '', tri: 'valeur' },
@@ -361,7 +363,7 @@ function VueActions({ t, kpis, data, fournisseurs, onVue, onPieces, onFinding }:
       montant: Number(kpis.valeur_saison || 0),
       libelleMontant: 'à commander en avance',
       nb: Number(kpis.nb_saison || 0),
-      filtre: { tri: 'saison' },
+      filtre: { tri: 'saison', saison: true },
     })
 
     if (nbRecep > 0) a.push({
@@ -872,7 +874,7 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
   setFiltre: (f: FiltrePieces) => void
   listeFournisseurs: string[]; listeLignes: string[]
 }) {
-  const { fournisseur, ligne, statut, abc, q, tri } = filtre
+  const { fournisseur, ligne, statut, abc, q, tri, saison } = filtre
   const maj = (p: Partial<FiltrePieces>) => setFiltre({ ...filtre, ...p })
 
   const [pieces, setPieces] = useState<any[]>([])
@@ -891,6 +893,7 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
     if (statut) p.set('statut', statut)
     if (abc) p.set('abc', abc)
     if (q.trim()) p.set('q', q.trim())
+    if (saison) p.set('saison', '1')
     try {
       const r = await fetch(`/api/rotation/pieces?${p}`)
       const j = await r.json()
@@ -898,7 +901,7 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
       setTotal(j.total || 0)
       setTotaux(j.totaux || null)
     } finally { setChargement(false) }
-  }, [fournisseur, ligne, statut, abc, q, tri, sens, page])
+  }, [fournisseur, ligne, statut, abc, q, tri, sens, page, saison])
 
   useEffect(() => {
     clearTimeout(debounce.current)
@@ -907,7 +910,7 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
   }, [charger, q])
 
   // Un changement de filtre remet en page 1 — sinon on tombe sur une page vide.
-  useEffect(() => { setPage(0) }, [fournisseur, ligne, statut, abc, q])
+  useEffect(() => { setPage(0) }, [fournisseur, ligne, statut, abc, q, saison])
 
   const onSort = (k: string) => {
     if (k === tri) setSens(s => (s === 'asc' ? 'desc' : 'asc'))
@@ -928,13 +931,14 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
     'ok': 'au vert',
   }
   const contexte = [
+    saison ? 'à prévoir pour la saison qui vient' : '',
     LIBELLE_STATUT[statut] || (statut ? statut.replace(/,/g, ' / ') : ''),
     fournisseur ? `chez ${fournisseur}` : '',
     ligne ? `ligne ${ligne}` : '',
     abc ? `classe ${abc}` : '',
     q ? `recherche « ${q} »` : '',
   ].filter(Boolean).join(' · ')
-  const filtreActif = !!(fournisseur || ligne || statut || abc || q)
+  const filtreActif = !!(fournisseur || ligne || statut || abc || q || saison)
 
   const paramsExport = new URLSearchParams({ type: 'pieces' })
   if (fournisseur) paramsExport.set('fournisseur', fournisseur)
@@ -955,6 +959,7 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
                 {totaux.exces_valeur > 0 && <> · <strong style={{ color: t.C.yellow }}>{argCourt(totaux.exces_valeur)}</strong> d'excédent</>}
                 {totaux.valeur_morte > 0 && <> · <strong style={{ color: t.C.red }}>{argCourt(totaux.valeur_morte)}</strong> de stock mort</>}
                 {totaux.qte_a_commander > 0 && <> · <strong style={{ color: t.C.blue }}>{n0(totaux.qte_a_commander)} u</strong> à commander ({argCourt(totaux.valeur_a_commander)})</>}
+                {totaux.besoin_saison > 0 && <> · <strong style={{ color: t.C.yellow }}>{n0(totaux.besoin_saison)} u</strong> pour la saison ({argCourt(totaux.valeur_saison)})</>}
               </div>
             )}
             <div style={{ fontSize: 11, color: t.sub, marginTop: 4 }}>

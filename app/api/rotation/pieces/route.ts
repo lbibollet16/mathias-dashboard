@@ -27,6 +27,10 @@ export async function GET(req: NextRequest) {
     const abc = p.get('abc')
     const xyz = p.get('xyz')
     const q = (p.get('q') || '').trim()
+    // Même prédicat que l'action « Préparer la saison » : sans lui, le bouton
+    // promet 31 pièces et en ouvre 3 000 triées par besoin. Un compte annoncé
+    // doit ouvrir exactement ce qu'il annonce.
+    const saison = p.get('saison') === '1'
     const tri = TRIS[p.get('tri') || 'valeur'] || 'valeur_stock'
     const sens = p.get('sens') === 'asc'
     const page = Math.max(0, parseInt(p.get('page') || '0', 10))
@@ -37,6 +41,10 @@ export async function GET(req: NextRequest) {
       .select('*', { count: 'exact' })
       .eq('run_id', run.run_id)
 
+    if (saison) {
+      req_ = req_.gt('besoin_saison', 0).gt('indice_horizon', 1.15)
+        .not('statut', 'in', '(rupture,sous_stock,sur_commande,mort,jamais_vendue,dormant)')
+    }
     if (fournisseur) req_ = req_.eq('fournisseur', fournisseur)
     if (ligne) req_ = req_.eq('code_ligne', ligne)
     if (statut) req_ = req_.in('statut', statut.split(','))
@@ -59,7 +67,7 @@ export async function GET(req: NextRequest) {
     // arrive ici depuis « Voir les 1 149 pièces », la première question est
     // « ça représente combien ? ». Sans ça, l'écran ne montre que 100 lignes
     // sans jamais dire ce que pèse l'ensemble.
-    const totaux = await totauxFiltre(run.run_id, { fournisseur, ligne, statut, abc, xyz, q }, count || 0)
+    const totaux = await totauxFiltre(run.run_id, { fournisseur, ligne, statut, abc, xyz, q, saison }, count || 0)
 
     return NextResponse.json({
       pret: true, pieces: data || [], total: count || 0, page, taille, totaux,
@@ -83,20 +91,25 @@ export async function GET(req: NextRequest) {
 async function totauxFiltre(
   runId: string,
   f: { fournisseur: string | null; ligne: string | null; statut: string | null
-       abc: string | null; xyz: string | null; q: string },
+       abc: string | null; xyz: string | null; q: string; saison?: boolean },
   nbLignes: number,
 ) {
   if (nbLignes === 0 || nbLignes > 25_000) return null
 
-  const COLS = 'valeur_stock, exces_valeur, valeur_morte, valeur_dormante, qte_a_commander, cout_unitaire, ventes_12m_cogs'
+  const COLS = 'valeur_stock, exces_valeur, valeur_morte, valeur_dormante, qte_a_commander, cout_unitaire, ventes_12m_cogs, besoin_saison'
   const t = {
     nb: 0, valeur_stock: 0, exces_valeur: 0, valeur_morte: 0, valeur_dormante: 0,
     qte_a_commander: 0, valeur_a_commander: 0, ventes_12m_cogs: 0,
+    besoin_saison: 0, valeur_saison: 0,
   }
 
   let from = 0
   while (from < nbLignes) {
     let q = supabaseAdmin.from('sc_analyse_pieces').select(COLS).eq('run_id', runId)
+    if (f.saison) {
+      q = q.gt('besoin_saison', 0).gt('indice_horizon', 1.15)
+        .not('statut', 'in', '(rupture,sous_stock,sur_commande,mort,jamais_vendue,dormant)')
+    }
     if (f.fournisseur) q = q.eq('fournisseur', f.fournisseur)
     if (f.ligne) q = q.eq('code_ligne', f.ligne)
     if (f.statut) q = q.in('statut', f.statut.split(','))
@@ -119,6 +132,9 @@ async function totauxFiltre(
       const aCmd = Number(r.qte_a_commander) || 0
       t.qte_a_commander += aCmd
       t.valeur_a_commander += aCmd * (Number(r.cout_unitaire) || 0)
+      const bs = Number(r.besoin_saison) || 0
+      t.besoin_saison += bs
+      t.valeur_saison += bs * (Number(r.cout_unitaire) || 0)
     }
     if (data.length < 1000) break
     from += 1000
