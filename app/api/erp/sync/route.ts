@@ -111,6 +111,12 @@ export async function POST() {
     const lotsAMaj: { id: number; qte_restante: number }[] = []
     let lotCtr = 0
 
+    // Toutes les entrées de stock du jour, TOUS fournisseurs confondus —
+    // alimente sc_receptions et l'alerte « commande trop importante ».
+    // lots_retournables ne couvre que les 11 fournisseurs ayant une politique
+    // de retour : il ne pouvait pas servir de base à cette alerte.
+    const receptionsDetectees: ReceptionDetectee[] = []
+
     for (const [pk, info] of stockTraction.entries()) {
       // Préparer stock_aujourdhui (remplace l'ancien)
       nouveauStockAuj.push({ code_piece: pk, quantite: info.stock, qty_total: info.qtyTotal || info.stock })
@@ -129,14 +135,21 @@ export async function POST() {
         })
       }
 
-      // Lots retournables — comparer stock_hier vs stock_aujourdhui
-      const pol = mapPol.get(info.idF)
-      if (!pol || modeInit) continue
+      // Comparer stock_hier vs Traction du jour. Le diff sert à DEUX choses :
+      // le suivi des lots retournables (limité aux fournisseurs sous politique)
+      // et le journal des réceptions (tous fournisseurs).
+      if (modeInit) continue
       if (!mapHier.has(pk)) continue
 
       const qtyHier = mapHier.get(pk)!
       const qtyAuj = info.qtyTotal || info.stock
       const diff = qtyAuj - qtyHier  // positif = réception, négatif = vente/sortie
+
+      if (diff > 0) receptionsDetectees.push({ pk, info, diff, avant: qtyHier, apres: qtyAuj })
+
+      // Lots retournables — uniquement pour les fournisseurs ayant une politique.
+      const pol = mapPol.get(info.idF)
+      if (!pol) continue
 
       if (diff > 0) {
         lotCtr++
@@ -184,6 +197,19 @@ export async function POST() {
     // 7. Lots
     if (lotsAAjouter.length > 0) await supabaseAdmin.from('lots_retournables').insert(lotsAAjouter)
     for (const m of lotsAMaj) await supabaseAdmin.from('lots_retournables').update({ qte_restante: m.qte_restante }).eq('id', m.id)
+
+    // 7b. Journal des réceptions + alerte « commande trop importante ».
+    //   Tout est encapsulé dans un try/catch : c'est un module d'analyse greffé
+    //   sur le sync, il ne doit JAMAIS faire échouer la synchronisation des
+    //   stocks, des lots ou des négatifs dont dépendent les autres onglets.
+    try {
+      const nbRecep = await enregistrerReceptions(receptionsDetectees, todayStr)
+      if (nbRecep.total > 0) {
+        log.push(`${nbRecep.total} réceptions journalisées, dont ${nbRecep.alertes} en alerte`)
+      }
+    } catch (e: any) {
+      log.push(`⚠️ Journal des réceptions ignoré : ${e.message}`)
+    }
 
     // 8. Négatifs
     const { data: negExistants } = await supabaseAdmin.from('memoire_negatifs').select('code_piece, date_apparition')
@@ -506,4 +532,139 @@ export async function POST() {
   } catch (e: any) {
     return NextResponse.json({ success: false, erreur: e.message, log }, { status: 500 })
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Journal des réceptions (module Rotation & Fournisseurs)
+// ═══════════════════════════════════════════════════════════════════════
+
+interface ReceptionDetectee {
+  pk: string
+  info: { stock: number; qtyTotal: number; idF: string; nomF: string; ligne: string; cost: number; desc: string }
+  diff: number
+  avant: number
+  apres: number
+}
+
+/**
+ * Écrit chaque entrée de stock détectée dans sc_receptions et évalue les quatre
+ * déclencheurs d'alerte (couverture après réception, valeur en dollars, multiple
+ * du lot économique de Wilson, pièce sans historique de vente).
+ *
+ * Deux subtilités :
+ *
+ *  1. Le sync tourne 2×/jour. Deux réceptions du même code le même jour doivent
+ *     s'ADDITIONNER, pas s'écraser : on relit la ligne du jour et on cumule
+ *     avant de réévaluer l'alerte sur le total.
+ *
+ *  2. La demande est calculée sur les mois RÉELLEMENT importés de la fenêtre
+ *     (historique_ventes a des trous), en réutilisant la liste de mois du
+ *     dernier run d'analyse pour rester cohérent avec l'onglet.
+ */
+async function enregistrerReceptions(
+  receptions: ReceptionDetectee[],
+  todayStr: string,
+): Promise<{ total: number; alertes: number }> {
+  if (receptions.length === 0) return { total: 0, alertes: 0 }
+
+  const { chargerConfig, dernierRun } = await import('@/lib/supply-chain-db')
+  const { evaluerReception, fenetreMois, moisPrecedent } = await import('@/lib/supply-chain')
+
+  const cfg = await chargerConfig()
+  const run = await dernierRun()
+
+  const moisFin = run?.kpis?.mois_fin || moisPrecedent(new Date())
+  const fenetre = fenetreMois(moisFin, 12)
+  // Mois réellement importés : sans cette liste on diviserait par 12 alors que
+  // seuls 7 mois sont chargés, et la demande serait sous-évaluée de moitié.
+  const moisPresents: string[] = Array.isArray(run?.kpis?.mois_presents) && run.kpis.mois_presents.length > 0
+    ? run.kpis.mois_presents
+    : fenetre
+  const nbMois = Math.max(1, moisPresents.length)
+
+  // Ventes de la fenêtre pour les seuls codes reçus.
+  const codes = receptions.map(r => r.pk)
+  const ventes = new Map<string, number>()
+  for (let i = 0; i < codes.length; i += 200) {
+    const { data } = await supabaseAdmin
+      .from('historique_ventes').select('code_piece, quantite, mois')
+      .in('code_piece', codes.slice(i, i + 200))
+      .gte('mois', fenetre[0]).lte('mois', moisFin)
+    for (const v of data || []) {
+      ventes.set(v.code_piece, (ventes.get(v.code_piece) || 0) + (Number(v.quantite) || 0))
+    }
+  }
+
+  // Réceptions déjà enregistrées aujourd'hui pour ces codes (2e passage du jour).
+  const dejaAuj = new Map<string, any>()
+  for (let i = 0; i < codes.length; i += 200) {
+    const { data } = await supabaseAdmin
+      .from('sc_receptions').select('*')
+      .eq('date_reception', todayStr)
+      .in('code_piece', codes.slice(i, i + 200))
+    for (const r of data || []) dejaAuj.set(r.code_piece, r)
+  }
+
+  const rows: any[] = []
+  let alertes = 0
+
+  for (const r of receptions) {
+    const precedent = dejaAuj.get(r.pk)
+    const qteRecue = r.diff + (precedent ? Number(precedent.qte_recue) || 0 : 0)
+    const stockAvant = precedent ? Number(precedent.stock_avant) : r.avant
+    const stockApres = r.apres
+
+    const cout = Number(r.info.cost) || 0
+    const ventes12 = ventes.get(r.pk) || 0
+    const demandeMens = ventes12 / nbMois
+
+    // Wilson : Q* = √(2·D·S/H), H = taux de possession × coût unitaire.
+    const D = demandeMens * 12
+    const H = cfg.taux_possession * cout
+    let eoq = 0
+    if (D > 0 && H > 0) eoq = Math.max(1, Math.round(Math.min(Math.sqrt((2 * D * cfg.cout_commande) / H), D)))
+
+    const ev = evaluerReception({
+      qteRecue, coutUnitaire: cout, stockAvant, stockApres,
+      demandeMens, aVenduSur12m: ventes12 > 0, eoq, cfg,
+    })
+    if (ev.alerte) alertes++
+
+    rows.push({
+      date_reception: todayStr,
+      code_piece: r.pk,
+      description: r.info.desc || null,
+      fournisseur: r.info.nomF || 'Non assigné',
+      code_ligne: r.info.ligne || 'N/A',
+      qte_recue: qteRecue,
+      cout_unitaire: cout,
+      valeur: qteRecue * cout,
+      stock_avant: stockAvant,
+      stock_apres: stockApres,
+      demande_mens: demandeMens,
+      couverture_avant: ev.couverture_avant,
+      couverture_apres: ev.couverture_apres,
+      eoq,
+      alerte: ev.alerte,
+      severite: ev.severite,
+      motifs: ev.motifs,
+      exces_unites: ev.exces_unites,
+      exces_valeur: ev.exces_valeur,
+      // Une réception déjà traitée par un humain garde son statut : le 2e sync
+      // du jour ne doit pas remettre à « nouveau » ce qui vient d'être justifié.
+      statut: precedent?.statut && precedent.statut !== 'nouveau' ? precedent.statut : 'nouveau',
+      vu_le: precedent?.vu_le || null,
+      vu_par: precedent?.vu_par || null,
+      commentaire: precedent?.commentaire || null,
+    })
+  }
+
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await supabaseAdmin
+      .from('sc_receptions')
+      .upsert(rows.slice(i, i + 500), { onConflict: 'date_reception,code_piece' })
+    if (error) throw new Error(error.message)
+  }
+
+  return { total: rows.length, alertes }
 }

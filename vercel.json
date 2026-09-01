@@ -8,6 +8,8 @@
     { "path": "/api/cron/sync-settlements", "schedule": "0 12 * * *" },
     { "path": "/api/amazon/sp-api/ledger-sync", "schedule": "30 12 * * *" },
     { "path": "/api/amazon/sp-api/sync-all", "schedule": "0 11 * * *" },
-    { "path": "/api/amazon/claims/detect", "schedule": "0 13 * * *" }
+    { "path": "/api/amazon/claims/detect", "schedule": "0 13 * * *" },
+    { "path": "/api/rotation/snapshot", "schedule": "0 9 1 * *" },
+    { "path": "/api/rotation/recalculer", "schedule": "45 11 * * *" }
   ]
 }

@@ -145,6 +145,13 @@ const CATEGORIES: Category[] = [
         color: '#0891b2',
       },
       {
+        label: 'Rotation & Fournisseurs',
+        icon: '🔄',
+        description: 'Stock par fournisseur et code de ligne, roulement, agents supply chain',
+        href: '/?tab=rotation',
+        color: '#7c3aed',
+      },
+      {
         label: 'Pièces Négatives',
         icon: '🔴',
         description: 'Suivi des pièces en négatif',

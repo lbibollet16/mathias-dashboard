@@ -22,3 +22,9 @@ tsconfig.tsbuildinfo
 
 # Projets source deposes pour integration (ne pas commiter)
 /design/
+
+# Rapports de vente Traction telecharges chaque mois (donnees metier)
+/analyse vente 2891/
+
+# Cache local du CLI Supabase
+/supabase/.temp/
