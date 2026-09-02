@@ -175,6 +175,15 @@ export interface AnalysePiece {
   valeur_dormante: number
   score_urgence: number
 
+  // Enrichissement venu du catalogue fournisseur (sc_catalogue_externe)
+  marque: string | null
+  categorie_nom: string | null
+  categorie_chemin: string | null
+  categorie_univers: string | null
+  dispo_fournisseur: number | null
+  popularite: number | null
+  discontinue: boolean
+
   // Saisonnalité
   indice_saison: number        // indice du délai à venir — sert au point de commande
   indice_horizon: number       // indice moyen sur l'horizon de préparation — sert au tri « saison »
@@ -186,8 +195,10 @@ export interface AnalysePiece {
   serie_12m: number[]
 }
 
+export type DimensionGroupe = 'fournisseur' | 'ligne' | 'categorie' | 'marque'
+
 export interface AnalyseGroupe {
-  dimension: 'fournisseur' | 'ligne'
+  dimension: DimensionGroupe
   cle: string
   id_fournisseur: string | null
   nb_pieces: number
@@ -393,7 +404,7 @@ export function parseTractionCSV(
       continue
     }
 
-    out.set(pk, {
+    const candidat: TractionPiece = {
       pk,
       desc: clean(iDesc),
       idFournisseur: idF,
@@ -409,7 +420,22 @@ export function parseTractionCSV(
       qteMin: num(clean(iMin)),
       qteMax: num(clean(iMax)),
       localisation: clean(iLoc),
-    })
+    }
+
+    // Traction sort 1 868 PKCode en DOUBLE (1 976 lignes en trop) : la même
+    // pièce, parfois avec un coût à 0 sur une ligne et le vrai coût sur
+    // l'autre. Un simple `set` gardait la dernière au hasard de l'ordre du
+    // fichier — 67 pièces en stock se retrouvaient ainsi avec un coût nul,
+    // donc une valeur nulle, un EOQ nul et une rotation nulle : invisibles
+    // dans toute liste triée par valeur. 29 203 $ (1,37 % de l'inventaire)
+    // manquaient à l'appel.
+    //
+    // On garde donc la ligne la plus informative : celle qui porte du stock
+    // d'abord, celle qui porte un coût ensuite.
+    const existant = out.get(pk)
+    if (!existant) { out.set(pk, candidat); continue }
+    const score = (p: TractionPiece) => (p.qty !== 0 ? 2 : 0) + (p.cout > 0 ? 1 : 0)
+    if (score(candidat) > score(existant)) out.set(pk, candidat)
   }
   return { pieces: out, exclusion }
 }
@@ -520,6 +546,16 @@ export interface EntreeAnalyse {
   moisFin?: string
   /** Ce que le parsing du feed a écarté (lignes Amazon). Pour l'afficher. */
   exclusion?: ExclusionTraction
+  /** Catégorie, marque et disponibilité fournisseur, par code pièce. */
+  catalogue?: Map<string, {
+    marque: string | null
+    categorie_nom: string | null
+    categorie_chemin: string | null
+    categorie_univers: string | null
+    dispo_fournisseur: number | null
+    popularite: number | null
+    discontinue: boolean
+  }>
 }
 
 export interface ResultatAnalyse {
@@ -706,6 +742,7 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
       tendance = p > 0 ? (r - p) / p : (r > 0 ? 1 : 0)
     }
 
+    const cat = e.catalogue?.get(code)
     const cout = t?.cout ?? 0
     const valeurStock = stock * cout
 
@@ -872,6 +909,13 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
       valeur_morte: valeurMorte,
       valeur_dormante: valeurDormante,
       score_urgence: scoreUrgence,
+      marque: cat?.marque ?? null,
+      categorie_nom: cat?.categorie_nom ?? null,
+      categorie_chemin: cat?.categorie_chemin ?? null,
+      categorie_univers: cat?.categorie_univers ?? null,
+      dispo_fournisseur: cat?.dispo_fournisseur ?? null,
+      popularite: cat?.popularite ?? null,
+      discontinue: cat?.discontinue ?? false,
       indice_saison: indiceDelai,
       indice_horizon: indiceHorizon,
       source_saison: sourceSaison,
@@ -908,10 +952,18 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
 
   // ── Agrégats par fournisseur et par code de ligne ────────────────────
   const groupes: AnalyseGroupe[] = []
-  for (const dimension of ['fournisseur', 'ligne'] as const) {
+  // Quatre regroupements du MÊME calcul : seul le critère change. Catégorie et
+  // marque ne couvrent que les pièces enrichies par le catalogue fournisseur —
+  // les autres tombent dans « (non catégorisé) », ce qui est en soi une mesure
+  // utile de ce qu'il reste à classifier.
+  for (const dimension of ['fournisseur', 'ligne', 'categorie', 'marque'] as const) {
     const par = new Map<string, AnalysePiece[]>()
     for (const p of pieces) {
-      const cle = dimension === 'fournisseur' ? p.fournisseur : p.code_ligne
+      const cle =
+        dimension === 'fournisseur' ? p.fournisseur
+        : dimension === 'ligne' ? p.code_ligne
+        : dimension === 'categorie' ? (p.categorie_chemin || '(non catégorisé)')
+        : (p.marque || '(sans marque)')
       const arr = par.get(cle)
       if (arr) arr.push(p); else par.set(cle, [p])
     }

@@ -31,6 +31,9 @@ export async function GET(req: NextRequest) {
     // promet 31 pièces et en ouvre 3 000 triées par besoin. Un compte annoncé
     // doit ouvrir exactement ce qu'il annonce.
     const saison = p.get('saison') === '1'
+    const categorie = p.get('categorie')
+    const marque = p.get('marque')
+    const univers = p.get('univers')
     const tri = TRIS[p.get('tri') || 'valeur'] || 'valeur_stock'
     const sens = p.get('sens') === 'asc'
     const page = Math.max(0, parseInt(p.get('page') || '0', 10))
@@ -47,6 +50,9 @@ export async function GET(req: NextRequest) {
     }
     if (fournisseur) req_ = req_.eq('fournisseur', fournisseur)
     if (ligne) req_ = req_.eq('code_ligne', ligne)
+    if (categorie) req_ = req_.eq('categorie_chemin', categorie)
+    if (marque) req_ = req_.eq('marque', marque)
+    if (univers) req_ = req_.eq('categorie_univers', univers)
     if (statut) req_ = req_.in('statut', statut.split(','))
     if (abc) req_ = req_.in('classe_abc', abc.split(','))
     if (xyz) req_ = req_.in('classe_xyz', xyz.split(','))
@@ -67,7 +73,8 @@ export async function GET(req: NextRequest) {
     // arrive ici depuis « Voir les 1 149 pièces », la première question est
     // « ça représente combien ? ». Sans ça, l'écran ne montre que 100 lignes
     // sans jamais dire ce que pèse l'ensemble.
-    const totaux = await totauxFiltre(run.run_id, { fournisseur, ligne, statut, abc, xyz, q, saison }, count || 0)
+    const totaux = await totauxFiltre(run.run_id,
+      { fournisseur, ligne, statut, abc, xyz, q, saison, categorie, marque, univers }, count || 0)
 
     return NextResponse.json({
       pret: true, pieces: data || [], total: count || 0, page, taille, totaux,
@@ -91,7 +98,8 @@ export async function GET(req: NextRequest) {
 async function totauxFiltre(
   runId: string,
   f: { fournisseur: string | null; ligne: string | null; statut: string | null
-       abc: string | null; xyz: string | null; q: string; saison?: boolean },
+       abc: string | null; xyz: string | null; q: string; saison?: boolean
+       categorie?: string | null; marque?: string | null; univers?: string | null },
   nbLignes: number,
 ) {
   if (nbLignes === 0 || nbLignes > 25_000) return null
@@ -112,6 +120,9 @@ async function totauxFiltre(
     }
     if (f.fournisseur) q = q.eq('fournisseur', f.fournisseur)
     if (f.ligne) q = q.eq('code_ligne', f.ligne)
+    if (f.categorie) q = q.eq('categorie_chemin', f.categorie)
+    if (f.marque) q = q.eq('marque', f.marque)
+    if (f.univers) q = q.eq('categorie_univers', f.univers)
     if (f.statut) q = q.in('statut', f.statut.split(','))
     if (f.abc) q = q.in('classe_abc', f.abc.split(','))
     if (f.xyz) q = q.in('classe_xyz', f.xyz.split(','))

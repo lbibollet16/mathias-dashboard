@@ -79,6 +79,11 @@ const COLS_PIECE = [
   { cle: 'description', titre: 'Description' },
   { cle: 'fournisseur', titre: 'Fournisseur' },
   { cle: 'code_ligne', titre: 'Code de ligne' },
+  { cle: 'marque', titre: 'Marque' },
+  { cle: 'categorie_chemin', titre: 'Categorie' },
+  { cle: 'categorie_univers', titre: 'Univers' },
+  { cle: 'dispo_fournisseur', titre: 'Dispo fournisseur' },
+  { cle: 'discontinue', titre: 'Discontinuee (fournisseur)' },
   { cle: 'stock', titre: 'Stock' },
   { cle: 'stock_dispo', titre: 'Stock disponible' },
   { cle: 'qte_reserve', titre: 'Réservé' },
@@ -213,6 +218,9 @@ export async function GET(req: NextRequest) {
         let r = q.eq('run_id', run.run_id)
         if (fournisseur) r = r.eq('fournisseur', fournisseur)
         if (ligne) r = r.eq('code_ligne', ligne)
+        if (p.get('categorie')) r = r.eq('categorie_chemin', p.get('categorie'))
+        if (p.get('marque')) r = r.eq('marque', p.get('marque'))
+        if (p.get('univers')) r = r.eq('categorie_univers', p.get('univers'))
         const statut = p.get('statut')
         if (statut) r = r.in('statut', statut.split(','))
         return r.order('valeur_stock', { ascending: false })
@@ -221,10 +229,15 @@ export async function GET(req: NextRequest) {
       return reponseCSV(nom, versCSV(COLS_PIECE, rows))
     }
 
-    const dimension = type === 'lignes' ? 'ligne' : 'fournisseur'
+    // ?type=groupes&dimension=… , avec repli sur les anciens noms pour ne pas
+    // casser un lien deja envoye par courriel.
+    const DIMS = ['fournisseur', 'ligne', 'categorie', 'marque']
+    const dimension = DIMS.includes(p.get('dimension') || '')
+      ? p.get('dimension')!
+      : (type === 'lignes' ? 'ligne' : 'fournisseur')
     const rows = await lireTout<any>('sc_analyse_groupes', '*', q =>
       q.eq('run_id', run.run_id).eq('dimension', dimension).order('valeur_stock', { ascending: false }))
-    return reponseCSV(`${type}_${jour}.csv`, versCSV(COLS_GROUPE, rows))
+    return reponseCSV(`${dimension}s_${jour}.csv`, versCSV(COLS_GROUPE, rows))
 
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message }, { status: 500 })

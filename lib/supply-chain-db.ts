@@ -201,6 +201,30 @@ export async function chargerNegatifs(): Promise<Map<string, number>> {
   return m
 }
 
+/**
+ * Catégorie, marque et disponibilité fournisseur, poussées par
+ * mathias-power-parts. Couvre 19 371 pièces sur 127 000 — le reste tombera
+ * dans « (non catégorisé) », ce qui mesure exactement ce qu'il reste à
+ * classifier.
+ */
+export async function chargerCatalogueExterne() {
+  const rows = await lireTout<any>('sc_catalogue_externe',
+    'code_piece, marque, categorie_nom, categorie_chemin, categorie_univers, stock_fournisseur, popularite, discontinue')
+  const m = new Map<string, any>()
+  for (const r of rows) {
+    m.set(String(r.code_piece).trim(), {
+      marque: r.marque ?? null,
+      categorie_nom: r.categorie_nom ?? null,
+      categorie_chemin: r.categorie_chemin ?? null,
+      categorie_univers: r.categorie_univers ?? null,
+      dispo_fournisseur: r.stock_fournisseur === null ? null : Number(r.stock_fournisseur),
+      popularite: r.popularite === null ? null : Number(r.popularite),
+      discontinue: !!r.discontinue,
+    })
+  }
+  return m
+}
+
 export async function chargerAlertesRecep(): Promise<Map<string, number>> {
   const rows = await lireTout<any>(
     'sc_receptions', 'fournisseur',

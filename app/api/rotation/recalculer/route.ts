@@ -11,6 +11,7 @@ import { analyser, Finding } from '@/lib/supply-chain'
 import {
   chargerConfig, chargerParamsFournisseurs, chargerTraction, chargerVentes,
   chargerSnapshots, chargerRetournables, chargerNegatifs, chargerAlertesRecep,
+  chargerCatalogueExterne,
   ouvrirRun, ecrireResultats, lireTout,
 } from '@/lib/supply-chain-db'
 
@@ -28,10 +29,11 @@ export async function POST(req: NextRequest) {
     runId = await ouvrirRun(declencheur)
 
     const [cfg, paramsFournisseur, { ventes, moisDisponibles },
-           { snapshots, moisSnapshots }, retournables, negatifs, alertesRecep] =
+           { snapshots, moisSnapshots }, retournables, negatifs, alertesRecep, catalogue] =
       await Promise.all([
         chargerConfig(), chargerParamsFournisseurs(), chargerVentes(),
         chargerSnapshots(), chargerRetournables(), chargerNegatifs(), chargerAlertesRecep(),
+        chargerCatalogueExterne(),
       ])
 
     // Les codes de ligne configurés (AMA…) sont écartés dès la lecture du feed :
@@ -40,7 +42,7 @@ export async function POST(req: NextRequest) {
 
     const res = analyser({
       traction, ventes, moisDisponibles, cfg, paramsFournisseur,
-      snapshots, moisSnapshots, retournables, negatifs, alertesRecep, exclusion,
+      snapshots, moisSnapshots, retournables, negatifs, alertesRecep, exclusion, catalogue,
     })
 
     // ── Agent réception ────────────────────────────────────────────────
