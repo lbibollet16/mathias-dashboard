@@ -28,3 +28,6 @@ tsconfig.tsbuildinfo
 
 # Cache local du CLI Supabase
 /supabase/.temp/
+
+# Scripts jetables de session
+.tmp-*

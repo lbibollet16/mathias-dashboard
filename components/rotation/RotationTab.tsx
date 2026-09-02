@@ -20,15 +20,14 @@ import {
   fmtArgentCourt,
 } from '@/components/meca/MecaUI'
 
-type Vue = 'actions' | 'fournisseurs' | 'lignes' | 'pieces' | 'agents' | 'receptions' | 'archives' | 'reglages'
+type Vue = 'actions' | 'groupes' | 'pieces' | 'agents' | 'receptions' | 'archives' | 'reglages'
 
 // « À faire » d'abord : c'est la seule vue qu'on doit avoir besoin d'ouvrir un
 // jour normal. Les autres sont là pour creuser quand on a une question précise.
 const VUES: { id: Vue; label: string }[] = [
   { id: 'actions', label: '🎯 À faire' },
   { id: 'pieces', label: '🔩 Pièces' },
-  { id: 'fournisseurs', label: '🏭 Fournisseurs' },
-  { id: 'lignes', label: '🏷️ Codes de ligne' },
+  { id: 'groupes', label: '🏭 Regroupements' },
   { id: 'receptions', label: '🚨 Réceptions' },
   { id: 'agents', label: '🔬 Analyse détaillée' },
   { id: 'archives', label: '🗄️ Archives' },
@@ -47,9 +46,23 @@ export interface FiltrePieces {
   tri: string
   /** Restreint aux pièces de l'action « Préparer la saison ». */
   saison: boolean
+  categorie: string | null
+  marque: string | null
+  univers: string | null
 }
 
-const FILTRE_VIDE: FiltrePieces = { fournisseur: null, ligne: null, statut: '', abc: '', q: '', tri: 'valeur', saison: false }
+const FILTRE_VIDE: FiltrePieces = {
+  fournisseur: null, ligne: null, statut: '', abc: '', q: '', tri: 'valeur', saison: false,
+  categorie: null, marque: null, univers: null,
+}
+
+/** Les quatre façons de regrouper le même stock. */
+const DIMENSIONS: { id: string; label: string; nom: string }[] = [
+  { id: 'fournisseur', label: '🏭 Fournisseur', nom: 'fournisseurs' },
+  { id: 'ligne', label: '🏷️ Code de ligne', nom: 'codes de ligne' },
+  { id: 'categorie', label: '📂 Catégorie', nom: 'catégories' },
+  { id: 'marque', label: '™ Marque', nom: 'marques' },
+]
 
 /** Chaque agent pointe vers les pièces qu'il a jugées : un constat sans la liste
  *  derrière n'est qu'une opinion. */
@@ -260,8 +273,11 @@ export default function RotationTab(props: Theme & { profil?: any }) {
 
       {vue === 'actions' && <VueActions t={t} kpis={kpis} data={data} fournisseurs={fournisseurs}
         onVue={setVue} onPieces={ouvrirPieces} onFinding={ouvrirDepuisFinding} />}
-      {vue === 'fournisseurs' && <VueGroupes t={t} titre="Stock par fournisseur" dimension="fournisseur" groupes={fournisseurs} onDrill={c => ouvrirPieces({ fournisseur: c })} />}
-      {vue === 'lignes' && <VueGroupes t={t} titre="Stock par code de ligne" dimension="ligne" groupes={lignes} onDrill={c => ouvrirPieces({ ligne: c })} />}
+      {vue === 'groupes' && <VueGroupes t={t} groupes={groupes} onDrill={(dim, c) => ouvrirPieces(
+        dim === 'fournisseur' ? { fournisseur: c }
+        : dim === 'ligne' ? { ligne: c }
+        : dim === 'categorie' ? { categorie: c }
+        : { marque: c })} />}
       {vue === 'pieces' && <VuePieces t={t} filtre={filtre} setFiltre={setFiltre}
         listeFournisseurs={fournisseurs.map((g: any) => g.cle)} listeLignes={lignes.map((g: any) => g.cle)} />}
       {vue === 'agents' && <VueAgents t={t} resume={data?.findings_par_agent || []} onFinding={ouvrirDepuisFinding} />}
@@ -707,9 +723,12 @@ const COLONNES_GROUPE: ColonneGroupe[] = [
     total: () => '—' },
 ]
 
-function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
-  t: Theme; titre: string; dimension: 'fournisseur' | 'ligne'; groupes: any[]; onDrill: (cle: string) => void
+function VueGroupes({ t, groupes, onDrill }: {
+  t: Theme; groupes: any[]; onDrill: (dimension: string, cle: string) => void
 }) {
+  // Le même stock, quatre découpes. Une seule vue plutôt que quatre onglets :
+  // c'est le même tableau, seul le regroupement change.
+  const [dimension, setDimension] = useState('fournisseur')
   const [tri, setTri] = useState('valeur_stock')
   const [sens, setSens] = useState<'asc' | 'desc'>('desc')
   const [q, setQ] = useState('')
@@ -722,8 +741,9 @@ function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
       (tout || c.cle) && !(c.fournisseurSeul && dimension !== 'fournisseur')),
     [tout, dimension])
 
+
   const filtres = useMemo(() => {
-    let l = groupes
+    let l = groupes.filter(g => g.dimension === dimension)
     if (!sansStock) l = l.filter(g => g.valeur_stock !== 0 || g.nb_pieces_stock > 0)
     if (pareto) l = l.filter(g => g.classe_pareto === pareto)
     if (q.trim()) {
@@ -736,7 +756,7 @@ function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
       const x = Number(av ?? -Infinity), y = Number(bv ?? -Infinity)
       return sens === 'asc' ? x - y : y - x
     })
-  }, [groupes, tri, sens, q, pareto, sansStock])
+  }, [groupes, dimension, tri, sens, q, pareto, sansStock])
 
   const totaux = useMemo(() => ({
     valeur: filtres.reduce((s, g) => s + g.valeur_stock, 0),
@@ -752,7 +772,8 @@ function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
     else { setTri(k); setSens('desc') }
   }
 
-  const nom = dimension === 'fournisseur' ? 'fournisseurs' : 'codes de ligne'
+  const nom = DIMENSIONS.find(d => d.id === dimension)?.nom ?? dimension
+  const titre = 'Stock par ' + (DIMENSIONS.find(d => d.id === dimension)?.label.replace(/^\S+\s/, '').toLowerCase() ?? dimension)
 
   return (
     <Carte t={t} style={{ padding: 0, overflow: 'hidden' }}>
@@ -768,8 +789,29 @@ function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
               Clique une ligne pour ouvrir ses pièces.
             </div>
           </div>
-          <a href={`/api/rotation/export?type=${dimension === 'fournisseur' ? 'fournisseurs' : 'lignes'}`}
+          <a href={`/api/rotation/export?type=groupes&dimension=${dimension}`}
             style={{ ...btnLien(t), textDecoration: 'none' }}>⬇ CSV</a>
+        </div>
+
+        {/* Le sélecteur de découpe : c'est lui qui rend un booking par
+            catégorie ou par marque possible, sans dupliquer l'écran. */}
+        <div className="rot-nocopy" style={{ display: 'flex', gap: 6, marginTop: 14, flexWrap: 'wrap' }}>
+          {DIMENSIONS.map(d => {
+            const actif = dimension === d.id
+            const nb = groupes.filter((g: any) => g.dimension === d.id).length
+            return (
+              <button key={d.id} onClick={() => setDimension(d.id)}
+                style={{
+                  padding: '7px 13px', borderRadius: 8, cursor: 'pointer', fontSize: 12.5,
+                  fontWeight: actif ? 800 : 600,
+                  border: `1px solid ${actif ? t.C.blue : t.bdr}`,
+                  background: actif ? (t.dark ? '#1a233a' : '#dbeafe') : t.card,
+                  color: actif ? t.C.blue : t.sub,
+                }}>
+                {d.label} <span style={{ opacity: .65, fontWeight: 500 }}>{nb}</span>
+              </button>
+            )
+          })}
         </div>
 
         <div className="rot-nocopy" style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -794,7 +836,7 @@ function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
           <thead style={{ background: t.thBg, position: 'sticky', top: 0 }}>
             <tr>
-              <ThTriable t={t} label={dimension === 'fournisseur' ? 'Fournisseur' : 'Code de ligne'}
+              <ThTriable t={t} label={DIMENSIONS.find(d => d.id === dimension)?.label.replace(/^\S+\s/, '') ?? 'Clé'}
                 colonne="cle" actif={tri} dir={sens} onSort={onSort} align="left" />
               {colonnes.map(c => (
                 <ThTriable key={c.id} t={t} label={c.titre} colonne={c.id} actif={tri} dir={sens} onSort={onSort} />
@@ -804,7 +846,7 @@ function VueGroupes({ t, titre, dimension, groupes, onDrill }: {
           </thead>
           <tbody>
             {filtres.map(g => (
-              <tr key={g.cle} onClick={() => onDrill(g.cle)}
+              <tr key={g.cle} onClick={() => onDrill(dimension, g.cle)}
                 style={{ borderTop: `1px solid ${t.bdr}`, cursor: 'pointer' }}
                 onMouseEnter={e => (e.currentTarget.style.background = t.hvr)}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
@@ -955,7 +997,7 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
   setFiltre: (f: FiltrePieces) => void
   listeFournisseurs: string[]; listeLignes: string[]
 }) {
-  const { fournisseur, ligne, statut, abc, q, tri, saison } = filtre
+  const { fournisseur, ligne, statut, abc, q, tri, saison, categorie, marque, univers } = filtre
   const maj = (p: Partial<FiltrePieces>) => setFiltre({ ...filtre, ...p })
 
   const [pieces, setPieces] = useState<any[]>([])
@@ -977,6 +1019,9 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
     if (abc) p.set('abc', abc)
     if (q.trim()) p.set('q', q.trim())
     if (saison) p.set('saison', '1')
+    if (categorie) p.set('categorie', categorie)
+    if (marque) p.set('marque', marque)
+    if (univers) p.set('univers', univers)
     try {
       const r = await fetch(`/api/rotation/pieces?${p}`)
       const j = await r.json()
@@ -984,7 +1029,7 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
       setTotal(j.total || 0)
       setTotaux(j.totaux || null)
     } finally { setChargement(false) }
-  }, [fournisseur, ligne, statut, abc, q, tri, sens, page, saison])
+  }, [fournisseur, ligne, statut, abc, q, tri, sens, page, saison, categorie, marque, univers])
 
   useEffect(() => {
     clearTimeout(debounce.current)
@@ -993,7 +1038,7 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
   }, [charger, q])
 
   // Un changement de filtre remet en page 1 — sinon on tombe sur une page vide.
-  useEffect(() => { setPage(0) }, [fournisseur, ligne, statut, abc, q, saison])
+  useEffect(() => { setPage(0) }, [fournisseur, ligne, statut, abc, q, saison, categorie, marque, univers])
 
   const onSort = (k: string) => {
     if (k === tri) setSens(s => (s === 'asc' ? 'desc' : 'asc'))
@@ -1018,15 +1063,21 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
     LIBELLE_STATUT[statut] || (statut ? statut.replace(/,/g, ' / ') : ''),
     fournisseur ? `chez ${fournisseur}` : '',
     ligne ? `ligne ${ligne}` : '',
+    categorie ? `catégorie « ${categorie} »` : '',
+    marque ? `marque ${marque}` : '',
+    univers ? `univers ${univers}` : '',
     abc ? `classe ${abc}` : '',
     q ? `recherche « ${q} »` : '',
   ].filter(Boolean).join(' · ')
-  const filtreActif = !!(fournisseur || ligne || statut || abc || q || saison)
+  const filtreActif = !!(fournisseur || ligne || statut || abc || q || saison || categorie || marque || univers)
 
   const paramsExport = new URLSearchParams({ type: 'pieces' })
   if (fournisseur) paramsExport.set('fournisseur', fournisseur)
   if (ligne) paramsExport.set('ligne', ligne)
   if (statut) paramsExport.set('statut', statut)
+  if (categorie) paramsExport.set('categorie', categorie)
+  if (marque) paramsExport.set('marque', marque)
+  if (univers) paramsExport.set('univers', univers)
 
   return (
     <Carte t={t} style={{ padding: 0, overflow: 'hidden' }}>
@@ -1073,6 +1124,14 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
             <option value="dormant">Dormant</option>
             <option value="sur_commande">Sur commande (non stockée)</option>
             <option value="ok">OK</option>
+          </select>
+          <select value={univers || ''} onChange={e => maj({ univers: e.target.value || null })} style={champ(t, 170)}>
+            <option value="">Tous les univers</option>
+            <option value="powersports">Powersports</option>
+            <option value="oem">OEM</option>
+            <option value="marine">Marine</option>
+            <option value="bike">Vélo</option>
+            <option value="auto">Auto</option>
           </select>
           <select value={abc} onChange={e => maj({ abc: e.target.value })} style={champ(t, 130)}>
             <option value="">ABC : tout</option>
@@ -1147,7 +1206,14 @@ function VuePieces({ t, filtre, setFiltre, listeFournisseurs, listeLignes }: {
                   </div>
                   <div style={{ fontSize: 11, color: t.sub, marginTop: 1 }}>
                     {p.fournisseur} · ligne {p.code_ligne}
+                    {p.marque && <> · <strong style={{ color: t.C.blue }}>{p.marque}</strong></>}
                   </div>
+                  {(p.categorie_chemin || p.discontinue) && (
+                    <div style={{ fontSize: 10.5, color: t.sub, marginTop: 2, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                      {p.categorie_chemin && <span>📂 {p.categorie_chemin}</span>}
+                      {p.discontinue && <Badge t={t} couleur={t.C.red}>discontinuée</Badge>}
+                    </div>
+                  )}
                 </div>
 
                 {/* Situation, en toutes lettres */}
