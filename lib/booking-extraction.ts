@@ -20,7 +20,7 @@
  * sc_booking_imports en « a valider ». C'est un humain qui la promeut en
  * programme actif.
  *
- * Requiert AI_GATEWAY_API_KEY dans l'env.
+ * L'acces passe par lib/claude.ts : API Anthropic directe, gateway en secours.
  */
 
 import { z } from 'zod'
@@ -35,12 +35,27 @@ import { extraireJSON } from '@/lib/claude'
 // Le schema de sortie — il calque sc_booking_programmes / _paliers / _bonus
 // ═══════════════════════════════════════════════════════════════════════
 
-const AxeEnum = z.enum(['tout', 'categorie', 'marque', 'ligne', 'codes'])
-
-const EcheanceSchema = z.object({
-  part: z.number().describe('Fraction de la facture, entre 0 et 1. Les parts somment a 1.'),
-  jours: z.number().describe('Jours entre la facturation et ce versement.'),
-})
+/**
+ * UN SCHEMA VOLONTAIREMENT PLAT.
+ *
+ * Apres avoir supprime les unions, l'API a oppose sa seconde limite :
+ * « The compiled grammar is too large, which would cause performance issues.
+ * Simplify your tool schemas. » Le cout vient des TABLEAUX D'OBJETS IMBRIQUES
+ * — un echeancier et des sous-minimums dans chaque palier, eux-memes dans un
+ * tableau de paliers — et des enumerations, qui multiplient les productions
+ * de la grammaire.
+ *
+ * Ces deux structures deviennent donc des chaines compactes, que `normaliser`
+ * reconvertit en objets. Le modele les ecrit sans peine, l'analyse est
+ * deterministe, et la grammaire retombe a plat.
+ *
+ * L'axe redevient une chaine libre validee cote code : une enumeration de
+ * cinq valeurs repetee dans trois schemas coutait cher pour une contrainte
+ * qu'un `if` verifie aussi bien.
+ */
+const AXES = ['tout', 'categorie', 'marque', 'ligne', 'codes'] as const
+const AxeEnum = z.string().describe(
+  'Un seul de : tout, categorie, marque, ligne, codes.')
 
 /**
  * AUCUN CHAMP N'EST `nullable` DANS CE SCHEMA, ET C'EST DELIBERE.
@@ -61,13 +76,6 @@ const EcheanceSchema = z.object({
  * reste du code — et les colonnes DATE de la base — ne voient jamais passer
  * une chaine vide.
  */
-const SousMinimumSchema = z.object({
-  axe: AxeEnum,
-  cible: z.array(z.string()),
-  montant: z.number(),
-  libelle: z.string().describe('Vide si le document ne nomme pas cette famille.'),
-})
-
 const PalierSchema = z.object({
   bareme: z.string().describe('Nom de la grille. « global » quand le programme n en a qu une.'),
   axe: AxeEnum,
@@ -78,8 +86,15 @@ const PalierSchema = z.object({
   seuil_qte: z.number().describe('ZERO si le seuil est en dollars. Rempli UNIQUEMENT si le seuil est en unites.'),
   seuil_sur: z.enum(['groupe', 'commande']),
   escompte_pct: z.number(),
-  sous_minimums: z.array(SousMinimumSchema),
-  echeancier: z.array(EcheanceSchema),
+  sous_minimums: z.string().describe(
+    'Conditions supplementaires, sous la forme « axe:cible1,cible2=montant », separees par « ; ». ' +
+    'Exemple : « categorie:Filtre,Plaquette,Courroie=3000 » pour « dont 3 000 $ de pieces ' +
+    'd entretien ». Chaine vide s il n y en a pas.'),
+  echeancier: z.string().describe(
+    'Les versements, sous la forme « part@jours », separes par « ; ». La part est une fraction ' +
+    'entre 0 et 1, les jours comptent depuis la facturation. « net 30 » -> « 1@30 ». ' +
+    '« 1/3 a 180, 210 et 240 jours » -> « 0.333@180;0.333@210;0.334@240 ». Chaine vide si le ' +
+    'document ne dit rien des termes de paiement.'),
   franco_port: z.boolean(),
   notes: z.string().describe('Vide s il n y a rien a preciser.'),
 })
@@ -142,7 +157,13 @@ type Nullifie<T, K extends keyof T> = Omit<T, K> & { [P in K]: T[P] | null }
 type PalierBrut = z.infer<typeof PalierSchema>
 type BonusBrut = z.infer<typeof BonusSchema>
 
-export type PalierExtrait = Nullifie<PalierBrut, 'niveau' | 'seuil_qte' | 'notes'>
+/** La forme qu'attend la base, une fois les chaines compactes redeployees. */
+export interface SousMinimum { axe: string; cible: string[]; montant: number; libelle: string | null }
+export interface Echeance { part: number; jours: number }
+
+export type PalierExtrait =
+  Omit<Nullifie<PalierBrut, 'niveau' | 'seuil_qte' | 'notes'>, 'sous_minimums' | 'echeancier'>
+  & { sous_minimums: SousMinimum[]; echeancier: Echeance[] }
 export type BonusExtrait = Nullifie<BonusBrut, 'avant_le' | 'jours' | 'notes'>
 
 /**
@@ -194,14 +215,18 @@ seuil_sur : "groupe" quand le seuil se mesure sur le sous-ensemble du bareme ; "
 
 seuil_qte : a remplir UNIQUEMENT si le seuil est exprime en UNITES ("une commande de plus de 100 batteries"). Sinon laisse null et mets le montant en dollars dans seuil_montant.
 
-sous_minimums : conditions supplementaires a remplir pour debloquer le palier. "15 000 $ au total DONT 3 000 $ de pieces d'entretien" -> seuil_montant 15000, et un sous_minimum {axe:"categorie", cible:["Filtre","Plaquette","Courroie"], montant:3000, libelle:"pieces d'entretien"}.
+sous_minimums : conditions supplementaires a remplir pour debloquer le palier, sous forme de CHAINE COMPACTE « axe:cible1,cible2=montant », plusieurs separees par « ; ».
+  "15 000 $ au total DONT 3 000 $ de pieces d'entretien"
+  -> seuil_montant 15000, et sous_minimums "categorie:Filtre,Plaquette,Courroie=3000"
+  Chaine vide s'il n'y a aucune condition supplementaire.
 
-echeancier : les termes de paiement du palier, en PARTS et en JOURS depuis la facturation.
-  · "net 30" -> [{part:1, jours:30}]
-  · "90 jours, 3 paiements" -> [{part:0.3333,jours:30},{part:0.3333,jours:60},{part:0.3334,jours:90}]
-  · "1/3 avril 2027, 1/3 mai 2027, 1/3 juin 2027" -> CONVERTIS les dates calendaires en jours depuis la date d'ouverture du programme. Si le programme ouvre en aout 2026, avril 2027 est a environ 240 jours.
-  · "1/2 le 15 avril et 1/2 le 15 mai 2027" -> deux parts de 0.5.
-  Laisse [] si le document ne dit rien des termes.
+echeancier : les termes de paiement du palier, en CHAINE COMPACTE « part@jours », plusieurs separees par « ; ». La part est une fraction entre 0 et 1 ; les jours comptent depuis la facturation.
+  · "net 30"                    -> "1@30"
+  · "90 jours, 3 paiements"     -> "0.333@30;0.333@60;0.334@90"
+  · "1/2 le 15 avril et 1/2 le 15 mai 2027" -> "0.5@210;0.5@240"
+  · "1/3 avril 2027, 1/3 mai 2027, 1/3 juin 2027" -> CONVERTIS les dates calendaires en jours depuis l'ouverture du programme. Si le programme ouvre en aout 2026, avril 2027 est a environ 240 jours -> "0.333@240;0.333@270;0.334@300".
+  Chaine vide si le document ne dit rien des termes.
+  Les parts doivent totaliser 1.
 
 BONUS — tout ce qui ne rentre pas dans une grille :
   · "hatif" : un escompte conditionne a une DATE ("3 % si recu au 15 septembre", "+5 % pour commande hative avant le 10 octobre").
@@ -299,7 +324,10 @@ export async function extraireProgramme(d: DemandeExtraction): Promise<ResultatE
 
     return {
       success: true,
-      programme: normaliser(r.objet as ProgrammeExtrait),
+      // `r.objet` est la forme BRUTE renvoyee par le modele — chaines
+      // compactes et sentinelles comprises. `normaliser` la convertit en la
+      // forme que voit le reste du code.
+      programme: normaliser(r.objet as z.infer<typeof ProgrammeSchema>),
       duree_ms: r.duree_ms,
       modele: r.modele,
       fournisseur: r.fournisseur,
@@ -314,6 +342,48 @@ export async function extraireProgramme(d: DemandeExtraction): Promise<ResultatE
  * on refuse seulement les formes qui feraient planter l'insertion, et on
  * signale ce qui a ete redresse pour que le relecteur le voie.
  */
+/**
+ * « 0.333@180;0.333@210;0.334@240 » redevient un echeancier.
+ * Tout fragment illisible est ignore plutot que de fausser le calcul du
+ * dating : mieux vaut un echeancier vide, qui vaut zero, qu'un echeancier
+ * invente, qui vaut de l'argent.
+ */
+export function lireEcheancier(brut: string): Echeance[] {
+  const out: Echeance[] = []
+  for (const morceau of String(brut || '').split(/[;|]/)) {
+    const m = morceau.trim().match(/^([\d.]+)\s*@\s*(\d+)$/)
+    if (!m) continue
+    const part = Number(m[1]); const jours = Number(m[2])
+    if (!Number.isFinite(part) || !Number.isFinite(jours) || part <= 0) continue
+    out.push({ part, jours })
+  }
+  return out
+}
+
+/** « categorie:Filtre,Plaquette=3000 » redevient un sous-minimum. */
+export function lireSousMinimums(brut: string): SousMinimum[] {
+  const out: SousMinimum[] = []
+  for (const morceau of String(brut || '').split(';')) {
+    const m = morceau.trim().match(/^([a-z]+)\s*:\s*(.+?)\s*=\s*([\d.]+)$/i)
+    if (!m) continue
+    const montant = Number(m[3])
+    if (!Number.isFinite(montant) || montant <= 0) continue
+    out.push({
+      axe: normaliserAxe(m[1]),
+      cible: m[2].split(',').map(x => x.trim()).filter(Boolean),
+      montant,
+      libelle: null,
+    })
+  }
+  return out
+}
+
+/** L'axe n'est plus contraint par la grammaire : on le valide ici. */
+export function normaliserAxe(v: string | undefined): string {
+  const a = String(v || '').trim().toLowerCase()
+  return (AXES as readonly string[]).includes(a) ? a : 'tout'
+}
+
 function normaliser(brut: z.infer<typeof ProgrammeSchema>): ProgrammeExtrait {
   const incertitudes = [...(brut.incertitudes || [])]
 
@@ -344,10 +414,22 @@ function normaliser(brut: z.infer<typeof ProgrammeSchema>): ProgrammeExtrait {
       if (!bon) incertitudes.push(`Un palier du bareme « ${pl.bareme} » avait un seuil ou un escompte illisible et a ete ecarte.`)
       return bon
     })
-    .map(pl => ({ ...pl, niveau: texte(pl.niveau), seuil_qte: nombre(pl.seuil_qte), notes: texte(pl.notes) }))
+    .map(pl => ({
+      ...pl,
+      axe: normaliserAxe(pl.axe),
+      niveau: texte(pl.niveau),
+      seuil_qte: nombre(pl.seuil_qte),
+      notes: texte(pl.notes),
+      echeancier: lireEcheancier(pl.echeancier),
+      sous_minimums: lireSousMinimums(pl.sous_minimums),
+    }))
 
   const bonus: BonusExtrait[] = (brut.bonus || []).map(b => ({
-    ...b, avant_le: date(b.avant_le, `bonus « ${b.libelle} »`), jours: nombre(b.jours), notes: texte(b.notes),
+    ...b,
+    axe: normaliserAxe(b.axe),
+    avant_le: date(b.avant_le, `bonus « ${b.libelle} »`),
+    jours: nombre(b.jours),
+    notes: texte(b.notes),
   }))
 
   const p: ProgrammeExtrait = {
@@ -374,7 +456,7 @@ function normaliser(brut: z.infer<typeof ProgrammeSchema>): ProgrammeExtrait {
   // dating sans jamais lever d'erreur. On le signale plutot que de le corriger
   // en douce : c'est peut-etre le document qui est ambigu.
   for (const pl of paliers) {
-    if (!Array.isArray(pl.echeancier) || pl.echeancier.length === 0) continue
+    if (pl.echeancier.length === 0) continue
     const somme = pl.echeancier.reduce((s, e) => s + (Number(e.part) || 0), 0)
     if (Math.abs(somme - 1) > 0.02) {
       incertitudes.push(
