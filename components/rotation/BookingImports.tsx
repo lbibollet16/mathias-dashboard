@@ -48,6 +48,9 @@ export default function BookingImports({ t, email, fournisseurs, onValide }: {
   const [envoi, setEnvoi] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [ouvert, setOuvert] = useState<number | null>(null)
+  // Seul « a valider » s'ouvre de lui-meme : c'est le seul groupe qui demande
+  // une decision. Les echecs et les classes sans suite restent replies.
+  const [groupesOuverts, setGroupesOuverts] = useState<Set<string>>(new Set(['a_valider']))
   const [dispo, setDispo] = useState(true)
   const [gmail, setGmail] = useState<string | null>(null)
   const [releve, setReleve] = useState(false)
@@ -163,8 +166,34 @@ export default function BookingImports({ t, email, fournisseurs, onValide }: {
     )
   }
 
-  const aValider = imports.filter(i => i.statut === 'a_valider')
-  const autres = imports.filter(i => i.statut !== 'a_valider')
+  // La boite contient des dizaines de courriels dont la plupart ne sont pas
+  // des programmes. Les aligner a plat noie les trois ou quatre qui demandent
+  // une decision. On les range donc par statut, dans l'ordre de ce qu'ils
+  // exigent de toi, et seul le premier groupe s'ouvre de lui-meme.
+  const GROUPES: { statut: string; titre: string; couleur: keyof Theme['C'] | 'sub'; aide: string }[] = [
+    { statut: 'a_valider', titre: 'A valider', couleur: 'yellow',
+      aide: 'Un programme a ete lu. Verifie ce dont le modele n\'etait pas sur, puis valide.' },
+    { statut: 'lien_seulement', titre: 'Derriere un portail', couleur: 'yellow',
+      aide: 'La grille est derriere un login concessionnaire. Telecharge le fichier et depose-le ici.' },
+    { statut: 'erreur', titre: 'En echec', couleur: 'red',
+      aide: 'L\'extraction n\'a pas abouti. Si la cause etait passagere, relance.' },
+    { statut: 'valide', titre: 'Valides', couleur: 'green',
+      aide: 'Devenus des programmes actifs.' },
+    { statut: 'rejete', titre: 'Classes sans suite', couleur: 'sub',
+      aide: 'Ce ne sont pas des programmes de reservation — factures, catalogues, bulletins.' },
+    { statut: 'nouveau', titre: 'En attente de lecture', couleur: 'blue', aide: '' },
+  ]
+
+  const parStatut = new Map<string, any[]>()
+  for (const i of imports) parStatut.set(i.statut, [...(parStatut.get(i.statut) || []), i])
+
+  // Les causes d'echec, dedupliquees. Soixante-dix-huit lignes « Echec »
+  // identiques n'apprennent rien ; « 55 fois : le solde est a zero » se lit.
+  const causes = new Map<string, number>()
+  for (const i of parStatut.get('erreur') || []) {
+    const c = String(i.erreur || 'Cause inconnue').slice(0, 200)
+    causes.set(c, (causes.get(c) || 0) + 1)
+  }
 
   return (
     <Carte t={t}>
@@ -181,12 +210,6 @@ export default function BookingImports({ t, email, fournisseurs, onValide }: {
         }}>
           {envoi ? 'Lecture en cours…' : 'Deposer des programmes'}
         </button>
-        {aValider.length > 0 && (
-          <Badge t={t} couleur={t.C.yellow}>{aValider.length} a valider</Badge>
-        )}
-        {totaux.lien_seulement > 0 && (
-          <Badge t={t} couleur={t.C.yellow}>{totaux.lien_seulement} derriere un portail</Badge>
-        )}
 
         <span style={{ width: 1, height: 26, background: t.bdr, margin: '0 4px' }} />
 
@@ -233,11 +256,70 @@ export default function BookingImports({ t, email, fournisseurs, onValide }: {
         </p>
       )}
 
-      {[...aValider, ...autres].map(i => (
-        <LigneImport key={i.id} t={t} i={i} fournisseurs={fournisseurs}
-          ouvert={ouvert === i.id} onOuvrir={() => setOuvert(ouvert === i.id ? null : i.id)}
-          onAgir={agir} />
-      ))}
+      {GROUPES.map(g => {
+        const lignes = parStatut.get(g.statut) || []
+        if (lignes.length === 0) return null
+        const deplie = groupesOuverts.has(g.statut)
+        const couleur = g.couleur === 'sub' ? t.sub : t.C[g.couleur]
+
+        return (
+          <div key={g.statut} style={{ marginTop: 14, border: `1px solid ${t.bdr}`, borderRadius: 10 }}>
+            <button
+              onClick={() => setGroupesOuverts(s => {
+                const n = new Set(s)
+                n.has(g.statut) ? n.delete(g.statut) : n.add(g.statut)
+                return n
+              })}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+                padding: '11px 14px', cursor: 'pointer', textAlign: 'left',
+                background: deplie ? (t.dark ? '#ffffff08' : '#00000005') : 'transparent',
+                border: 'none', borderRadius: 10, color: 'inherit',
+              }}>
+              <span style={{
+                display: 'inline-block', width: 12, color: t.sub, fontSize: 11,
+                transform: deplie ? 'rotate(90deg)' : 'none', transition: 'transform .12s',
+              }}>▶</span>
+              <span style={{ fontWeight: 800, fontSize: 13, color: couleur }}>{g.titre}</span>
+              <Badge t={t} couleur={couleur}>{lignes.length}</Badge>
+              {!deplie && g.aide && (
+                <span style={{ fontSize: 11.5, color: t.sub, flex: 1, overflow: 'hidden',
+                               textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {g.aide}
+                </span>
+              )}
+            </button>
+
+            {deplie && (
+              <div style={{ padding: '0 14px 14px' }}>
+                {g.aide && (
+                  <p style={{ fontSize: 12, color: t.sub, margin: '0 0 4px', lineHeight: 1.6 }}>{g.aide}</p>
+                )}
+
+                {/* Les causes d'echec, une fois chacune. */}
+                {g.statut === 'erreur' && causes.size > 0 && (
+                  <div style={{ margin: '10px 0 4px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {[...causes.entries()].sort((a, b) => b[1] - a[1]).map(([c, n], k) => (
+                      <div key={k} style={{
+                        padding: '9px 12px', borderRadius: 8, fontSize: 12.5, lineHeight: 1.55,
+                        color: t.C.red, background: `${t.C.red}12`, border: `1px solid ${t.C.red}44`,
+                      }}>
+                        <strong>{n} fois</strong> — {c}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {lignes.map(i => (
+                  <LigneImport key={i.id} t={t} i={i} fournisseurs={fournisseurs}
+                    ouvert={ouvert === i.id} onOuvrir={() => setOuvert(ouvert === i.id ? null : i.id)}
+                    onAgir={agir} />
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </Carte>
   )
 }

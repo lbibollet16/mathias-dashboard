@@ -125,13 +125,22 @@ async function viaAnthropic<T extends z.ZodTypeAny>(d: DemandeJSON<T>): Promise<
   }
   contenu.push({ type: 'text', text: d.consigne })
 
-  const reponse = await client.messages.parse({
+  // EN STREAMING, TOUJOURS.
+  //
+  // Le SDK refuse un appel non streame des que `max_tokens` laisse presager
+  // plus de dix minutes : « Streaming is required for operations that may take
+  // longer than 10 minutes ». C'est exactement ce qui a fait echouer les 23
+  // premiers documents cote Anthropic. On pourrait baisser le plafond sous le
+  // seuil, mais il faudrait le deviner, et une grosse grille serait tronquee.
+  // Streamer leve la contrainte sans rien sacrifier.
+  const flux = client.messages.stream({
     model: modele,
     max_tokens: d.maxTokens ?? 24000,
     system: d.system,
     messages: [{ role: 'user', content: contenu }],
     output_config: { format: zodOutputFormat(d.schema as any) },
   })
+  const reponse = await flux.finalMessage()
 
   // Les classificateurs de surete peuvent decliner : le refus arrive en 200,
   // avec un contenu vide. Sans ce controle on lirait `parsed_output` a null
@@ -145,10 +154,36 @@ async function viaAnthropic<T extends z.ZodTypeAny>(d: DemandeJSON<T>): Promise<
       `La reponse a ete tronquee au plafond de ${d.maxTokens ?? 24000} jetons : le document ` +
       `contient probablement une grille plus grosse que prevu.`)
   }
-  if (!reponse.parsed_output) {
-    throw new Error('Claude a repondu mais la sortie ne respecte pas le schema attendu.')
+  // `finalMessage()` rend un Message brut, pas le `parsed_output` du helper
+  // `parse()`. La sortie structuree garantit un JSON conforme au schema : on
+  // le lit dans les blocs de texte, en ecartant les blocs de raisonnement.
+  const texte = reponse.content
+    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+    .map(b => b.text)
+    .join('')
+    .trim()
+
+  if (!texte) {
+    throw new Error('Claude a repondu sans contenu textuel exploitable.')
   }
-  return reponse.parsed_output as z.infer<T>
+
+  let brut: unknown
+  try {
+    brut = JSON.parse(texte)
+  } catch {
+    throw new Error('La reponse de Claude n\'est pas du JSON valide malgre la sortie structuree.')
+  }
+
+  const verif = d.schema.safeParse(brut)
+  if (!verif.success) {
+    // On dit QUEL champ cloche : « la sortie ne respecte pas le schema » tout
+    // court ne mene nulle part quand le schema fait 40 champs imbriques.
+    const premier = verif.error.issues[0]
+    throw new Error(
+      `La sortie ne respecte pas le schema attendu : ${premier?.path?.join('.') || '(racine)'} — ` +
+      `${premier?.message || 'motif inconnu'}.`)
+  }
+  return verif.data as z.infer<T>
 }
 
 // ═══════════════════════════════════════════════════════════════════════
