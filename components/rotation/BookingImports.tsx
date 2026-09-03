@@ -118,7 +118,8 @@ export default function BookingImports({ t, email, fournisseurs, onValide }: {
         charger()
       } else if (mode === 'relancer') {
         setGmail(`${j.nb_repris} document(s) repris, ${j.a_valider} en attente de ta relecture` +
-                 `${j.nb_erreurs ? `, ${j.nb_erreurs} encore en echec` : ''}.`)
+                 `${j.nb_erreurs ? `, ${j.nb_erreurs} encore en echec` : ''}` +
+                 `${j.nb_perimes ? `. ${j.nb_perimes} classe(s) sans suite : recus il y a plus de ${j.fenetre_jours} jours, programmes presumes fermes` : ''}.`)
         charger()
       } else {
         setGmail(
@@ -216,11 +217,12 @@ export default function BookingImports({ t, email, fournisseurs, onValide }: {
         <button onClick={() => gmailAppel('test')} disabled={releve} style={boutonPlat(t, t.sub, releve)}>
           Verifier l'acces a la boite
         </button>
-        <button onClick={() => gmailAppel('relever')} disabled={releve} style={boutonPlat(t, t.C.blue, releve)}>
-          {releve ? 'En cours…' : 'Relever booking@'}
+        <button onClick={() => gmailAppel('relever')} disabled={releve} style={boutonPlat(t, t.C.blue, releve)}
+          title="Analyse les courriels des 30 derniers jours. Au-dela, un programme de reservation est presque toujours ferme.">
+          {releve ? 'En cours…' : 'Relever booking@ (30 j)'}
         </button>
         <button onClick={() => gmailAppel('historique')} disabled={releve} style={boutonPlat(t, t.sub, releve)}
-          title="Analyse jusqu'a 60 courriels depuis janvier 2024 : les programmes des saisons passees remontent d'un coup.">
+          title="Ignore la fenetre de 30 jours et remonte a janvier 2024. A n'utiliser qu'une fois, pour recuperer les grilles des saisons passees : leurs dates sont a rafraichir a la main.">
           Rattraper l'historique
         </button>
         {totaux.erreur > 0 && (

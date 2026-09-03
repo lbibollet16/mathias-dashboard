@@ -4,6 +4,7 @@
 // GET   cron quotidien, ou appel manuel depuis l'ecran
 //         ?depuis=AAAA/MM/JJ   rattraper l'historique depuis une date
 //         ?max=N               plafond de messages traites (defaut 15)
+//         ?jours=N             fenetre glissante, en jours (defaut 30)
 //         ?test=1              diagnostic seul : verifie l'acces, ne traite rien
 //         ?relancer=1          rejoue les extractions en echec deja enregistrees
 //
@@ -17,7 +18,8 @@ import { dernierRun, lireTout } from '@/lib/supply-chain-db'
 import { extraireProgramme } from '@/lib/booking-extraction'
 import {
   lireConfigGmail, jetonAcces, idLibelleTraite, listerMessages, lireMessage,
-  telechargerPiece, marquerTraite, requeteRecherche, diagnostiquerCle, MessageBooking,
+  telechargerPiece, marquerTraite, requeteRecherche, diagnostiquerCle, FENETRE_JOURS,
+  MessageBooking,
 } from '@/lib/gmail-booking'
 import { pannePassagere } from '@/lib/ia-gateway'
 import { etatFournisseurs } from '@/lib/claude'
@@ -91,6 +93,12 @@ export async function GET(req: NextRequest) {
   const test = p.get('test') === '1'
   // Rejouer les extractions en echec, sans repasser par la recherche Gmail.
   const relancer = p.get('relancer') === '1'
+  // Un programme de reservation recu il y a plus d'un mois est presque
+  // toujours ferme : l'analyser coute un appel a Opus pour rien. La fenetre
+  // est reglable, parce que la date de RECEPTION n'est pas la date de
+  // FERMETURE — Parts Canada et Mercury ont ouvert le 3 aout et fermeront en
+  // octobre et novembre. Trente jours les attrape aujourd'hui, plus demain.
+  const jours = Math.max(1, Math.min(3650, parseInt(p.get('jours') || String(FENETRE_JOURS), 10)))
 
   // La forme de la cle se verifie AVANT de tenter quoi que ce soit : une cle
   // malformee fait echouer la signature sur un message OpenSSL opaque
@@ -112,7 +120,7 @@ export async function GET(req: NextRequest) {
     // Le diagnostic : verifie l'acces sans rien consommer. C'est le premier
     // appel a faire apres avoir branche les cles.
     if (test) {
-      const requete = requeteRecherche(depuis)
+      const requete = requeteRecherche(depuis, jours)
       const trouves = await listerMessages(cfg, jeton, requete, 10)
       // Verifier l'acces Gmail sans verifier l'acces a Claude, c'est valider
       // la moitie du tuyau : c'est exactement ce qui a laisse croire que tout
@@ -147,10 +155,27 @@ export async function GET(req: NextRequest) {
     // inaccessibles alors qu'ils n'ont jamais ete lus. On repart donc des
     // lignes en erreur et on retelecharge la piece jointe par son id Gmail.
     if (relancer) {
+      const limite = new Date(Date.now() - jours * 86_400_000).toISOString()
+
       const enErreur = await lireTout<any>('sc_booking_imports',
-        'id, gmail_message_id, nom_fichier, erreur',
+        'id, gmail_message_id, nom_fichier, erreur, recu_le',
         q => q.eq('statut', 'erreur').not('gmail_message_id', 'is', null)
-              .order('id', { ascending: true }))
+              .gte('recu_le', limite)
+              .order('recu_le', { ascending: false }))
+
+      // Les echecs trop vieux ne sont pas rejoues — ils ne sont pas non plus
+      // laisses en « echec » a s'accumuler a l'ecran. On les classe, avec la
+      // raison, pour que la file ne montre que ce sur quoi on peut encore agir.
+      const { data: perimes } = await supabaseAdmin
+        .from('sc_booking_imports')
+        .update({
+          statut: 'rejete',
+          maj_le: new Date().toISOString(),
+          commentaire: `Recu il y a plus de ${jours} jours : le programme est presume ferme. ` +
+                       `Pour l'analyser quand meme, relance avec une fenetre plus large.`,
+        })
+        .eq('statut', 'erreur').not('gmail_message_id', 'is', null).lt('recu_le', limite)
+        .select('id')
 
       const journal: any[] = []
       // Un meme courriel peut porter plusieurs documents en echec : on ne le
@@ -206,6 +231,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         success: true,
         mode: 'relance',
+        fenetre_jours: jours,
+        nb_perimes: (perimes || []).length,
         nb_repris: journal.length,
         a_valider: journal.filter(j => j.statut === 'a_valider').length,
         nb_erreurs: journal.filter(j => j.statut === 'erreur').length,
@@ -217,7 +244,7 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    const aTraiter = await listerMessages(cfg, jeton, requeteRecherche(depuis), max)
+    const aTraiter = await listerMessages(cfg, jeton, requeteRecherche(depuis, jours), max)
 
     const journal: any[] = []
     for (const { id } of aTraiter) {
@@ -269,6 +296,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       success: true,
       boite: cfg.boite,
+      fenetre_jours: depuis ? null : jours,
       nb_messages: aTraiter.length,
       nb_documents: journal.length,
       a_valider: journal.filter(j => j.statut === 'a_valider').length,
