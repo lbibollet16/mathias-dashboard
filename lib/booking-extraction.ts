@@ -258,9 +258,24 @@ groupe : quand un document offre une ECHELLE de dates decroissante ("3 % au 15 s
 
 6. RECOPIE les seuils et pourcentages du tableau ligne par ligne, sans en sauter ni en reordonner. Une grille de 22 familles sur 6 niveaux fait 132 paliers : produis-les tous.
 
+6bis. N'EXTRAIS EN PALIERS QUE CE QUI S'APPLIQUE A CETTE COMMANDE-CI.
+   Beaucoup de programmes publient, a cote de leur grille, des tableaux qui
+   decrivent un avantage FUTUR ou CONSEQUENT : « escomptes de saison etablis
+   en fonction des resultats de ce programme », « frais de transport
+   journaliers de l'annee a venir », « entente de retour privilegiee ». Ce ne
+   sont PAS des escomptes sur la commande en cours — les mettre en paliers
+   ferait croire au systeme qu'il obtient -23 % aujourd'hui alors que ce taux
+   ne vaudra que l'an prochain.
+   Resume-les dans le champ notes, en une phrase chacun, sans en faire des paliers.
+
+6ter. QUAND UN TABLEAU A PLUSIEURS COLONNES DE POURCENTAGE, prends celle qui
+   correspond a la commande de reservation. Kimpex publie « PL » (placement)
+   et « REG » (regulier) cote a cote : seule la colonne placement s'applique
+   ici. Dis dans le champ notes quelle colonne tu as retenue.
+
 7. incertitudes doit etre HONNETE et precis. Signale : une colonne illisible, une annee devinee, une condition que tu n'as pas su modeliser, un tableau qui semble tronque. Un import avec des incertitudes claires vaut mieux qu'un import faussement sur de lui — un humain relira.
 
-8. Ne remplis fournisseur_traction que si un nom de la liste correspond SANS AMBIGUITE. Sinon null : quelqu'un fera le rapprochement a la main, une seule fois.`
+8. Ne remplis fournisseur_traction que si un nom de la liste correspond SANS AMBIGUITE. Sinon laisse-le VIDE : quelqu'un fera le rapprochement a la main, une seule fois.`
 
 /**
  * Le rapprochement au nom Traction est la seule chose que l'IA ne peut pas
@@ -307,9 +322,13 @@ export async function extraireProgramme(d: DemandeExtraction): Promise<ResultatE
       consigne,
       schema: ProgrammeSchema,
       pdf: d.data ? { data: d.data, nomFichier: d.nomFichier } : undefined,
-      // Une grille de 132 paliers fait un gros JSON. Trop serrer tronque
-      // l'extraction en plein tableau, et le programme ressort ampute.
-      maxTokens: 32000,
+      // Une grille dense fait un tres gros JSON. Le programme Kimpex
+      // « Placement pre-saison Moto/VTT » a fait deux fois de suite une
+      // sortie tronquee a 46 000 caracteres au plafond de 32 000 jetons :
+      // onze categories sur six niveaux, plus une charte de saison de
+      // quatre-vingt-onze lignes. Trop serrer coupe en plein tableau et le
+      // programme ressort ampute, sans qu'on sache ce qui manque.
+      maxTokens: 64000,
     })
 
     if (!r.success || !r.objet) {
