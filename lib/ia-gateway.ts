@@ -1,20 +1,24 @@
 /**
- * Ce que disent les pannes du Vercel AI Gateway, et ce qu'il faut en faire.
+ * Ce que disent les pannes d'acces a Claude, et ce qu'il faut en faire.
  *
  * Deux fonctionnalites l'appellent — le parseur de PDF de commandes Traction
- * et l'extraction des programmes de booking — et toutes deux ont besoin des
- * memes deux reponses :
+ * et l'extraction des programmes de booking — et deux chemins d'acces peuvent
+ * echouer : l'API Anthropic directe et le Vercel AI Gateway.
  *
- *   · l'echec est-il PASSAGER ? De la reponse depend si on rejoue plus tard
- *     ou si on classe definitivement. Etiqueter « traite » un courriel dont
- *     l'appel n'a jamais quitte le serveur perd son programme pour de bon.
+ * DEUX LECONS APPRISES A LA DURE, LE 3 SEPTEMBRE 2026
  *
- *   · que dire a l'utilisateur ? Le gateway renvoie des phrases exactes mais
- *     opaques dans leur contexte. « A positive credit balance is required for
- *     all requests, including BYOK, so fallback providers remain available »
- *     est parfaitement juste, et parfaitement inutile pour qui voit
- *     « IA indisponible » dans un ecran d'import de commandes.
+ * 1. Une traduction qui ne sait pas QUI a echoue envoie corriger la mauvaise
+ *    chose. La premiere version disait « la cle AI_GATEWAY_API_KEY est
+ *    absente ou refusee » alors que c'etait l'API Anthropic qui refusait la
+ *    sienne. Le fournisseur est donc un parametre, pas une supposition.
+ *
+ * 2. Une traduction qui REMPLACE le message d'origine detruit le diagnostic.
+ *    « La cle est refusee » ne dit pas si elle est mal copiee, revoquee, ou
+ *    si c'est le compte qui n'a plus de credit — trois causes, trois gestes
+ *    differents. Le texte brut est desormais toujours conserve en queue.
  */
+
+export type Fournisseur = 'anthropic' | 'gateway'
 
 /**
  * Une panne d'ENVIRONNEMENT, par opposition a un document illisible.
@@ -35,43 +39,64 @@ export function pannePassagere(erreur: string | undefined | null): boolean {
   if (/no such model|unsupported model/i.test(e)) return true
   if (/model/i.test(e) && /not found|does not exist|unavailable/i.test(e)) return true
 
-  return /credit balance|insufficient|quota|rate limit|429|50[234]|timeout|ETIMEDOUT|ECONNRESET|ENOTFOUND|fetch failed|overloaded|unavailable|API key|unauthorized|invalid_api_key/i
+  return /credit balance|insufficient|quota|rate limit|429|50[234]|timeout|ETIMEDOUT|ECONNRESET|ENOTFOUND|fetch failed|overloaded|unavailable|API key|unauthorized|authentication|invalid_api_key|Streaming is required/i
     .test(e)
 }
 
-/**
- * Traduit l'erreur brute du gateway en une phrase qui dit quoi faire.
- *
- * On garde le texte d'origine en queue : c'est lui qu'on cherchera dans les
- * journaux le jour ou la cause sera ailleurs.
- */
-export function messageErreurIA(erreur: string | undefined | null): string {
-  const e = String(erreur || '').trim()
-  if (!e) return 'Appel a l\'IA sans reponse ni message d\'erreur.'
+/** Ou l'on corrige, selon le chemin qui a echoue. */
+const OU_CORRIGER: Record<Fournisseur, { variable: string; solde: string }> = {
+  anthropic: {
+    variable: 'ANTHROPIC_API_KEY',
+    solde: 'console.anthropic.com > Billing',
+  },
+  gateway: {
+    variable: 'AI_GATEWAY_API_KEY',
+    solde: 'Vercel > ton equipe > AI > Top up',
+  },
+}
 
-  if (/credit balance|insufficient (funds|credit)/i.test(e)) {
-    return 'Le solde du Vercel AI Gateway est a zero : aucun appel ne part. ' +
-           'Charge des credits dans Vercel > ton equipe > AI > Top up.'
+/**
+ * Traduit l'erreur brute en une phrase qui dit quoi faire, SANS jamais perdre
+ * le texte d'origine : c'est lui qu'on cherchera le jour ou la cause sera
+ * ailleurs que dans les cas prevus.
+ */
+export function messageErreurIA(
+  erreur: string | undefined | null,
+  fournisseur: Fournisseur = 'gateway',
+): string {
+  const e = String(erreur || '').trim()
+  if (!e) return 'Appel a Claude sans reponse ni message d\'erreur.'
+
+  const ou = OU_CORRIGER[fournisseur]
+  const brut = ` [${fournisseur} a repondu : ${e.slice(0, 220)}]`
+
+  if (/credit balance|insufficient (funds|credit)|balance is too low/i.test(e)) {
+    return `Le solde est a zero : aucun appel ne part. Charge des credits dans ${ou.solde}.${brut}`
   }
   if (/rate limit|429|too many requests/i.test(e)) {
-    return 'Le gateway limite le debit en ce moment. Reessaie dans quelques minutes — ' +
-           'rien n\'est perdu, l\'operation est rejouable.'
+    return `Le service limite le debit en ce moment. Reessaie dans quelques minutes — ` +
+           `rien n'est perdu, l'operation est rejouable.${brut}`
   }
   if (/quota/i.test(e)) {
-    return 'Le quota du gateway est atteint. Verifie les limites du projet dans Vercel > AI.'
+    return `Le quota est atteint. Verifie les limites du compte.${brut}`
   }
-  if (/API key|invalid_api_key|unauthorized|401|403/i.test(e)) {
-    return 'La cle AI_GATEWAY_API_KEY est absente ou refusee. ' +
-           'Verifie-la dans Vercel > Settings > Environment Variables, puis redeploie.'
+  if (/authentication|invalid x-api-key|invalid_api_key|API key|unauthorized|\b401\b|\b403\b/i.test(e)) {
+    return `La cle ${ou.variable} est absente, mal copiee ou revoquee. Verifie-la dans ` +
+           `Vercel > Settings > Environment Variables, puis redeploie. Verifie aussi qu'elle ` +
+           `est encore active et que le compte a du credit (${ou.solde}).${brut}`
   }
-  if (/not found|no such model|unsupported model/i.test(e) && /model/i.test(e)) {
-    return `Le modele demande n'est pas disponible sur ce gateway. ${e}`
+  if (/Streaming is required/i.test(e)) {
+    return `Le SDK exige le streaming pour une reponse de cette taille. C'est un defaut de ` +
+           `code, pas de configuration.${brut}`
+  }
+  if (/no such model|unsupported model/i.test(e) || (/model/i.test(e) && /not found/i.test(e))) {
+    return `Le modele demande n'est pas disponible sur ce chemin d'acces.${brut}`
   }
   if (/overloaded|unavailable|50[234]/i.test(e)) {
-    return 'Le service d\'IA est momentanement indisponible. Reessaie dans quelques minutes.'
+    return `Le service est momentanement indisponible. Reessaie dans quelques minutes.${brut}`
   }
   if (/timeout|ETIMEDOUT|ECONNRESET|ENOTFOUND|fetch failed/i.test(e)) {
-    return `L'appel a l'IA n'a pas abouti (reseau ou delai depasse). ${e}`
+    return `L'appel n'a pas abouti (reseau ou delai depasse).${brut}`
   }
   return e
 }
