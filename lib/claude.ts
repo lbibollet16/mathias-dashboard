@@ -23,7 +23,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
 import { generateText, Output } from 'ai'
 import type { z } from 'zod'
-import { messageErreurIA, pannePassagere } from '@/lib/ia-gateway'
+import { messageErreurIA, pannePassagere, type Fournisseur } from '@/lib/ia-gateway'
 
 /**
  * Le meme modele des deux cotes, pour que la bascule ne change pas la qualite
@@ -47,7 +47,7 @@ export const MODELES = {
 
 export type NiveauModele = keyof typeof MODELES
 
-export type Fournisseur = 'anthropic' | 'gateway'
+export type { Fournisseur } from '@/lib/ia-gateway'
 
 export interface DemandeJSON<T extends z.ZodTypeAny> {
   system: string
@@ -255,7 +255,9 @@ export async function extraireJSON<T extends z.ZodTypeAny>(
       }
     } catch (e: any) {
       const brut = e?.message || String(e)
-      tentatives.push({ fournisseur: f, erreur: messageErreurIA(brut) })
+      // Nommer le fournisseur : sans lui, la traduction envoie corriger la
+      // cle de l'autre chemin — c'est exactement ce qui s'est passe.
+      tentatives.push({ fournisseur: f, erreur: messageErreurIA(brut, f) })
 
       // Un echec qui vient du DOCUMENT donnera le meme resultat en face :
       // basculer serait payer deux fois pour la meme reponse. On s'arrete.
@@ -263,7 +265,7 @@ export async function extraireJSON<T extends z.ZodTypeAny>(
         return {
           success: false,
           duree_ms: Date.now() - t0,
-          erreur: messageErreurIA(brut),
+          erreur: messageErreurIA(brut, f),
           panne_service: false,
           tentatives,
         }
