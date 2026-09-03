@@ -88,17 +88,25 @@ function fournisseursDisponibles(): Fournisseur[] {
     : ['anthropic', 'gateway']
 
   return ordre.filter(f =>
-    f === 'anthropic' ? !!process.env.ANTHROPIC_API_KEY : !!process.env.AI_GATEWAY_API_KEY)
+    f === 'anthropic'
+      ? !!nettoyerCleApi(process.env.ANTHROPIC_API_KEY)
+      : !!process.env.AI_GATEWAY_API_KEY)
 }
 
 /** Ce qui est configure, pour l'afficher a l'ecran sans reveler les cles. */
 export function etatFournisseurs() {
   const dispo = fournisseursDisponibles()
   return {
-    anthropic: !!process.env.ANTHROPIC_API_KEY,
+    anthropic: !!nettoyerCleApi(process.env.ANTHROPIC_API_KEY),
     gateway: !!process.env.AI_GATEWAY_API_KEY,
     ordre: dispo,
     pret: dispo.length > 0,
+    // Ce qui cloche dans la cle Anthropic, s'il y a lieu. Affiche par le
+    // diagnostic « Verifier l'acces » : mieux vaut le savoir avant de lancer
+    // une releve que de le decouvrir sur soixante-dix-huit echecs.
+    souci_anthropic: process.env.ANTHROPIC_API_KEY
+      ? diagnostiquerCleApi(process.env.ANTHROPIC_API_KEY)
+      : null,
   }
 }
 
@@ -106,8 +114,47 @@ export function etatFournisseurs() {
 // L'API Anthropic en direct
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * La cle, debarrassee de ce qui se colle avec elle.
+ *
+ * Meme lecon que la cle privee Gmail : une valeur copiee depuis un site ou un
+ * gestionnaire de mots de passe arrive avec des guillemets, une espace, ou un
+ * retour a la ligne. Le SDK les envoie tels quels dans l'entete, Anthropic
+ * repond 401, et le message parle de cle « invalide » sans dire qu'elle est
+ * seulement mal emballee.
+ */
+export function nettoyerCleApi(brut: string | undefined): string | undefined {
+  if (!brut) return undefined
+  let k = brut.trim()
+  if ((k.startsWith('"') && k.endsWith('"')) || (k.startsWith("'") && k.endsWith("'"))) {
+    k = k.slice(1, -1).trim()
+  }
+  // Une cle d'API n'a ni espace ni saut de ligne a l'interieur.
+  return k.replace(/\s+/g, '')
+}
+
+/** Ce qui cloche dans la cle, sans jamais la reveler. */
+export function diagnostiquerCleApi(brut: string | undefined): string | null {
+  const k = nettoyerCleApi(brut)
+  if (!k) return 'ANTHROPIC_API_KEY est absente.'
+  if (!k.startsWith('sk-ant-')) {
+    return `ANTHROPIC_API_KEY ne commence pas par « sk-ant- » (elle commence par ` +
+           `« ${k.slice(0, 7)} »). Ce n'est probablement pas une cle d'API Anthropic — ` +
+           `verifie que tu n'as pas colle un identifiant d'organisation ou une cle d'un autre service.`
+  }
+  if (k.length < 40) {
+    return `ANTHROPIC_API_KEY ne fait que ${k.length} caracteres : elle a ete tronquee au collage.`
+  }
+  return null
+}
+
 async function viaAnthropic<T extends z.ZodTypeAny>(d: DemandeJSON<T>): Promise<z.infer<T>> {
-  const client = new Anthropic()
+  const souci = diagnostiquerCleApi(process.env.ANTHROPIC_API_KEY)
+  if (souci) throw new Error(souci)
+
+  // On passe la cle explicitement plutot que de laisser le SDK lire l'env :
+  // c'est le seul moyen de lui donner la version nettoyee.
+  const client = new Anthropic({ apiKey: nettoyerCleApi(process.env.ANTHROPIC_API_KEY) })
   const modele = MODELES[d.niveau || 'opus'].direct
 
   const contenu: Anthropic.ContentBlockParam[] = []
