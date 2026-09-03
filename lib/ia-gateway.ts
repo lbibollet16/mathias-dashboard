@@ -96,6 +96,14 @@ export function messageErreurIA(
            `Vercel > Settings > Environment Variables, puis redeploie. Verifie aussi qu'elle ` +
            `est encore active et que le compte a du credit (${ou.solde}).${brut}`
   }
+  // Une sortie tronquee se reconnait a l'erreur d'analyse JSON qu'elle
+  // provoque : le texte s'arrete au milieu d'une chaine. Le dire ainsi evite
+  // de chercher un defaut de schema la ou il n'y a qu'un plafond atteint.
+  if (/Unterminated string|Failed to parse structured output|Unexpected end of JSON|after property value/i.test(e)) {
+    return `La reponse a ete coupee avant la fin : le document produit plus de donnees que le ` +
+           `plafond de jetons autorise. C'est le cas des grilles a plusieurs centaines de lignes. ` +
+           `Il faut relever le plafond ou restreindre ce qu'on demande d'extraire.${brut}`
+  }
   if (/Streaming is required/i.test(e)) {
     return `Le SDK exige le streaming pour une reponse de cette taille. C'est un defaut de ` +
            `code, pas de configuration.${brut}`
