@@ -42,11 +42,30 @@ const EcheanceSchema = z.object({
   jours: z.number().describe('Jours entre la facturation et ce versement.'),
 })
 
+/**
+ * AUCUN CHAMP N'EST `nullable` DANS CE SCHEMA, ET C'EST DELIBERE.
+ *
+ * Chaque `.nullable()` produit un `anyOf: [T, null]` — une union. L'API des
+ * sorties structurees en plafonne le nombre a seize, « pour eviter un cout de
+ * compilation exponentiel ». Ce schema en comptait vingt, et TOUTES les
+ * extractions echouaient sur un 400.
+ *
+ * On aurait pu en retirer quatre pour repasser sous la barre. Les retirer
+ * TOUTES coute la meme chose et laisse de la marge pour les champs a venir.
+ * La convention remplace donc le null :
+ *
+ *   texte inconnu   -> chaine vide
+ *   nombre inconnu  -> zero
+ *
+ * `normaliser()` les reconvertit en null avant l'enregistrement, pour que le
+ * reste du code — et les colonnes DATE de la base — ne voient jamais passer
+ * une chaine vide.
+ */
 const SousMinimumSchema = z.object({
   axe: AxeEnum,
   cible: z.array(z.string()),
   montant: z.number(),
-  libelle: z.string().nullable(),
+  libelle: z.string().describe('Vide si le document ne nomme pas cette famille.'),
 })
 
 const PalierSchema = z.object({
@@ -54,15 +73,15 @@ const PalierSchema = z.object({
   axe: AxeEnum,
   cible: z.array(z.string()).describe('Valeurs visees sur cet axe. Vide si axe = tout.'),
   rang: z.number().describe('Ordre croissant du palier dans son bareme, a partir de 1.'),
-  niveau: z.string().nullable().describe('Le nom du palier tel qu ecrit : « A », « DIAMOND », « Niveau 3 ».'),
+  niveau: z.string().describe('Le nom du palier tel qu ecrit : « A », « DIAMOND », « Niveau 3 ». Vide si le document n en donne pas.'),
   seuil_montant: z.number(),
-  seuil_qte: z.number().nullable().describe('Rempli UNIQUEMENT si le seuil est en unites et non en dollars.'),
+  seuil_qte: z.number().describe('ZERO si le seuil est en dollars. Rempli UNIQUEMENT si le seuil est en unites.'),
   seuil_sur: z.enum(['groupe', 'commande']),
   escompte_pct: z.number(),
   sous_minimums: z.array(SousMinimumSchema),
   echeancier: z.array(EcheanceSchema),
   franco_port: z.boolean(),
-  notes: z.string().nullable(),
+  notes: z.string().describe('Vide s il n y a rien a preciser.'),
 })
 
 const BonusSchema = z.object({
@@ -70,11 +89,11 @@ const BonusSchema = z.object({
   groupe: z.string().describe('Les bonus d un meme groupe se concurrencent ; deux groupes s additionnent.'),
   libelle: z.string(),
   valeur_pct: z.number(),
-  avant_le: z.string().nullable().describe('AAAA-MM-JJ. Date limite pour en beneficier.'),
-  jours: z.number().nullable().describe('Pour paiement_rapide : le delai. « 2 % 10 net » -> 10.'),
+  avant_le: z.string().describe('AAAA-MM-JJ. Date limite pour en beneficier. Vide s il n y en a pas.'),
+  jours: z.number().describe('Pour paiement_rapide : le delai. « 2 % 10 net » -> 10. Zero sinon.'),
   axe: AxeEnum,
   cible: z.array(z.string()),
-  notes: z.string().nullable(),
+  notes: z.string().describe('Vide s il n y a rien a preciser.'),
 })
 
 const ProgrammeSchema = z.object({
@@ -82,21 +101,21 @@ const ProgrammeSchema = z.object({
     .describe('false si le document n est pas un programme de reservation (facture, catalogue, courriel sans grille).'),
   nom: z.string(),
   fournisseur_annonce: z.string().describe('Le fournisseur tel que le document le nomme.'),
-  fournisseur_traction: z.string().nullable()
-    .describe('Le nom EXACT tire de la liste fournie, ou null si aucun ne correspond avec certitude.'),
-  saison: z.string().nullable(),
+  fournisseur_traction: z.string()
+    .describe('Le nom EXACT tire de la liste fournie. VIDE si aucun ne correspond avec certitude.'),
+  saison: z.string().describe('« Automne 2026 » par exemple. Vide si le document ne le dit pas.'),
 
-  ouvre_le: z.string().nullable().describe('AAAA-MM-JJ'),
-  ferme_le: z.string().nullable().describe('AAAA-MM-JJ'),
-  livraison_debut: z.string().nullable(),
-  livraison_fin: z.string().nullable(),
-  couvre_debut: z.string().nullable().describe('Debut de la periode que la commande doit couvrir, si le document le dit.'),
-  couvre_fin: z.string().nullable(),
+  ouvre_le: z.string().describe('AAAA-MM-JJ, ou vide si absent du document.'),
+  ferme_le: z.string().describe('AAAA-MM-JJ, ou vide si absent du document.'),
+  livraison_debut: z.string().describe('AAAA-MM-JJ, ou vide.'),
+  livraison_fin: z.string().describe('AAAA-MM-JJ, ou vide.'),
+  couvre_debut: z.string().describe('Debut de la periode que la commande doit couvrir, si le document le dit. Vide sinon.'),
+  couvre_fin: z.string().describe('AAAA-MM-JJ, ou vide.'),
 
-  min_commande: z.number().nullable(),
-  min_reappro: z.number().nullable(),
-  franco_seuil: z.number().nullable(),
-  retour_pct: z.number().nullable(),
+  min_commande: z.number().describe('Zero si le document n en impose pas.'),
+  min_reappro: z.number().describe('Zero si le document n en impose pas.'),
+  franco_seuil: z.number().describe('Zero si le document n en parle pas.'),
+  retour_pct: z.number().describe('Zero si le document n en parle pas.'),
   baremes_exclusifs: z.boolean()
     .describe('true si chaque piece ne compte que dans un seul bareme (grille par categorie). false si les baremes se cumulent.'),
 
@@ -110,14 +129,35 @@ const ProgrammeSchema = z.object({
 
   liens_portail: z.array(z.string())
     .describe('URL de portail concessionnaire ou le vrai formulaire se trouve (eBiz, K-Web, DEX, Central Force...).'),
-  notes: z.string().nullable().describe('Conditions en clair qui ne rentrent dans aucun champ.'),
+  notes: z.string().describe('Conditions en clair qui ne rentrent dans aucun champ. Vide s il n y en a pas.'),
 
   confiance: z.number().describe('Entre 0 et 1. Ta confiance globale dans cette extraction.'),
   incertitudes: z.array(z.string())
     .describe('Ce dont tu n es pas sur, en francais, une phrase par point. Vide si tout est clair.'),
 })
 
-export type ProgrammeExtrait = z.infer<typeof ProgrammeSchema>
+/** Rend nullable une poignee de champs d'un type, sans le reecrire en entier. */
+type Nullifie<T, K extends keyof T> = Omit<T, K> & { [P in K]: T[P] | null }
+
+type PalierBrut = z.infer<typeof PalierSchema>
+type BonusBrut = z.infer<typeof BonusSchema>
+
+export type PalierExtrait = Nullifie<PalierBrut, 'niveau' | 'seuil_qte' | 'notes'>
+export type BonusExtrait = Nullifie<BonusBrut, 'avant_le' | 'jours' | 'notes'>
+
+/**
+ * Le programme APRES normalisation : les sentinelles du schema — chaine vide
+ * et zero — sont redevenues des null. C'est cette forme-la que voit le reste
+ * du code, et notamment les colonnes DATE de la base, a qui une chaine vide
+ * ferait lever une erreur.
+ */
+export type ProgrammeExtrait =
+  Nullifie<
+    Omit<z.infer<typeof ProgrammeSchema>, 'paliers' | 'bonus'>,
+    'fournisseur_traction' | 'saison' | 'ouvre_le' | 'ferme_le' | 'livraison_debut'
+    | 'livraison_fin' | 'couvre_debut' | 'couvre_fin' | 'min_commande' | 'min_reappro'
+    | 'franco_seuil' | 'retour_pct' | 'notes'
+  > & { paliers: PalierExtrait[]; bonus: BonusExtrait[] }
 
 export interface ResultatExtraction {
   success: boolean
@@ -173,6 +213,13 @@ BONUS — tout ce qui ne rentre pas dans une grille :
 groupe : quand un document offre une ECHELLE de dates decroissante ("3 % au 15 sept, 2 % au 15 oct, 1 % au 15 dec"), ces trois-la sont dans le MEME groupe — un seul s'applique. Un avantage independant ("2 % de plus si confirme au 22 septembre") va dans un groupe DIFFERENT, parce qu'il s'ajoute. Utilise des noms de groupe parlants.
 
 ════════ REGLES ABSOLUES ════════
+
+0. JAMAIS DE null. Aucun champ n'accepte null. Pour ce que le document ne dit pas :
+   · un texte inconnu  -> chaine vide ""
+   · un nombre inconnu -> 0
+   Une date absente est donc "", un minimum de commande non impose est 0, un
+   palier sans nom a niveau "". Ne devine pas pour remplir : le vide est une
+   reponse, l'invention n'en est pas une.
 
 1. N'INVENTE JAMAIS UN CHIFFRE. Si le document annonce "jusqu'a 12 %" sans publier la grille, mets un seul palier a 12 % avec seuil_montant 0, et ecris dans incertitudes que la grille reelle n'est pas dans ce document.
 
@@ -267,22 +314,61 @@ export async function extraireProgramme(d: DemandeExtraction): Promise<ResultatE
  * on refuse seulement les formes qui feraient planter l'insertion, et on
  * signale ce qui a ete redresse pour que le relecteur le voie.
  */
-function normaliser(p: ProgrammeExtrait): ProgrammeExtrait {
-  const incertitudes = [...(p.incertitudes || [])]
-  const dateOk = (s: string | null) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null)
+function normaliser(brut: z.infer<typeof ProgrammeSchema>): ProgrammeExtrait {
+  const incertitudes = [...(brut.incertitudes || [])]
 
-  for (const champ of ['ouvre_le', 'ferme_le', 'livraison_debut', 'livraison_fin', 'couvre_debut', 'couvre_fin'] as const) {
-    if (p[champ] && !dateOk(p[champ])) {
+  // Les sentinelles redeviennent des null. Une chaine vide dans une colonne
+  // DATE fait lever Postgres, et un zero dans min_commande se lirait comme
+  // « minimum de 0 $ » au lieu de « pas de minimum ».
+  const texte = (s: string | undefined | null) => {
+    const v = String(s ?? '').trim()
+    return v.length ? v : null
+  }
+  const nombre = (n: number | undefined | null) => {
+    const v = Number(n)
+    return Number.isFinite(v) && v > 0 ? v : null
+  }
+  const date = (s: string | undefined | null, champ: string) => {
+    const v = texte(s)
+    if (!v) return null
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) {
       incertitudes.push(`La date « ${champ} » n'etait pas au format AAAA-MM-JJ et a ete ignoree.`)
-      ;(p as any)[champ] = null
+      return null
     }
+    return v
   }
 
-  const paliers = (p.paliers || []).filter(pl => {
-    const bon = Number.isFinite(pl.escompte_pct) && Number.isFinite(pl.seuil_montant)
-    if (!bon) incertitudes.push(`Un palier du bareme « ${pl.bareme} » avait un seuil ou un escompte illisible et a ete ecarte.`)
-    return bon
-  })
+  const paliers: PalierExtrait[] = (brut.paliers || [])
+    .filter(pl => {
+      const bon = Number.isFinite(pl.escompte_pct) && Number.isFinite(pl.seuil_montant)
+      if (!bon) incertitudes.push(`Un palier du bareme « ${pl.bareme} » avait un seuil ou un escompte illisible et a ete ecarte.`)
+      return bon
+    })
+    .map(pl => ({ ...pl, niveau: texte(pl.niveau), seuil_qte: nombre(pl.seuil_qte), notes: texte(pl.notes) }))
+
+  const bonus: BonusExtrait[] = (brut.bonus || []).map(b => ({
+    ...b, avant_le: date(b.avant_le, `bonus « ${b.libelle} »`), jours: nombre(b.jours), notes: texte(b.notes),
+  }))
+
+  const p: ProgrammeExtrait = {
+    ...brut,
+    fournisseur_traction: texte(brut.fournisseur_traction),
+    saison: texte(brut.saison),
+    ouvre_le: date(brut.ouvre_le, 'ouvre_le'),
+    ferme_le: date(brut.ferme_le, 'ferme_le'),
+    livraison_debut: date(brut.livraison_debut, 'livraison_debut'),
+    livraison_fin: date(brut.livraison_fin, 'livraison_fin'),
+    couvre_debut: date(brut.couvre_debut, 'couvre_debut'),
+    couvre_fin: date(brut.couvre_fin, 'couvre_fin'),
+    min_commande: nombre(brut.min_commande),
+    min_reappro: nombre(brut.min_reappro),
+    franco_seuil: nombre(brut.franco_seuil),
+    retour_pct: nombre(brut.retour_pct),
+    notes: texte(brut.notes),
+    paliers,
+    bonus,
+    incertitudes,
+  }
 
   // Un echeancier dont les parts ne somment pas a 1 fausserait le calcul du
   // dating sans jamais lever d'erreur. On le signale plutot que de le corriger
