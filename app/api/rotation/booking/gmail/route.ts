@@ -28,6 +28,21 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 800
 
 /**
+ * Le temps qu'on s'autorise a travailler avant de rendre la main.
+ *
+ * Une lecture de programme prend 15 a 50 secondes selon la densite du
+ * document. Une file de trente documents depasse donc largement les 800
+ * secondes de la fonction — et quand la plateforme coupe, la reponse HTTP est
+ * perdue alors que le travail, lui, a bien eu lieu : chaque document est
+ * ecrit au fil de l'eau. L'ecran affiche alors une erreur en laissant croire
+ * que rien ne s'est passe.
+ *
+ * On s'arrete donc AVANT la coupure, et on dit combien il reste. Mieux vaut
+ * quatre reponses honnetes qu'une reponse perdue.
+ */
+const BUDGET_MS = 9 * 60 * 1000
+
+/**
  * De quoi reconnaitre ce qui a ete colle, sans jamais divulguer la cle. Ces
  * trois indices suffisent a diagnostiquer les quatre accidents de copier-coller.
  */
@@ -185,7 +200,10 @@ export async function GET(req: NextRequest) {
         parMessage.set(l.gmail_message_id, [...(parMessage.get(l.gmail_message_id) || []), l])
       }
 
+      let reste = 0
+      const t0 = Date.now()
       for (const [idMsg, lignes] of parMessage) {
+        if (Date.now() - t0 > BUDGET_MS) { reste += lignes.length; continue }
         try {
           const msg = await lireMessage(cfg, jeton, idMsg)
           const contexte = `De : ${msg.expediteur}\nObjet : ${msg.objet}\nRecu le : ${msg.recuLe.slice(0, 10)}`
@@ -233,6 +251,9 @@ export async function GET(req: NextRequest) {
         mode: 'relance',
         fenetre_jours: jours,
         nb_perimes: (perimes || []).length,
+        // Ce qui n'a pas ete atteint dans le temps imparti. L'ecran le dit,
+        // pour qu'on sache qu'il faut relancer plutot que de croire au bout.
+        nb_restant: reste,
         nb_repris: journal.length,
         a_valider: journal.filter(j => j.statut === 'a_valider').length,
         nb_erreurs: journal.filter(j => j.statut === 'erreur').length,
@@ -247,7 +268,10 @@ export async function GET(req: NextRequest) {
     const aTraiter = await listerMessages(cfg, jeton, requeteRecherche(depuis, jours), max)
 
     const journal: any[] = []
+    let nonAtteints = 0
+    const debut = Date.now()
     for (const { id } of aTraiter) {
+      if (Date.now() - debut > BUDGET_MS) { nonAtteints++; continue }
       let msg: MessageBooking | null = null
       try {
         msg = await lireMessage(cfg, jeton, id)
@@ -297,6 +321,7 @@ export async function GET(req: NextRequest) {
       success: true,
       boite: cfg.boite,
       fenetre_jours: depuis ? null : jours,
+      nb_restant: nonAtteints,
       nb_messages: aTraiter.length,
       nb_documents: journal.length,
       a_valider: journal.filter(j => j.statut === 'a_valider').length,
