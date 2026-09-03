@@ -33,14 +33,97 @@ export interface ConfigGmail {
   boite: string
 }
 
+/**
+ * Remet une cle privee en forme PEM, quelle que soit la facon dont elle a ete
+ * collee dans Vercel.
+ *
+ * OpenSSL refuse tout ecart avec un message opaque —
+ * `error:1E08010C:DECODER routines::unsupported` — qui ne dit pas ce qui
+ * cloche. Quatre accidents arrivent en pratique, et tous les quatre donnent
+ * exactement ce meme message :
+ *   · les guillemets du JSON colles avec la valeur
+ *   · les \n restes litteraux, ou au contraire deja convertis
+ *   · des retours chariot Windows glisses par le copier-coller
+ *   · le fichier JSON ENTIER colle au lieu du seul champ private_key
+ * On les rattrape tous ici plutot que de renvoyer l'utilisateur a l'aveugle.
+ */
+export function normaliserClePrivee(brut: string): string {
+  let k = brut.trim()
+
+  // Le fichier JSON complet : on en extrait le champ qui nous interesse.
+  if (k.startsWith('{')) {
+    try {
+      const j = JSON.parse(k)
+      if (typeof j.private_key === 'string') k = j.private_key.trim()
+    } catch { /* on continue avec la valeur brute */ }
+  }
+
+  // Guillemets englobants, simples ou doubles.
+  if ((k.startsWith('"') && k.endsWith('"')) || (k.startsWith("'") && k.endsWith("'"))) {
+    k = k.slice(1, -1).trim()
+  }
+
+  // Sauts de ligne echappes, puis retours chariot.
+  k = k.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\r/g, '')
+
+  // Un PEM arrive parfois sur une seule ligne : on recoupe le base64 en 64.
+  const m = k.match(/-----BEGIN ([A-Z ]+)-----([\s\S]*?)-----END \1-----/)
+  if (m && !m[2].trim().includes('\n')) {
+    const lignes = m[2].replace(/\s+/g, '').match(/.{1,64}/g) || []
+    k = `-----BEGIN ${m[1]}-----\n${lignes.join('\n')}\n-----END ${m[1]}-----\n`
+  }
+
+  if (!k.endsWith('\n')) k += '\n'
+  return k
+}
+
+/**
+ * Ce qui cloche dans la cle, en clair, sans jamais l'afficher. C'est ce que le
+ * diagnostic renvoie a l'ecran quand la signature echoue.
+ */
+export function diagnostiquerCle(brut: string | undefined): string | null {
+  if (!brut) return 'GMAIL_SA_PRIVATE_KEY est vide ou absente.'
+
+  // On juge le resultat de la normalisation, pas la forme d'entree : coller le
+  // fichier JSON entier, ou une cle a guillemets, ou en une seule ligne, se
+  // rattrape sans probleme. Ne signaler que ce qui est vraiment perdu — sinon
+  // on refuse une cle qui aurait parfaitement fonctionne.
+  const k = normaliserClePrivee(brut)
+
+  if (!k.includes('-----BEGIN')) {
+    if (brut.trim().startsWith('{')) {
+      return 'La valeur ressemble a un fichier JSON, mais son champ private_key est illisible. ' +
+             'Colle plutot le contenu de ce champ seul, de « -----BEGIN PRIVATE KEY----- » a ' +
+             '« -----END PRIVATE KEY----- ».'
+    }
+    return 'La cle ne commence pas par « -----BEGIN PRIVATE KEY----- ». C\'est peut-etre le champ ' +
+           'private_key_id — un identifiant court — qui a ete colle au lieu de private_key.'
+  }
+  if (!k.includes('-----END')) {
+    return 'La cle n\'a pas de ligne « -----END PRIVATE KEY----- » : elle a ete tronquee au ' +
+           'copier-coller. Recolle-la en entier.'
+  }
+  const corps = k.replace(/-----[A-Z ]+-----/g, '').replace(/\s+/g, '')
+  if (corps.length < 1000) {
+    return `Le corps de la cle ne fait que ${corps.length} caracteres — une cle de compte de ` +
+           `service en fait environ 1 600. Elle est incomplete.`
+  }
+  if (!/^[A-Za-z0-9+/=]+$/.test(corps)) {
+    return 'Le corps de la cle contient des caracteres qui ne sont pas du base64 : des guillemets ' +
+           'ou des espaces se sont glisses dedans.'
+  }
+  return null
+}
+
 export function lireConfigGmail(): ConfigGmail | null {
-  const email = process.env.GMAIL_SA_EMAIL
-  // Vercel stocke les sauts de ligne echappes : on les restaure, sinon la
-  // signature RS256 echoue avec une erreur de cle illisible.
-  const clePrivee = process.env.GMAIL_SA_PRIVATE_KEY?.replace(/\\n/g, '\n')
-  const boite = process.env.GMAIL_BOOKING_MAILBOX || 'booking@mathiasms.com'
-  if (!email || !clePrivee) return null
-  return { email, clePrivee, boite }
+  // Les guillemets se collent facilement avec le courriel aussi, et Gmail
+  // repondrait alors un 400 incomprehensible sur l'adresse.
+  const email = process.env.GMAIL_SA_EMAIL?.trim().replace(/^["']|["']$/g, '')
+  const brut = process.env.GMAIL_SA_PRIVATE_KEY
+  const boite = (process.env.GMAIL_BOOKING_MAILBOX || 'booking@mathiasms.com')
+    .trim().replace(/^["']|["']$/g, '')
+  if (!email || !brut) return null
+  return { email, clePrivee: normaliserClePrivee(brut), boite }
 }
 
 function b64url(x: Buffer | string): string {
@@ -65,9 +148,19 @@ export async function jetonAcces(cfg: ConfigGmail): Promise<string> {
     exp: maintenant + 3600,
   }))
 
-  const signeur = createSign('RSA-SHA256')
-  signeur.update(`${entete}.${charge}`)
-  const signature = b64url(signeur.sign(cfg.clePrivee))
+  let signature: string
+  try {
+    const signeur = createSign('RSA-SHA256')
+    signeur.update(`${entete}.${charge}`)
+    signature = b64url(signeur.sign(cfg.clePrivee))
+  } catch (e: any) {
+    // OpenSSL ne dit jamais CE qui cloche dans le PEM. On le dit a sa place.
+    const detail = diagnostiquerCle(process.env.GMAIL_SA_PRIVATE_KEY)
+    throw new Error(
+      `La cle privee est illisible (${e?.message || e}). ` +
+      (detail || 'Le format du PEM semble correct mais OpenSSL le refuse : regenere une cle ' +
+                 'JSON depuis la console Google et recolle-la.'))
+  }
   const jwt = `${entete}.${charge}.${signature}`
 
   const r = await fetch(TOKEN_URL, {

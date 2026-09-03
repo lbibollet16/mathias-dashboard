@@ -16,11 +16,36 @@ import { dernierRun, lireTout } from '@/lib/supply-chain-db'
 import { extraireProgramme } from '@/lib/booking-extraction'
 import {
   lireConfigGmail, jetonAcces, idLibelleTraite, listerMessages, lireMessage,
-  telechargerPiece, marquerTraite, requeteRecherche, MessageBooking,
+  telechargerPiece, marquerTraite, requeteRecherche, diagnostiquerCle, MessageBooking,
 } from '@/lib/gmail-booking'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
+
+/**
+ * De quoi reconnaitre ce qui a ete colle, sans jamais divulguer la cle. Ces
+ * trois indices suffisent a diagnostiquer les quatre accidents de copier-coller.
+ */
+function formeCle(brut: string | undefined) {
+  if (!brut) return null
+  const t = brut.trim()
+  return {
+    longueur: t.length,
+    commence_par: t.slice(0, 28),
+    finit_par: t.slice(-26),
+    contient_begin: t.includes('-----BEGIN'),
+    contient_end: t.includes('-----END'),
+    // Un PEM valide a des sauts de ligne REELS. S'il n'a que des \n
+    // echappes, c'est normal — le code les convertit. S'il n'a ni l'un ni
+    // l'autre, la cle est sur une seule ligne et il faut la recouper.
+    sauts_de_ligne_reels: t.split('\n').length - 1,
+    sauts_de_ligne_echappes: t.split('\\n').length - 1,
+    // Sans le drapeau /s, indisponible sur la cible de compilation du projet :
+    // [\s\S] traverse les sauts de ligne aussi bien que le point.
+    guillemets_englobants: /^["'][\s\S]*["']$/.test(t),
+    ressemble_a_du_json: t.startsWith('{'),
+  }
+}
 
 const EXT_PDF = /\.pdf$/i
 const EXT_TABLEUR = /\.(xlsx|xlsm|xls|csv)$/i
@@ -62,6 +87,20 @@ export async function GET(req: NextRequest) {
   const max = Math.min(60, Math.max(1, parseInt(p.get('max') || '15', 10)))
   const test = p.get('test') === '1'
 
+  // La forme de la cle se verifie AVANT de tenter quoi que ce soit : une cle
+  // malformee fait echouer la signature sur un message OpenSSL opaque
+  // (« DECODER routines::unsupported ») qui ne dit pas ce qui cloche.
+  // On ne renvoie jamais la cle, seulement ce qui lui manque.
+  const soucisCle = diagnostiquerCle(process.env.GMAIL_SA_PRIVATE_KEY)
+  if (soucisCle) {
+    return NextResponse.json({
+      erreur: `La cle privee est mal formee. ${soucisCle}`,
+      ou: 'Vercel > Settings > Environment Variables > GMAIL_SA_PRIVATE_KEY, ' +
+          'puis redeploie pour que la nouvelle valeur soit prise en compte.',
+      forme_lue: formeCle(process.env.GMAIL_SA_PRIVATE_KEY),
+    }, { status: 409 })
+  }
+
   try {
     const jeton = await jetonAcces(cfg)
 
@@ -73,6 +112,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         success: true,
         boite: cfg.boite,
+        compte_de_service: cfg.email,
         acces: 'ok',
         requete,
         nb_messages_en_attente: trouves.length,
