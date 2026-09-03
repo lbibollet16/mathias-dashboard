@@ -161,6 +161,8 @@ export async function POST(req: NextRequest) {
       statut_piece: l.statut_piece,
       rotation: l.rotation,
       portage_dollars: l.portage_dollars,
+      alt_couverture: l.alt_couverture ?? 0,
+      alt_codes: l.alt_codes ?? [],
     }))
 
     for (let i = 0; i < lignes.length; i += 500) {

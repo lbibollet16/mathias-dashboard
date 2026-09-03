@@ -49,6 +49,8 @@ export default function BookingImports({ t, email, fournisseurs, onValide }: {
   const [message, setMessage] = useState<string | null>(null)
   const [ouvert, setOuvert] = useState<number | null>(null)
   const [dispo, setDispo] = useState(true)
+  const [gmail, setGmail] = useState<string | null>(null)
+  const [releve, setReleve] = useState(false)
   const input = useRef<HTMLInputElement>(null)
 
   const charger = useCallback(async () => {
@@ -84,6 +86,37 @@ export default function BookingImports({ t, email, fournisseurs, onValide }: {
       if (input.current) input.current.value = ''
     }
   }, [email, charger])
+
+  /**
+   * Deux appels distincts : « verifier » ne consomme rien et sert a valider le
+   * branchement des cles ; « relever » traite vraiment la boite. Separer les
+   * deux evite de decouvrir un probleme d'authentification au milieu d'un
+   * traitement a moitie fait.
+   */
+  const gmailAppel = useCallback(async (mode: 'test' | 'relever' | 'historique') => {
+    setReleve(true); setGmail(null)
+    try {
+      const q = mode === 'test' ? '?test=1'
+        : mode === 'historique' ? '?depuis=2024/01/01&max=60'
+        : ''
+      const r = await fetch(`/api/rotation/booking/gmail${q}`)
+      const j = await r.json()
+      if (j.erreur) {
+        setGmail(`${j.erreur}${j.aide ? ' — ' + j.aide : ''}${j.manque?.length ? ' Manque : ' + j.manque.join(', ') + '.' : ''}`)
+        return
+      }
+      if (mode === 'test') {
+        setGmail(j.message || 'Acces confirme.')
+      } else {
+        setGmail(
+          `${j.nb_messages} courriel(s) releve(s), ${j.nb_documents} document(s) analyse(s), ` +
+          `${j.a_valider} en attente de ta relecture.`)
+        charger()
+      }
+    } catch (e: any) {
+      setGmail(`Erreur : ${e.message}`)
+    } finally { setReleve(false) }
+  }, [charger])
 
   const agir = useCallback(async (id: number, action: string, extra: any = {}) => {
     try {
@@ -143,7 +176,26 @@ export default function BookingImports({ t, email, fournisseurs, onValide }: {
         {totaux.lien_seulement > 0 && (
           <Badge t={t} couleur={t.C.yellow}>{totaux.lien_seulement} derriere un portail</Badge>
         )}
+
+        <span style={{ width: 1, height: 26, background: t.bdr, margin: '0 4px' }} />
+
+        <button onClick={() => gmailAppel('test')} disabled={releve} style={boutonPlat(t, t.sub, releve)}>
+          Verifier l'acces a la boite
+        </button>
+        <button onClick={() => gmailAppel('relever')} disabled={releve} style={boutonPlat(t, t.C.blue, releve)}>
+          {releve ? 'En cours…' : 'Relever booking@'}
+        </button>
+        <button onClick={() => gmailAppel('historique')} disabled={releve} style={boutonPlat(t, t.sub, releve)}
+          title="Analyse jusqu'a 60 courriels depuis janvier 2024 : les programmes des saisons passees remontent d'un coup.">
+          Rattraper l'historique
+        </button>
       </div>
+
+      {gmail && (
+        <div style={{ marginTop: 12 }}>
+          <Message t={t} type={/erreur|refuse|configur|manque/i.test(gmail) ? 'err' : 'ok'}>{gmail}</Message>
+        </div>
+      )}
 
       {envoi && (
         <p style={{ fontSize: 12, color: t.sub, margin: '10px 0 0', lineHeight: 1.6 }}>
@@ -381,6 +433,14 @@ function Info({ t, label, valeur }: { t: Theme; label: string; valeur: string })
       <div style={{ fontWeight: 700, marginTop: 2 }}>{valeur}</div>
     </div>
   )
+}
+
+function boutonPlat(t: Theme, couleur: string, disabled = false): any {
+  return {
+    padding: '7px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700,
+    cursor: disabled ? 'wait' : 'pointer', opacity: disabled ? 0.6 : 1,
+    border: `1px solid ${t.bdr}`, background: 'transparent', color: couleur,
+  }
 }
 
 function bouton(t: Theme, couleur: string): any {

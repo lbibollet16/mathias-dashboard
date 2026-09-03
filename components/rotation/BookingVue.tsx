@@ -553,6 +553,7 @@ function Resultat({ t, p, programme, voirToutes, setVoirToutes }: {
                 <Th t={t}>Dont etirement</Th>
                 <Th t={t}>Stock</Th>
                 <Th t={t}>En route</Th>
+                <Th t={t}>Couvert par equiv.</Th>
                 <Th t={t}>Demande</Th>
                 <Th t={t}>Couv. apres</Th>
                 <Th t={t}>Rotation</Th>
@@ -581,6 +582,13 @@ function Resultat({ t, p, programme, voirToutes, setVoirToutes }: {
                     </td>
                     <td style={tdStyle()}>{l.stock}</td>
                     <td style={tdStyle()}>{l.en_route || '—'}</td>
+                    <td style={{ ...tdStyle(), color: l.alt_couverture > 0 ? t.C.green : t.sub }}>
+                      {l.alt_couverture > 0
+                        ? <span title={`Deja en stock sous : ${(l.alt_codes || []).join(', ')}`}>
+                            −{l.alt_couverture}
+                          </span>
+                        : '—'}
+                    </td>
                     <td style={tdStyle()}>{Number(l.demande_periode).toFixed(1)}</td>
                     <td style={tdStyle()}>{l.couverture_apres != null ? `${l.couverture_apres} m` : '—'}</td>
                     <td style={tdStyle()}>{Number(l.rotation).toFixed(2)}</td>
