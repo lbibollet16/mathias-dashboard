@@ -23,17 +23,13 @@
  * Requiert AI_GATEWAY_API_KEY dans l'env.
  */
 
-import { generateText, Output } from 'ai'
 import { z } from 'zod'
-import { messageErreurIA } from '@/lib/ia-gateway'
+import { extraireJSON } from '@/lib/claude'
 
-// Claude Opus 5 et pas Haiku, contrairement au parseur de commandes Traction.
-// Ce dernier lit un tableau regulier a colonnes fixes ; ici il faut tenir 132
-// paliers repartis sur 22 baremes, distinguer un seuil en dollars d'un seuil
-// en unites, et convertir « 1/3 en avril 2027 » en jours depuis la commande.
-// Le volume est de quelques dizaines de documents par an — le surcout est
-// negligeable devant une grille mal lue.
-const MODELE = 'anthropic/claude-opus-5'
+// Le modele, les deux chemins d'acces et la bascule entre eux vivent dans
+// lib/claude.ts. Opus 5 des deux cotes : il faut tenir 132 paliers repartis
+// sur 22 baremes, distinguer un seuil en dollars d'un seuil en unites, et
+// convertir « 1/3 en avril 2027 » en jours depuis la commande.
 
 // ═══════════════════════════════════════════════════════════════════════
 // Le schema de sortie — il calque sc_booking_programmes / _paliers / _bonus
@@ -128,7 +124,12 @@ export interface ResultatExtraction {
   programme?: ProgrammeExtrait
   duree_ms?: number
   modele?: string
+  /** Quel acces a repondu : l'API Anthropic directe, ou le Vercel AI Gateway. */
+  fournisseur?: 'anthropic' | 'gateway'
   erreur?: string
+  /** L'echec vient-il du service et non du document ? */
+  panne_service?: boolean
+  tentatives?: { fournisseur: string; erreur: string }[]
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -229,46 +230,35 @@ export async function extraireProgramme(d: DemandeExtraction): Promise<ResultatE
       d.texte ? `\n════════ CONTENU ════════\n${d.texte}` : '',
     ].filter(Boolean).join('\n')
 
-    const contenu: any[] = []
-    if (d.data) {
-      // La donnee doit etre un Uint8Array pur, pas un Buffer Node.
-      const src = d.data
-      const ab = new ArrayBuffer(src.byteLength)
-      const copie = new Uint8Array(ab)
-      copie.set(src)
-      contenu.push({
-        type: 'file',
-        mediaType: d.mediaType || 'application/pdf',
-        data: copie,
-        filename: d.nomFichier || 'programme.pdf',
-      })
-    }
-    contenu.push({ type: 'text', text: consigne })
-
-    const result = await generateText({
-      model: MODELE,
+    const r = await extraireJSON({
       system: SYSTEM_PROMPT + promptFournisseurs(d.fournisseurs || []),
-      messages: [{ role: 'user', content: contenu }],
-      output: Output.object({ schema: ProgrammeSchema }),
-      // Une grille de 132 paliers fait un gros JSON. Trop serrer ici tronque
+      consigne,
+      schema: ProgrammeSchema,
+      pdf: d.data ? { data: d.data, nomFichier: d.nomFichier } : undefined,
+      // Une grille de 132 paliers fait un gros JSON. Trop serrer tronque
       // l'extraction en plein tableau, et le programme ressort ampute.
-      maxOutputTokens: 32000,
-      temperature: 0,
+      maxTokens: 32000,
     })
 
-    const programme = result.output as ProgrammeExtrait
+    if (!r.success || !r.objet) {
+      return {
+        success: false,
+        erreur: r.erreur,
+        duree_ms: r.duree_ms,
+        panne_service: r.panne_service,
+        tentatives: r.tentatives,
+      }
+    }
+
     return {
       success: true,
-      programme: normaliser(programme),
-      duree_ms: Date.now() - t0,
-      modele: MODELE,
+      programme: normaliser(r.objet as ProgrammeExtrait),
+      duree_ms: r.duree_ms,
+      modele: r.modele,
+      fournisseur: r.fournisseur,
     }
   } catch (e: any) {
-    return {
-      success: false,
-      erreur: messageErreurIA(e?.message || String(e)),
-      duree_ms: Date.now() - t0,
-    }
+    return { success: false, erreur: e?.message || String(e), duree_ms: Date.now() - t0 }
   }
 }
 

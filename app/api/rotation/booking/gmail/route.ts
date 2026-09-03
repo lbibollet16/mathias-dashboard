@@ -20,6 +20,7 @@ import {
   telechargerPiece, marquerTraite, requeteRecherche, diagnostiquerCle, MessageBooking,
 } from '@/lib/gmail-booking'
 import { pannePassagere } from '@/lib/ia-gateway'
+import { etatFournisseurs } from '@/lib/claude'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -113,15 +114,26 @@ export async function GET(req: NextRequest) {
     if (test) {
       const requete = requeteRecherche(depuis)
       const trouves = await listerMessages(cfg, jeton, requete, 10)
+      // Verifier l'acces Gmail sans verifier l'acces a Claude, c'est valider
+      // la moitie du tuyau : c'est exactement ce qui a laisse croire que tout
+      // etait pret alors que l'extraction ne pouvait pas tourner.
+      const ia = etatFournisseurs()
+      const accesIA = ia.pret
+        ? `Claude joignable par : ${ia.ordre.join(', puis ')}.`
+        : "ATTENTION — aucun acces a Claude n'est configure : l'extraction ne pourra pas " +
+          "tourner. Ajoute ANTHROPIC_API_KEY (facturation Anthropic) ou AI_GATEWAY_API_KEY " +
+          "(facturation Vercel) dans Vercel, puis redeploie."
+
       return NextResponse.json({
         success: true,
         boite: cfg.boite,
         compte_de_service: cfg.email,
         acces: 'ok',
+        ia,
         requete,
         nb_messages_en_attente: trouves.length,
         message: `Acces a ${cfg.boite} confirme. ${trouves.length} message(s) correspondent ` +
-                 `a la recherche et ne sont pas encore traites.`,
+                 `a la recherche et ne sont pas encore traites. ${accesIA}`,
       })
     }
 
