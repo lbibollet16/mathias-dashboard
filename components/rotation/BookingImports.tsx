@@ -93,11 +93,12 @@ export default function BookingImports({ t, email, fournisseurs, onValide }: {
    * deux evite de decouvrir un probleme d'authentification au milieu d'un
    * traitement a moitie fait.
    */
-  const gmailAppel = useCallback(async (mode: 'test' | 'relever' | 'historique') => {
+  const gmailAppel = useCallback(async (mode: 'test' | 'relever' | 'historique' | 'relancer') => {
     setReleve(true); setGmail(null)
     try {
       const q = mode === 'test' ? '?test=1'
         : mode === 'historique' ? '?depuis=2024/01/01&max=60'
+        : mode === 'relancer' ? '?relancer=1&max=30'
         : ''
       const r = await fetch(`/api/rotation/booking/gmail${q}`)
       const j = await r.json()
@@ -107,10 +108,20 @@ export default function BookingImports({ t, email, fournisseurs, onValide }: {
       }
       if (mode === 'test') {
         setGmail(j.message || 'Acces confirme.')
+      } else if (j.panne_message) {
+        // Une panne d'environnement se dit UNE fois, en clair. Vingt-trois
+        // lignes « Echec » identiques a l'ecran ne disent rien d'utile.
+        setGmail(j.panne_message)
+        charger()
+      } else if (mode === 'relancer') {
+        setGmail(`${j.nb_repris} document(s) repris, ${j.a_valider} en attente de ta relecture` +
+                 `${j.nb_erreurs ? `, ${j.nb_erreurs} encore en echec` : ''}.`)
+        charger()
       } else {
         setGmail(
           `${j.nb_messages} courriel(s) releve(s), ${j.nb_documents} document(s) analyse(s), ` +
-          `${j.a_valider} en attente de ta relecture.`)
+          `${j.a_valider} en attente de ta relecture` +
+          `${j.nb_a_rejouer ? `, ${j.nb_a_rejouer} a rejouer plus tard` : ''}.`)
         charger()
       }
     } catch (e: any) {
@@ -189,6 +200,12 @@ export default function BookingImports({ t, email, fournisseurs, onValide }: {
           title="Analyse jusqu'a 60 courriels depuis janvier 2024 : les programmes des saisons passees remontent d'un coup.">
           Rattraper l'historique
         </button>
+        {totaux.erreur > 0 && (
+          <button onClick={() => gmailAppel('relancer')} disabled={releve} style={boutonPlat(t, t.C.red, releve)}
+            title="Retelecharge les pieces jointes depuis Gmail et refait l'extraction. Utile quand l'echec venait du service et non du document.">
+            Relancer les {totaux.erreur} echecs
+          </button>
+        )}
       </div>
 
       {gmail && (
