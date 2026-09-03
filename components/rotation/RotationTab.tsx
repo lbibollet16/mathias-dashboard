@@ -7,6 +7,7 @@
 //   Fournisseurs  — stock, rotation et santé par fournisseur (Pareto)
 //   Codes ligne   — même lecture, regroupée par famille de pièces
 //   Pièces        — détail, filtrable, avec ABC/XYZ, Wilson, point de commande
+//   Booking       — commandes de réservation fournisseur, escompte contre portage
 //   Agents        — tous les constats, par agent
 //   Réceptions    — alertes « commande trop importante rentrée en inventaire »
 //   Archives      — snapshots mensuels, courbe de roulement, inventaire imprimable
@@ -19,8 +20,9 @@ import {
   Theme, Carte, SectionTitre, KpiCard, GrilleKpi, Th, ThTriable, Badge, Message,
   fmtArgentCourt,
 } from '@/components/meca/MecaUI'
+import BookingVue from '@/components/rotation/BookingVue'
 
-type Vue = 'actions' | 'groupes' | 'pieces' | 'agents' | 'receptions' | 'archives' | 'reglages'
+type Vue = 'actions' | 'groupes' | 'pieces' | 'booking' | 'agents' | 'receptions' | 'archives' | 'reglages'
 
 // « À faire » d'abord : c'est la seule vue qu'on doit avoir besoin d'ouvrir un
 // jour normal. Les autres sont là pour creuser quand on a une question précise.
@@ -28,6 +30,7 @@ const VUES: { id: Vue; label: string }[] = [
   { id: 'actions', label: '🎯 À faire' },
   { id: 'pieces', label: '🔩 Pièces' },
   { id: 'groupes', label: '🏭 Regroupements' },
+  { id: 'booking', label: '📅 Booking' },
   { id: 'receptions', label: '🚨 Réceptions' },
   { id: 'agents', label: '🔬 Analyse détaillée' },
   { id: 'archives', label: '🗄️ Archives' },
@@ -280,6 +283,7 @@ export default function RotationTab(props: Theme & { profil?: any }) {
         : { marque: c })} />}
       {vue === 'pieces' && <VuePieces t={t} filtre={filtre} setFiltre={setFiltre}
         listeFournisseurs={fournisseurs.map((g: any) => g.cle)} listeLignes={lignes.map((g: any) => g.cle)} />}
+      {vue === 'booking' && <BookingVue t={t} email={email} />}
       {vue === 'agents' && <VueAgents t={t} resume={data?.findings_par_agent || []} onFinding={ouvrirDepuisFinding} />}
       {vue === 'receptions' && <VueReceptions t={t} email={email} onMaj={charger} />}
       {vue === 'archives' && <VueArchives t={t} snapshots={data?.snapshots || []} onMaj={charger} />}
