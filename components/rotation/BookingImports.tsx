@@ -119,17 +119,22 @@ export default function BookingImports({ t, email, fournisseurs, onValide }: {
       } else if (mode === 'relancer') {
         setGmail(`${j.nb_repris} document(s) repris, ${j.a_valider} en attente de ta relecture` +
                  `${j.nb_erreurs ? `, ${j.nb_erreurs} encore en echec` : ''}` +
-                 `${j.nb_perimes ? `. ${j.nb_perimes} classe(s) sans suite : recus il y a plus de ${j.fenetre_jours} jours, programmes presumes fermes` : ''}.`)
+                 `${j.nb_perimes ? `. ${j.nb_perimes} classe(s) sans suite : recus il y a plus de ${j.fenetre_jours} jours, programmes presumes fermes` : ''}.` +
+                 `${j.nb_restant ? ` Il en reste ${j.nb_restant} : relance encore, une lecture prend 15 a 50 secondes et le temps par appel est limite.` : ''}`)
         charger()
       } else {
         setGmail(
           `${j.nb_messages} courriel(s) releve(s), ${j.nb_documents} document(s) analyse(s), ` +
           `${j.a_valider} en attente de ta relecture` +
-          `${j.nb_a_rejouer ? `, ${j.nb_a_rejouer} a rejouer plus tard` : ''}.`)
+          `${j.nb_a_rejouer ? `, ${j.nb_a_rejouer} a rejouer plus tard` : ''}.` +
+          `${j.nb_restant ? ` Il en reste ${j.nb_restant} : relance encore.` : ''}`)
         charger()
       }
     } catch (e: any) {
-      setGmail(`Erreur : ${e.message}`)
+      // Le travail deja accompli est enregistre au fil de l'eau : on recharge
+      // meme en cas d'echec, sinon l'ecran laisse croire a une perte totale.
+      setGmail(`Erreur : ${e.message} — recharge de l'etat en cours, ce qui a ete traite avant l'incident est conserve.`)
+      charger()
     } finally { setReleve(false) }
   }, [charger])
 
