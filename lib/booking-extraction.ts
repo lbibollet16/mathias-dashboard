@@ -25,6 +25,7 @@
 
 import { generateText, Output } from 'ai'
 import { z } from 'zod'
+import { messageErreurIA } from '@/lib/ia-gateway'
 
 // Claude Opus 5 et pas Haiku, contrairement au parseur de commandes Traction.
 // Ce dernier lit un tableau regulier a colonnes fixes ; ici il faut tenir 132
@@ -263,7 +264,11 @@ export async function extraireProgramme(d: DemandeExtraction): Promise<ResultatE
       modele: MODELE,
     }
   } catch (e: any) {
-    return { success: false, erreur: e?.message || String(e), duree_ms: Date.now() - t0 }
+    return {
+      success: false,
+      erreur: messageErreurIA(e?.message || String(e)),
+      duree_ms: Date.now() - t0,
+    }
   }
 }
 

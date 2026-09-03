@@ -7,6 +7,7 @@
 
 import { generateText, Output } from 'ai'
 import { z } from 'zod'
+import { messageErreurIA, pannePassagere } from '@/lib/ia-gateway'
 
 export interface AiParsedCommande {
   num_commande:    string
@@ -27,6 +28,13 @@ export interface AiParseResult {
   commandes:  AiParsedCommande[]
   duree_ms?:  number
   erreur?:    string
+  /**
+   * L'echec vient-il du service et non du document ? L'appelant retombe sur
+   * le moteur regex dans les deux cas, mais il n'a pas a dire la meme chose :
+   * un PDF illisible demande de regarder le PDF, un gateway a sec demande de
+   * charger des credits.
+   */
+  panne_service?: boolean
 }
 
 const CommandeSchema = z.object({
@@ -150,11 +158,17 @@ export async function parseCommandesPdfAvecIA(buffer: Buffer | Uint8Array): Prom
       duree_ms: Date.now() - t0,
     }
   } catch (e: any) {
+    const brut = e?.message || String(e)
     return {
       success: false,
       commandes: [],
       duree_ms: Date.now() - t0,
-      erreur: e.message || String(e),
+      // Le gateway renvoie des phrases exactes mais opaques hors contexte.
+      // « A positive credit balance is required for all requests, including
+      // BYOK » ne dit pas a un directeur des pieces d'aller charger des
+      // credits dans Vercel.
+      erreur: messageErreurIA(brut),
+      panne_service: pannePassagere(brut),
     }
   }
 }

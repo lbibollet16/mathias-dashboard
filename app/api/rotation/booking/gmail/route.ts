@@ -19,6 +19,7 @@ import {
   lireConfigGmail, jetonAcces, idLibelleTraite, listerMessages, lireMessage,
   telechargerPiece, marquerTraite, requeteRecherche, diagnostiquerCle, MessageBooking,
 } from '@/lib/gmail-booking'
+import { pannePassagere } from '@/lib/ia-gateway'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -46,21 +47,6 @@ function formeCle(brut: string | undefined) {
     guillemets_englobants: /^["'][\s\S]*["']$/.test(t),
     ressemble_a_du_json: t.startsWith('{'),
   }
-}
-
-/**
- * Une panne d'ENVIRONNEMENT, par opposition a un document illisible.
- *
- * La difference decide du sort du message dans Gmail : un document qui n'est
- * pas un programme est definitivement traite, mais un appel qui n'a jamais
- * quitte le serveur doit pouvoir etre rejoue. Sans cette distinction, un solde
- * de credits a zero fait etiqueter « traite » toute la boite en quelques
- * secondes, et les programmes sont perdus pour de bon.
- */
-function pannePassagere(erreur: string | undefined): boolean {
-  if (!erreur) return false
-  return /credit balance|quota|rate limit|429|503|502|504|timeout|ETIMEDOUT|ECONNRESET|fetch failed|overloaded|unavailable|API key|unauthorized|invalid_api_key/i
-    .test(erreur)
 }
 
 const EXT_PDF = /\.pdf$/i
