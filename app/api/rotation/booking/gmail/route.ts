@@ -381,12 +381,12 @@ function versPatch(res: Awaited<ReturnType<typeof extraireProgramme>>, msg: Mess
   if (!p.est_un_programme) {
     return liens.length
       ? {
-          statut: 'lien_seulement', extraction: p, liens_portail: liens,
+          statut: 'lien_seulement', extraction: p, liens_portail: liens, erreur: null,
           modele: res.modele, duree_ms: res.duree_ms,
           commentaire: 'Le programme est derriere un portail concessionnaire : depose le fichier a la main.',
         }
       : {
-          statut: 'rejete', extraction: p, modele: res.modele, duree_ms: res.duree_ms,
+          statut: 'rejete', extraction: p, modele: res.modele, duree_ms: res.duree_ms, erreur: null,
           commentaire: 'Ce document n\'est pas un programme de reservation.',
         }
   }
@@ -401,6 +401,10 @@ function versPatch(res: Awaited<ReturnType<typeof extraireProgramme>>, msg: Mess
     fournisseur_traction: p.fournisseur_traction || null,
     modele: res.modele,
     duree_ms: res.duree_ms,
+    // Une ligne qui repasse au vert perd l'erreur de son essai precedent.
+    // Sans ca, un import valide affiche encore le message qui l'a fait
+    // echouer hier, et on cherche un probleme qui n'existe plus.
+    erreur: null,
   }
 }
 
