@@ -5,6 +5,7 @@
 //         ?depuis=AAAA/MM/JJ   rattraper l'historique depuis une date
 //         ?max=N               plafond de messages traites (defaut 15)
 //         ?test=1              diagnostic seul : verifie l'acces, ne traite rien
+//         ?relancer=1          rejoue les extractions en echec deja enregistrees
 //
 // Chaque message analyse recoit le libelle « Booking traite » dans Gmail, et
 // son id est unique en base : ni le cron ni un rattrapage ne peuvent creer un
@@ -18,6 +19,8 @@ import {
   lireConfigGmail, jetonAcces, idLibelleTraite, listerMessages, lireMessage,
   telechargerPiece, marquerTraite, requeteRecherche, diagnostiquerCle, MessageBooking,
 } from '@/lib/gmail-booking'
+import { pannePassagere } from '@/lib/ia-gateway'
+import { etatFournisseurs } from '@/lib/claude'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -86,6 +89,8 @@ export async function GET(req: NextRequest) {
   const depuis = p.get('depuis') || undefined
   const max = Math.min(60, Math.max(1, parseInt(p.get('max') || '15', 10)))
   const test = p.get('test') === '1'
+  // Rejouer les extractions en echec, sans repasser par la recherche Gmail.
+  const relancer = p.get('relancer') === '1'
 
   // La forme de la cle se verifie AVANT de tenter quoi que ce soit : une cle
   // malformee fait echouer la signature sur un message OpenSSL opaque
@@ -109,20 +114,109 @@ export async function GET(req: NextRequest) {
     if (test) {
       const requete = requeteRecherche(depuis)
       const trouves = await listerMessages(cfg, jeton, requete, 10)
+      // Verifier l'acces Gmail sans verifier l'acces a Claude, c'est valider
+      // la moitie du tuyau : c'est exactement ce qui a laisse croire que tout
+      // etait pret alors que l'extraction ne pouvait pas tourner.
+      const ia = etatFournisseurs()
+      const accesIA = ia.pret
+        ? `Claude joignable par : ${ia.ordre.join(', puis ')}.`
+        : "ATTENTION — aucun acces a Claude n'est configure : l'extraction ne pourra pas " +
+          "tourner. Ajoute ANTHROPIC_API_KEY (facturation Anthropic) ou AI_GATEWAY_API_KEY " +
+          "(facturation Vercel) dans Vercel, puis redeploie."
+
       return NextResponse.json({
         success: true,
         boite: cfg.boite,
         compte_de_service: cfg.email,
         acces: 'ok',
+        ia,
         requete,
         nb_messages_en_attente: trouves.length,
         message: `Acces a ${cfg.boite} confirme. ${trouves.length} message(s) correspondent ` +
-                 `a la recherche et ne sont pas encore traites.`,
+                 `a la recherche et ne sont pas encore traites. ${accesIA}`,
       })
     }
 
     const idLibelle = await idLibelleTraite(cfg, jeton)
     const fournisseurs = await nomsFournisseurs()
+
+    // ── Relance des echecs deja enregistres ───────────────────────
+    // Un message etiquete « traite » dans Gmail ne ressort plus de la
+    // recherche. Sans ce mode, un incident d'environnement — un solde de
+    // credits a zero, par exemple — rendrait ses documents definitivement
+    // inaccessibles alors qu'ils n'ont jamais ete lus. On repart donc des
+    // lignes en erreur et on retelecharge la piece jointe par son id Gmail.
+    if (relancer) {
+      const enErreur = await lireTout<any>('sc_booking_imports',
+        'id, gmail_message_id, nom_fichier, erreur',
+        q => q.eq('statut', 'erreur').not('gmail_message_id', 'is', null)
+              .order('id', { ascending: true }))
+
+      const journal: any[] = []
+      // Un meme courriel peut porter plusieurs documents en echec : on ne le
+      // telecharge qu'une fois.
+      const parMessage = new Map<string, any[]>()
+      for (const l of enErreur.slice(0, max * 3)) {
+        parMessage.set(l.gmail_message_id, [...(parMessage.get(l.gmail_message_id) || []), l])
+      }
+
+      for (const [idMsg, lignes] of parMessage) {
+        try {
+          const msg = await lireMessage(cfg, jeton, idMsg)
+          const contexte = `De : ${msg.expediteur}\nObjet : ${msg.objet}\nRecu le : ${msg.recuLe.slice(0, 10)}`
+
+          for (const l of lignes) {
+            const pj = l.nom_fichier
+              ? msg.pieces.find(x => x.nomFichier === l.nom_fichier)
+              : null
+
+            let res
+            if (pj) {
+              const octets = await telechargerPiece(cfg, jeton, idMsg, pj.attachmentId)
+              res = EXT_PDF.test(pj.nomFichier)
+                ? await extraireProgramme({ data: octets, mediaType: 'application/pdf',
+                    nomFichier: pj.nomFichier, fournisseurs, contexte })
+                : await extraireProgramme({
+                    texte: await tableurEnTexte(octets, pj.nomFichier), fournisseurs, contexte })
+            } else if (msg.corps.trim().length >= 200) {
+              res = await extraireProgramme({ texte: msg.corps, fournisseurs, contexte })
+            } else {
+              journal.push({ id: l.id, statut: 'inchange',
+                note: 'Ni piece jointe retrouvee ni corps exploitable.' })
+              continue
+            }
+
+            const patch = versPatch(res, msg)
+            const { data } = await supabaseAdmin.from('sc_booking_imports')
+              .update({ ...patch, maj_le: new Date().toISOString() })
+              .eq('id', l.id).select().single()
+            journal.push({
+              id: l.id, nom_fichier: l.nom_fichier, statut: data?.statut,
+              erreur: data?.erreur || undefined,
+              nb_paliers: data?.extraction?.paliers?.length ?? 0,
+              incertitudes: (data?.incertitudes || []).length,
+            })
+          }
+        } catch (e: any) {
+          journal.push({ gmail_message_id: idMsg, statut: 'erreur', erreur: e?.message })
+        }
+      }
+
+      const panne = journal.find(j => pannePassagere(j.erreur))?.erreur
+      return NextResponse.json({
+        success: true,
+        mode: 'relance',
+        nb_repris: journal.length,
+        a_valider: journal.filter(j => j.statut === 'a_valider').length,
+        nb_erreurs: journal.filter(j => j.statut === 'erreur').length,
+        panne: panne || null,
+        panne_message: panne
+          ? `L'extraction echoue toujours : ${panne}`
+          : null,
+        journal,
+      })
+    }
+
     const aTraiter = await listerMessages(cfg, jeton, requeteRecherche(depuis), max)
 
     const journal: any[] = []
@@ -130,11 +224,22 @@ export async function GET(req: NextRequest) {
       let msg: MessageBooking | null = null
       try {
         msg = await lireMessage(cfg, jeton, id)
-        journal.push(...await traiterMessage(cfg, jeton, msg, fournisseurs))
-        await marquerTraite(cfg, jeton, id, idLibelle)
+        const lignes = await traiterMessage(cfg, jeton, msg, fournisseurs)
+        journal.push(...lignes)
+
+        // On n'etiquette pas un message dont un document a bute sur une panne
+        // passagere : il doit rester en vue pour la prochaine releve. Les
+        // documents deja extraits ne seront pas dupliques — l'index unique
+        // (gmail_message_id, nom_fichier) s'en charge.
+        const rejouable = lignes.some(l => pannePassagere(l.erreur))
+        if (rejouable) {
+          journal.push({ gmail_message_id: id, statut: 'a_rejouer',
+            note: 'Message laisse non etiquete : l\'extraction n\'a pas pu tourner.' })
+        } else {
+          await marquerTraite(cfg, jeton, id, idLibelle)
+        }
       } catch (e: any) {
-        // Un message qui echoue est journalise et marque quand meme : sinon le
-        // cron rebutera dessus tous les jours et n'avancera jamais.
+        const erreur = e?.message || String(e)
         await supabaseAdmin.from('sc_booking_imports').insert({
           source: 'courriel',
           gmail_message_id: id,
@@ -142,12 +247,24 @@ export async function GET(req: NextRequest) {
           objet: msg?.objet ?? null,
           recu_le: msg?.recuLe ?? new Date().toISOString(),
           statut: 'erreur',
-          erreur: e?.message || String(e),
+          erreur,
         })
-        try { await marquerTraite(cfg, jeton, id, idLibelle) } catch { /* deja signale */ }
-        journal.push({ gmail_message_id: id, statut: 'erreur', erreur: e?.message })
+        // Meme regle qu'au-dessus. Un message qui a bute sur un document
+        // illisible est etiquete : sinon le cron rebute dessus tous les jours
+        // et n'avance jamais. Mais un message tombe sur une panne d'environnement
+        // reste en vue, sans quoi une coupure de service viderait la boite de
+        // ses programmes sans que rien n'ait ete lu.
+        if (!pannePassagere(erreur)) {
+          try { await marquerTraite(cfg, jeton, id, idLibelle) } catch { /* deja signale */ }
+        }
+        journal.push({ gmail_message_id: id, statut: 'erreur', erreur })
       }
     }
+
+    // Quand toute la releve echoue sur la meme panne, le dire UNE fois et en
+    // clair vaut mieux que vingt-trois lignes identiques a l'ecran.
+    const panne = journal.find(j => pannePassagere(j.erreur))?.erreur
+    const nbErreurs = journal.filter(j => j.statut === 'erreur').length
 
     return NextResponse.json({
       success: true,
@@ -155,6 +272,13 @@ export async function GET(req: NextRequest) {
       nb_messages: aTraiter.length,
       nb_documents: journal.length,
       a_valider: journal.filter(j => j.statut === 'a_valider').length,
+      nb_erreurs: nbErreurs,
+      nb_a_rejouer: journal.filter(j => j.statut === 'a_rejouer').length,
+      panne: panne || null,
+      panne_message: panne
+        ? `L'extraction n'a pas pu tourner : ${panne} — les messages concernes n'ont PAS ete ` +
+          `etiquetes dans Gmail, relance la releve quand ce sera regle.`
+        : null,
       journal,
     })
   } catch (e: any) {
@@ -297,6 +421,7 @@ async function enregistrer(ligne: any): Promise<any> {
     id: data.id,
     nom_fichier: data.nom_fichier,
     statut: data.statut,
+    erreur: data.erreur || undefined,
     fournisseur: data.fournisseur_traction || data.fournisseur_annonce,
     nb_paliers: data.extraction?.paliers?.length ?? 0,
     incertitudes: (data.incertitudes || []).length,

@@ -156,7 +156,12 @@ export async function POST(req: NextRequest) {
         commandes = r.commandes
         moteurUtilise = 'ia'
       } else {
-        warnings.push(`IA indisponible (${r.erreur}) — fallback regex`)
+        // Deux avertissements de nature differente. Le premier envoie
+        // regarder le PDF, le second envoie charger des credits — les
+        // confondre fait chercher au mauvais endroit.
+        warnings.push(r.panne_service
+          ? `Moteur IA hors service — import fait au moteur regex. ${r.erreur}`
+          : `L'IA n'a pas su lire ce PDF (${r.erreur}) — fallback regex`)
         const rg = await parseCommandesPdf(buf)
         if (!rg.success) {
           return NextResponse.json({

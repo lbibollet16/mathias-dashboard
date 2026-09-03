@@ -1,12 +1,17 @@
 // Parser IA des PDF "Liste commande" Traction.
-// On envoie le PDF DIRECTEMENT à Claude (vision native, supportée via le
-// Vercel AI Gateway). Pas besoin d'extraction texte préalable — Claude lit
-// la mise en page du tableau et nous renvoie un JSON structuré.
+// On envoie le PDF DIRECTEMENT à Claude (vision native). Pas besoin
+// d'extraction texte préalable — Claude lit la mise en page du tableau et
+// nous renvoie un JSON structuré.
 //
-// Requiert AI_GATEWAY_API_KEY dans l'env.
+// L'accès passe par lib/claude.ts, qui essaie l'API Anthropic puis le Vercel
+// AI Gateway et bascule de l'un à l'autre quand l'échec vient du service.
+// Requiert donc ANTHROPIC_API_KEY ou AI_GATEWAY_API_KEY.
+//
+// En cas d'échec, l'appelant retombe sur le moteur regex : cet import n'est
+// jamais bloqué par une panne d'IA.
 
-import { generateText, Output } from 'ai'
 import { z } from 'zod'
+import { extraireJSON } from '@/lib/claude'
 
 export interface AiParsedCommande {
   num_commande:    string
@@ -27,6 +32,13 @@ export interface AiParseResult {
   commandes:  AiParsedCommande[]
   duree_ms?:  number
   erreur?:    string
+  /**
+   * L'echec vient-il du service et non du document ? L'appelant retombe sur
+   * le moteur regex dans les deux cas, mais il n'a pas a dire la meme chose :
+   * un PDF illisible demande de regarder le PDF, un gateway a sec demande de
+   * charger des credits.
+   */
+  panne_service?: boolean
 }
 
 const CommandeSchema = z.object({
@@ -105,31 +117,28 @@ export async function parseCommandesPdfAvecIA(buffer: Buffer | Uint8Array): Prom
     const data = new Uint8Array(ab)
     data.set(src)
 
-    const result = await generateText({
-      model: 'anthropic/claude-haiku-4.5',
+    const r = await extraireJSON({
       system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'file',
-              mediaType: 'application/pdf',
-              data,
-              filename: 'liste-commande.pdf',
-            },
-            {
-              type: 'text',
-              text: 'Extrais toutes les lignes de commande de ce PDF.',
-            },
-          ],
-        },
-      ],
-      output: Output.object({ schema: ResponseSchema }),
-      temperature: 0,
+      consigne: 'Extrais toutes les lignes de commande de ce PDF.',
+      schema: ResponseSchema,
+      pdf: { data, nomFichier: 'liste-commande.pdf' },
+      // Haiku, comme dans la version d'origine : ce rapport a toujours la
+      // meme mise en page a colonnes fixes, et Opus n'y apporterait rien
+      // qu'un cinquieme de facture en plus.
+      niveau: 'haiku',
     })
 
-    const object = result.output as z.infer<typeof ResponseSchema>
+    if (!r.success || !r.objet) {
+      return {
+        success: false,
+        commandes: [],
+        duree_ms: r.duree_ms,
+        erreur: r.erreur,
+        panne_service: r.panne_service,
+      }
+    }
+
+    const object = r.objet as z.infer<typeof ResponseSchema>
     const commandes: AiParsedCommande[] = (object.commandes || []).map((c: any) => ({
       num_commande:    String(c.num_commande || ''),
       statut:          String(c.statut || ''),
@@ -154,7 +163,7 @@ export async function parseCommandesPdfAvecIA(buffer: Buffer | Uint8Array): Prom
       success: false,
       commandes: [],
       duree_ms: Date.now() - t0,
-      erreur: e.message || String(e),
+      erreur: e?.message || String(e),
     }
   }
 }

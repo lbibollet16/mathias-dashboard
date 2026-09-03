@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { dernierRun, lireTout } from '@/lib/supply-chain-db'
 import { extraireProgramme, ProgrammeExtrait } from '@/lib/booking-extraction'
+import { etatFournisseurs } from '@/lib/claude'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -78,6 +79,18 @@ export async function POST(req: NextRequest) {
     const email = String(form.get('user_email') || '') || null
     if (!fichiers.length) {
       return NextResponse.json({ erreur: 'Aucun fichier recu' }, { status: 400 })
+    }
+
+    // Refuser tout de suite plutot que d'enregistrer N lignes en erreur : sans
+    // acces a Claude, aucun televersement ne peut aboutir.
+    const ia = etatFournisseurs()
+    if (!ia.pret) {
+      return NextResponse.json({
+        erreur: "Aucun acces a Claude n'est configure : l'extraction ne peut pas tourner.",
+        aide: 'Ajoute ANTHROPIC_API_KEY (facturation Anthropic, console.anthropic.com) ou ' +
+              'AI_GATEWAY_API_KEY (facturation Vercel) dans Vercel > Settings > Environment ' +
+              'Variables, puis redeploie.',
+      }, { status: 409 })
     }
 
     const fournisseurs = await nomsFournisseurs()
