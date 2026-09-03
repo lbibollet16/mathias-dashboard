@@ -107,6 +107,7 @@ export function etatFournisseurs() {
     souci_anthropic: process.env.ANTHROPIC_API_KEY
       ? diagnostiquerCleApi(process.env.ANTHROPIC_API_KEY)
       : null,
+    espace_travail: !!nettoyerCleApi(process.env.ANTHROPIC_WORKSPACE_ID),
   }
 }
 
@@ -154,7 +155,19 @@ async function viaAnthropic<T extends z.ZodTypeAny>(d: DemandeJSON<T>): Promise<
 
   // On passe la cle explicitement plutot que de laisser le SDK lire l'env :
   // c'est le seul moyen de lui donner la version nettoyee.
-  const client = new Anthropic({ apiKey: nettoyerCleApi(process.env.ANTHROPIC_API_KEY) })
+  //
+  // L'en-tete d'espace de travail est OBLIGATOIRE avec une cle « liee a une
+  // identite » — celles que la console cree par defaut sur un compte
+  // d'organisation. Sans elle, Anthropic repond 400 :
+  //   « anthropic-workspace-id is required when authenticating with an
+  //     identity-linked API key »
+  // C'est un refus de REQUETE, pas d'authentification : la cle est bonne, il
+  // lui manque juste le contexte de travail.
+  const espace = nettoyerCleApi(process.env.ANTHROPIC_WORKSPACE_ID)
+  const client = new Anthropic({
+    apiKey: nettoyerCleApi(process.env.ANTHROPIC_API_KEY),
+    ...(espace ? { defaultHeaders: { 'anthropic-workspace-id': espace } } : {}),
+  })
   const modele = MODELES[d.niveau || 'opus'].direct
 
   const contenu: Anthropic.ContentBlockParam[] = []

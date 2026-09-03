@@ -80,6 +80,17 @@ export function messageErreurIA(
   if (/quota/i.test(e)) {
     return `Le quota est atteint. Verifie les limites du compte.${brut}`
   }
+  // Ce cas passe AVANT le controle d'authentification : son texte contient
+  // « API key » et serait sinon classe comme une cle revoquee, ce qui envoie
+  // chercher exactement au mauvais endroit. La cle est bonne — il lui manque
+  // le contexte d'espace de travail.
+  if (/anthropic-workspace-id is required/i.test(e)) {
+    return `Ta cle Anthropic est valide, mais c'est une cle « liee a une identite » : elle exige ` +
+           `qu'on precise dans quel espace de travail la requete agit. Ajoute ` +
+           `ANTHROPIC_WORKSPACE_ID dans Vercel (l'identifiant « wrkspc_... » se lit dans ` +
+           `console.anthropic.com > Settings > Workspaces, ou dans l'URL de l'espace), puis ` +
+           `redeploie. Autre solution : creer une cle d'API standard, non liee a une identite.${brut}`
+  }
   if (/authentication|invalid x-api-key|invalid_api_key|API key|unauthorized|\b401\b|\b403\b/i.test(e)) {
     return `La cle ${ou.variable} est absente, mal copiee ou revoquee. Verifie-la dans ` +
            `Vercel > Settings > Environment Variables, puis redeploie. Verifie aussi qu'elle ` +
