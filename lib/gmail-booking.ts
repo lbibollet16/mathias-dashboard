@@ -251,9 +251,18 @@ export interface MessageBooking {
  * objet ou a une piece jointe. Le filtre reste large — c'est l'extraction qui
  * tranche ensuite si le document est un programme ou non.
  */
-export function requeteRecherche(depuis?: string): string {
-  const morceaux = [`-label:"${LIBELLE_TRAITE}"`, 'has:attachment OR subject:(booking OR réservation OR reservation OR precommande OR précommande OR stocking OR program OR programme)']
+/** Fenetre par defaut, en jours. Voir le commentaire de `requeteRecherche`. */
+export const FENETRE_JOURS = 30
+
+export function requeteRecherche(depuis?: string, jours: number = FENETRE_JOURS): string {
+  const morceaux = [
+    `-label:"${LIBELLE_TRAITE}"`,
+    'has:attachment OR subject:(booking OR réservation OR reservation OR precommande OR précommande OR stocking OR program OR programme)',
+  ]
+  // `depuis` (AAAA/MM/JJ) l'emporte : c'est le rattrapage d'historique
+  // explicite. Sinon on se limite a la fenetre glissante.
   if (depuis) morceaux.push(`after:${depuis}`)
+  else if (jours > 0) morceaux.push(`newer_than:${Math.round(jours)}d`)
   return morceaux.join(' ')
 }
 
