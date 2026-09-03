@@ -31,3 +31,6 @@ tsconfig.tsbuildinfo
 
 # Scripts jetables de session
 .tmp-*
+
+# Les PDF de programmes fournisseurs : sources de saisie, pas du code
+/booking/

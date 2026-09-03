@@ -192,6 +192,14 @@ export interface AnalysePiece {
   demande_saison: number       // demande prévue sur l'horizon de préparation
   besoin_saison: number        // ce qu'il manque pour tenir cet horizon
 
+  // La demande débarrassée de la saison, et la courbe qu'on lui a retirée.
+  // Le booking en a besoin : il couvre une fenêtre choisie par l'utilisateur
+  // — « novembre à mai » — qui n'a aucune raison de coïncider avec l'horizon
+  // configuré. Sans ces deux-là, impossible de répondre à « combien m'en
+  // faut-il pour traverser cette période-là » autrement qu'en moyenne plate.
+  demande_deseason: number
+  indice_12m: number[]
+
   serie_12m: number[]
 }
 
@@ -922,6 +930,8 @@ export function analyser(e: EntreeAnalyse): ResultatAnalyse {
       pic_mois: picMois,
       demande_saison: demandeSaison,
       besoin_saison: besoinSaison,
+      demande_deseason: deseason,
+      indice_12m: indice,
       serie_12m: serie,
       _cogsAnnualise: cogsAnnualise,
     })
