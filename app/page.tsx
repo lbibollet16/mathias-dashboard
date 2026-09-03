@@ -15,8 +15,8 @@ const supabaseCli = createClient(
 )
 
 const ROLES_ONGLETS: Record<string, string[]> = {
-  admin:        ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','rotation','verification','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config','utilisateurs'],
-  gestionnaire: ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','rotation','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config'],
+  admin:        ['calc','import','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','rotation','verification','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config','utilisateurs'],
+  gestionnaire: ['calc','import','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','rotation','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config'],
   commis:       ['commandes','commandes_attente','fournitures','retours','aviseur','commis_pieces'],
   employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours','aviseur','commis_pieces'],
 }
@@ -411,7 +411,7 @@ export default function Dashboard() {
         // déroulant {key, enfants[]}. Les menus évitent que la barre déborde.
         const items: any[] = [
           {key:'grp_achats', l:isMobile?'🧮 Achats':'🧮 Calculateur Achats', enfants:[
-            {id:'calc',l:'🧮 Calculateur Achats'},{id:'import',l:'📥 Importer Ventes'},{id:'booking',l:'📊 Booking'},
+            {id:'calc',l:'🧮 Calculateur Achats'},{id:'import',l:'📥 Importer Ventes'},
           ]},
           {id:'retours',l:isMobile?'🔄 RMA':'Retours RMA'},
           {id:'negatifs',l:isMobile?'🔴 Négatifs':'Pièces Négatives',d:true},
@@ -869,8 +869,30 @@ export default function Dashboard() {
           </div>
         </>}
 
-        {/* ── BOOKING ─────────────────────────────────────────────── */}
-        {tab==='booking' && <BookingTab data={data} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} alts={alts}/>}
+        {/* ── BOOKING : a demenage dans Rotation & Fournisseurs ───── */}
+        {/* L'ancien optimiseur donnait des quantites differentes du nouveau
+            pour le meme fournisseur, sans jamais connaitre les paliers ni les
+            termes de paiement d'un programme. Il est remplace, pas duplique.
+            Ce renvoi evite un ecran blanc a qui avait l'onglet en signet. */}
+        {tab==='booking' && (
+          <div style={{maxWidth:700,margin:'0 auto'}}>
+            <div style={{background:card,borderRadius:12,padding:'20px 24px',border:`1px solid ${bdr}`}}>
+              <h3 style={{margin:'0 0 10px',fontSize:16,fontWeight:700}}>Le Booking a demenage</h3>
+              <p style={{margin:'0 0 8px',fontSize:13,lineHeight:1.7,color:sub}}>
+                Il est maintenant dans <strong>Rotation &amp; Fournisseurs</strong>, onglet
+                {' '}<strong>Booking</strong>, ou il connait les programmes de tes fournisseurs :
+                paliers, escomptes, termes de paiement et dates limites.
+              </p>
+              <p style={{margin:'0 0 16px',fontSize:13,lineHeight:1.7,color:sub}}>
+                Il repond desormais a « est-ce que ce programme vaut le cout de porter ce stock »,
+                et plus seulement a « qu'est-ce que je commande ».
+              </p>
+              <button onClick={()=>setTab('rotation')} style={{padding:'9px 16px',borderRadius:8,fontSize:13,fontWeight:700,cursor:'pointer',border:'1px solid #1a73e8',background:'#1a73e81f',color:'#1a73e8'}}>
+                Aller a Rotation &amp; Fournisseurs
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── NÉGATIFS ────────────────────────────────────────────── */}
         {tab==='negatifs' && <NegatifsTab negs={negs} dark={dark} card={card} bdr={bdr} sub={sub} thBg={thBg} S={S} C={C} hvr={hvr} alts={alts} negsVerifies={negsVerifies} setNegsVerifies={setNegsVerifies} profil={profil} data={data} lancerSync={lancerSync} syncing={syncing} syncLog={syncLog} validationsCompta={validationsCompta} retoursActifs={retoursActifsGlobal} setRetoursActifs={setRetoursActifsGlobal} verifsDoubles={verifsDoubles}/>}
@@ -4419,7 +4441,6 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
   const TOUS_ONGLETS = [
     { id: 'calc',        label: '🧮 Calculateur Achats',  desc: 'Calcul des achats et stocks' },
     { id: 'import',      label: '📥 Importer Ventes',     desc: 'Import des données de ventes' },
-    { id: 'booking',     label: '📅 Booking',             desc: 'Planification et réservations' },
     { id: 'retours',     label: '🔄 Retours RMA',         desc: 'Gestion des retours fournisseurs' },
     { id: 'negatifs',    label: '🔴 Pièces Négatives',    desc: 'Suivi des pièces en négatif' },
     { id: 'commandes',   label: '📋 Commandes du jour',   desc: 'Commandes journalières' },
@@ -4439,8 +4460,8 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
   ]
 
   const ROLES_LEGACY: Record<string, string[]> = {
-    admin:         ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','rotation','verification','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config','utilisateurs'],
-    gestionnaire:  ['calc','import','booking','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','rotation','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config'],
+    admin:         ['calc','import','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','rotation','verification','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config','utilisateurs'],
+    gestionnaire:  ['calc','import','retours','negatifs','commandes','commandes_attente','fournitures','inventaire','rotation','comptabilite','amazon','aviseur','directeur_service','aviseur_technique','commis_pieces','comptoir_pieces','pieces_config'],
     commis:        ['commandes','commandes_attente','fournitures','retours','aviseur','commis_pieces'],
     employe_piece: ['commandes_attente','fournitures','negatifs','inventaire','retours','aviseur','commis_pieces'],
   }
@@ -4812,128 +4833,6 @@ function UtilisateursTab({dark, card, bdr, sub, thBg, S, C, hvr}: any) {
 
 // ── Négatifs Tab ────────────────────────────────────────────────────────────
 // ── Booking Tab ──────────────────────────────────────────────────────────────
-function BookingTab({data,dark,card,bdr,sub,thBg,S,alts}: any) {
-  const C = { blue:'#1a73e8', green:'#188038', yellow:'#f9ab00', red:'#d93025' }
-  const [fournisseur,setFournisseur]=useState('')
-  const [debut,setDebut]=useState('')
-  const [fin,setFin]=useState('')
-  const [termes,setTermes]=useState(30)
-  const [budget,setBudget]=useState(0)
-  const [calc,setCalc]=useState(false)
-  const [res,setRes]=useState<any[]>([])
-  const [cf,setCf]=useState<any>(null)
-  const hvr=dark?'#1a1a1a':'#f8fafc'
-
-  const fournisseurs=Array.from(new Set((data?.liste_complete||[]).filter((it:any)=>it.classeABC!=='C').map((it:any)=>it.fournisseur))).sort() as string[]
-
-  function optimiser(e:any){
-    e.preventDefault()
-    if(!data?.liste_complete)return
-    const mDeb=parseInt(debut.split('-')[1])-1,mFin=parseInt(fin.split('-')[1])-1
-    const mois:number[]=[]
-    if(mDeb<=mFin){for(let i=mDeb;i<=mFin;i++)mois.push(i)}else{for(let i=mDeb;i<=11;i++)mois.push(i);for(let i=0;i<=mFin;i++)mois.push(i)}
-    let sugg:any[]=[],coutTot=0
-    data.liste_complete.forEach((it:any)=>{
-      if(it.fournisseur!==fournisseur||it.classeABC==='C')return
-      let v=0; mois.forEach((m:number)=>{v+=it.moyMois*(it.indiceSaison?.[m]??1)})
-      if(v<=3)return
-      // Exclure si une alternative couvre la demande
-      const altCodesB:string[] = (alts&&alts.get&&alts.get(it.pk))||[]
-      const normB = (s:string) => s.trim().toLowerCase().replace(/\s+/g,'')
-      const altCouvreB = altCodesB.some((ac:string)=>{
-        const acN=normB(ac)
-        const ai=data.liste_complete.find((x:any)=>normB(x.pk)===acN)
-        return ai&&Math.max(0,ai.stock)>=v
-      })
-      if(altCouvreB)return
-      const saf=it.stockSecurite||Math.ceil(v*(it.classeABC==='A'?.2:.1))
-      const q=Math.ceil(v+saf-Math.max(0,it.stock))
-      if(q>0&&it.saison!=='Sur Commande')sugg.push({...it,vp:v.toFixed(1),saf,vs:it.stock,qb:q})
-    })
-    sugg.sort((a:any,b:any)=>((b.scoreUrgence||0)-(a.scoreUrgence||0)))
-    if(budget>0){
-      let tot=0;const sel:any[]=[]
-      for(const s of sugg){const c=s.qb*s.cost;if(tot+c<=budget){sel.push(s);tot+=c}}
-      sugg=sel;coutTot=tot
-    } else {
-      coutTot=sugg.reduce((s:number,it:any)=>s+it.qb*it.cost,0)
-    }
-    setRes(sugg)
-    // Cashflow
-    const payDate=new Date(debut);payDate.setDate(payDate.getDate()+termes)
-    const encDate=new Date(fin);encDate.setMonth(encDate.getMonth()+1)
-    const ecart=Math.round((payDate.getTime()-encDate.getTime())/(1000*60*60*24))
-    setCf({coutTot,payF:payDate.toLocaleDateString('fr-CA'),encF:encDate.toLocaleDateString('fr-CA'),ecart})
-    setCalc(true)
-  }
-
-  return <div style={{maxWidth:1400,margin:'0 auto'}}>
-    <div style={{background:card,borderRadius:12,padding:'16px 20px',marginBottom:14,border:`1px solid ${bdr}`}}>
-      <h3 style={{margin:'0 0 14px',fontSize:16,fontWeight:700}}>🧠 Optimiseur de Booking</h3>
-      <form onSubmit={optimiser} style={{display:'flex',gap:12,flexWrap:'wrap',alignItems:'flex-end'}}>
-        <div style={{flex:2,minWidth:180}}>
-          <label style={{display:'block',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Fournisseur</label>
-          <select value={fournisseur} onChange={e=>setFournisseur(e.target.value)} required style={S}>
-            <option value="">Sélectionner...</option>
-            {fournisseurs.map((f:string)=><option key={f} value={f}>{f}</option>)}
-          </select>
-        </div>
-        <div style={{flex:1,minWidth:130}}>
-          <label style={{display:'block',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Début période</label>
-          <input type="month" value={debut} onChange={e=>setDebut(e.target.value)} required style={S}/>
-        </div>
-        <div style={{flex:1,minWidth:130}}>
-          <label style={{display:'block',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Fin période</label>
-          <input type="month" value={fin} onChange={e=>setFin(e.target.value)} required style={S}/>
-        </div>
-        <div style={{flex:1,minWidth:130}}>
-          <label style={{display:'block',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Termes (jours)</label>
-          <input type="number" value={termes} onChange={e=>setTermes(Number(e.target.value))} min={0} style={S}/>
-        </div>
-        <div style={{flex:1.2,minWidth:140}}>
-          <label style={{display:'block',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,marginBottom:5}}>Budget Max ($)</label>
-          <input type="number" value={budget} onChange={e=>setBudget(Number(e.target.value))} min={0} step={100} style={S}/>
-        </div>
-        <button type="submit" style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'0 18px',height:39,fontSize:13,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>🧠 Optimiser</button>
-      </form>
-    </div>
-    {calc&&cf&&<div style={{background:cf.ecart<=0?(dark?'#0d2a18':'#e6f4ea'):(dark?'#2b2411':'#fef7e0'),border:`2px solid ${cf.ecart<=0?C.green:C.yellow}`,borderRadius:10,padding:'12px 18px',marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:10}}>
-      <div><div style={{fontSize:11,fontWeight:700,color:sub,textTransform:'uppercase',marginBottom:3}}>Total</div><strong style={{fontSize:24,color:C.blue}}>{cf.coutTot.toLocaleString('fr-CA',{minimumFractionDigits:2})} $</strong></div>
-      <div style={{color:cf.ecart<=0?C.green:'#92400e',fontWeight:600,fontSize:13,maxWidth:'60%',textAlign:'right'}}>
-        {cf.ecart<=0?`✅ Trésorerie OK — Facture le ${cf.payF}, ventes vers ${cf.encF}.`:`⚠️ Paiement le ${cf.payF} mais ventes vers ${cf.encF}. Financer ${cf.ecart} jours.`}
-      </div>
-    </div>}
-    <div style={{background:card,borderRadius:12,border:`1px solid ${bdr}`,overflow:'hidden'}}>
-      <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-        <thead><tr style={{background:thBg}}>
-          {['Matrice','Code Pièce','Description','Ventes Prédites','Stock Sécu.','Stock Actuel','Coût Un.','QTÉ BOOKING','Total $'].map((h,i)=>(
-            <th key={i} style={{padding:'11px 9px',fontSize:11,fontWeight:700,textTransform:'uppercase',color:sub,borderBottom:`2px solid ${bdr}`,textAlign:i>=3?'center':'left',background:i===7?(dark?'#0d2a18':'#e6f4ea'):thBg}}>{h}</th>
-          ))}
-        </tr></thead>
-        <tbody>
-          {!calc
-            ? <tr><td colSpan={9} style={{textAlign:'center',padding:50,color:sub}}>Remplissez les informations et cliquez Optimiser.</td></tr>
-            : res.length===0
-            ? <tr><td colSpan={9} style={{textAlign:'center',padding:50,color:sub}}>Aucune pièce A ou B valide pour ce budget.</td></tr>
-            : res.map((it,i)=>(
-              <tr key={i}>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center'}}><span style={{background:it.classeABC==='A'?C.green:C.yellow,color:'#fff',padding:'3px 6px',borderRadius:4,fontSize:11,fontWeight:700}}>{it.classeABC}</span></td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,fontWeight:700}}>{it.pk}</td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:sub}}>{it.desc}</td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.blue,fontWeight:700}}>{it.vp}</td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:C.yellow,fontWeight:700}}>+{it.saf}</td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',color:it.vs<0?C.red:sub,fontWeight:600}}>{it.vs}</td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',color:sub}}>{it.cost.toFixed(2)}$</td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'center',background:dark?'#0d2a18':'#e6f4ea',color:C.green,fontSize:17,fontWeight:900}}>{it.qb}</td>
-                <td style={{padding:'9px',borderBottom:`1px solid ${bdr}`,textAlign:'right',fontWeight:700}}>{(it.qb*it.cost).toLocaleString('fr-CA',{minimumFractionDigits:2})}$</td>
-              </tr>
-            ))
-          }
-        </tbody>
-      </table>
-    </div>
-  </div>
-}
 
 // ── Composant : bandeau de retour comptabilité ───────────────────────────────
 // Affiché en TÊTE de NegatifsTab et InventaireTab quand il y a des retours

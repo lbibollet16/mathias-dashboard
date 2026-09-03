@@ -164,6 +164,18 @@ export interface DemandeBooking {
   palierVise?: string | null
   /** Ne proposer que des pieces deja vendues au moins une fois. */
   exclureJamaisVendues?: boolean
+
+  /**
+   * Les references interchangeables, depuis `pieces_alternatives` :
+   * code principal -> codes qui peuvent le remplacer.
+   */
+  alternatives?: Map<string, string[]>
+  /**
+   * Stock disponible de CHAQUE code du catalogue, alternatives comprises —
+   * y compris celles d'un autre fournisseur ou hors du perimetre du
+   * programme. Une piece sur la tablette compte, peu importe qui l'a vendue.
+   */
+  stockParCode?: Map<string, number>
 }
 
 export interface LigneBooking {
@@ -188,6 +200,10 @@ export interface LigneBooking {
   statut_piece: string
   rotation: number
   portage_dollars: number
+  /** Unites du besoin deja couvertes par une reference interchangeable en stock. */
+  alt_couverture: number
+  /** Les references qui ont fourni cette couverture. */
+  alt_codes: string[]
 }
 
 export interface EtatBareme {
@@ -440,6 +456,8 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
     deseason: number
     bareme: string          // affecte plus bas
     motif: LigneBooking['motif']
+    altCouverture: number   // unites deja couvertes par une reference equivalente
+    altCodes: string[]
   }
 
   const candidats: Candidat[] = []
@@ -502,7 +520,58 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
     candidats.push({
       p, besoin, demandePeriode, stockAuDebut, deseason: ds, bareme: 'global',
       motif: (p.stock_dispo <= 0 && ds > 0) ? 'rupture' : 'besoin',
+      altCouverture: 0, altCodes: [],
     })
+  }
+
+  // ── Les references interchangeables ───────────────────────────────
+  //
+  // Deux codes qui font le meme travail ne se planifient pas separement :
+  // booker un joint dont l'equivalent dort sur la tablette, c'est payer deux
+  // fois la meme piece.
+  //
+  // Le piege est le double comptage. Si A et B sont interchangeables et que
+  // les deux ont un besoin, crediter le stock de B a A puis le stock de A a B
+  // annulerait les deux besoins alors qu'il n'y a qu'un seul stock. On tient
+  // donc un compteur d'unites encore disponibles, et chaque unite ne peut
+  // servir qu'une fois — les pieces les plus lourdes passent en premier.
+  if (d.alternatives && d.alternatives.size > 0) {
+    const restant = new Map<string, number>()
+    const dispoDe = (code: string) => d.stockParCode?.get(code) ?? 0
+
+    // Les besoins les plus chers d'abord : c'est la ou une alternative
+    // deja en stock economise le plus.
+    const parPoids = [...candidats]
+      .filter(c => c.besoin > 0)
+      .sort((a, b) => (b.besoin * b.p.cout_unitaire) - (a.besoin * a.p.cout_unitaire))
+
+    for (const c of parPoids) {
+      const equivalents = d.alternatives.get(c.p.code_piece) || []
+      if (!equivalents.length) continue
+
+      for (const alt of equivalents) {
+        if (c.besoin <= 0) break
+        if (normaliser(alt) === normaliser(c.p.code_piece)) continue
+        if (!restant.has(alt)) restant.set(alt, Math.max(0, dispoDe(alt)))
+        const libre = restant.get(alt) || 0
+        if (libre <= 0) continue
+
+        const pris = Math.min(libre, c.besoin)
+        restant.set(alt, libre - pris)
+        c.besoin -= pris
+        c.altCouverture += pris
+        c.altCodes.push(alt)
+      }
+    }
+
+    const nbAllegees = candidats.filter(c => c.altCouverture > 0).length
+    if (nbAllegees > 0) {
+      const evite = candidats.reduce((s, c) => s + c.altCouverture * c.p.cout_unitaire, 0)
+      avertissements.push(
+        `${nbAllegees} pieces ont vu leur besoin reduit parce qu'une reference interchangeable ` +
+        `est deja en stock : ${Math.round(evite).toLocaleString('fr-CA')} $ qu'il est inutile de ` +
+        `commander. Les equivalences viennent de la table des pieces alternatives.`)
+    }
   }
 
   if (nbEcartesStatut > 0) {
@@ -578,6 +647,7 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
       couverture_apres: null,
       classe_abc: p.classe_abc, statut_piece: p.statut, rotation: p.rotation,
       portage_dollars: 0,
+      alt_couverture: c.altCouverture, alt_codes: c.altCodes,
     }
     l.qte += qte
     l.montant = Math.round(l.qte * p.cout_unitaire * 100) / 100

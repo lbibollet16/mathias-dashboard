@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { lireTout } from '@/lib/supply-chain-db'
+import { lireTout, dernierRun } from '@/lib/supply-chain-db'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,6 +25,17 @@ export async function GET(req: NextRequest) {
       if (!booking) return NextResponse.json({ erreur: 'Proposition introuvable' }, { status: 404 })
       return NextResponse.json({ booking, lignes })
     }
+
+    // La liste des fournisseurs de l'ERP accompagne la reponse : c'est elle
+    // qui alimente le rapprochement d'un programme importe. La deduire des
+    // programmes deja saisis serait circulaire — au premier import, elle
+    // serait vide.
+    const run = await dernierRun()
+    const groupesFournisseurs = run
+      ? await lireTout<any>('sc_analyse_groupes', 'cle, valeur_stock, nb_pieces', q =>
+          q.eq('run_id', run.run_id).eq('dimension', 'fournisseur')
+           .order('valeur_stock', { ascending: false }))
+      : []
 
     const [programmes, paliers, bonus, bookings] = await Promise.all([
       lireTout<any>('sc_booking_programmes', '*', q => q.order('ferme_le', { ascending: false })),
@@ -74,7 +85,11 @@ export async function GET(req: NextRequest) {
       }
     })
 
-    return NextResponse.json({ programmes: enrichis, bookings })
+    return NextResponse.json({
+      programmes: enrichis,
+      bookings,
+      fournisseurs: groupesFournisseurs.map(g => g.cle),
+    })
   } catch (e: any) {
     return NextResponse.json({ erreur: e.message }, { status: 500 })
   }
@@ -146,6 +161,8 @@ export async function POST(req: NextRequest) {
       statut_piece: l.statut_piece,
       rotation: l.rotation,
       portage_dollars: l.portage_dollars,
+      alt_couverture: l.alt_couverture ?? 0,
+      alt_codes: l.alt_codes ?? [],
     }))
 
     for (let i = 0; i < lignes.length; i += 500) {

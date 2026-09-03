@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Theme, Carte, SectionTitre, KpiCard, GrilleKpi, Th, Badge, Message, fmtArgentCourt,
 } from '@/components/meca/MecaUI'
+import BookingImports from '@/components/rotation/BookingImports'
 
 const fmtPct = (v: number) => `${(Math.round(v * 100) / 100).toLocaleString('fr-CA')} %`
 const fmtDate = (s: string | null) => {
@@ -52,6 +53,7 @@ export default function BookingVue({ t, email }: { t: Theme; email: string | nul
   const [erreur, setErreur] = useState<string | null>(null)
   const [programmes, setProgrammes] = useState<any[]>([])
   const [bookings, setBookings] = useState<any[]>([])
+  const [fournisseursErp, setFournisseursErp] = useState<string[]>([])
 
   const [choisi, setChoisi] = useState<any | null>(null)
   const [objectif, setObjectif] = useState('optimal')
@@ -74,6 +76,7 @@ export default function BookingVue({ t, email }: { t: Theme; email: string | nul
       if (j.erreur) throw new Error(j.erreur)
       setProgrammes(j.programmes || [])
       setBookings(j.bookings || [])
+      setFournisseursErp(j.fournisseurs || [])
       setErreur(null)
     } catch (e: any) {
       setErreur(e.message)
@@ -156,6 +159,11 @@ export default function BookingVue({ t, email }: { t: Theme; email: string | nul
 
       {/* ── Ce qui ferme bientot ───────────────────────────────────── */}
       <Urgences t={t} programmes={ouverts} />
+
+      {/* ── Ce qui arrive par courriel, en attente de relecture ────── */}
+      <BookingImports t={t} email={email}
+        fournisseurs={fournisseursErp}
+        onValide={charger} />
 
       {/* ── Le choix du programme ──────────────────────────────────── */}
       <Carte t={t}>
@@ -545,6 +553,7 @@ function Resultat({ t, p, programme, voirToutes, setVoirToutes }: {
                 <Th t={t}>Dont etirement</Th>
                 <Th t={t}>Stock</Th>
                 <Th t={t}>En route</Th>
+                <Th t={t}>Couvert par equiv.</Th>
                 <Th t={t}>Demande</Th>
                 <Th t={t}>Couv. apres</Th>
                 <Th t={t}>Rotation</Th>
@@ -573,6 +582,13 @@ function Resultat({ t, p, programme, voirToutes, setVoirToutes }: {
                     </td>
                     <td style={tdStyle()}>{l.stock}</td>
                     <td style={tdStyle()}>{l.en_route || '—'}</td>
+                    <td style={{ ...tdStyle(), color: l.alt_couverture > 0 ? t.C.green : t.sub }}>
+                      {l.alt_couverture > 0
+                        ? <span title={`Deja en stock sous : ${(l.alt_codes || []).join(', ')}`}>
+                            −{l.alt_couverture}
+                          </span>
+                        : '—'}
+                    </td>
                     <td style={tdStyle()}>{Number(l.demande_periode).toFixed(1)}</td>
                     <td style={tdStyle()}>{l.couverture_apres != null ? `${l.couverture_apres} m` : '—'}</td>
                     <td style={tdStyle()}>{Number(l.rotation).toFixed(2)}</td>

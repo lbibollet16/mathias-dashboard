@@ -58,6 +58,48 @@ export async function POST(req: NextRequest) {
       }, { status: 409 })
     }
 
+    // ── Les references interchangeables ───────────────────────────
+    // Une piece dont l'equivalent dort sur la tablette n'a pas besoin d'etre
+    // bookee. L'equivalent peut appartenir a un AUTRE fournisseur — on va
+    // donc chercher son stock separement, hors du perimetre du programme.
+    const codes = new Set(pieces.map(p => p.code_piece))
+    const { data: altRows } = await supabaseAdmin
+      .from('pieces_alternatives').select('code_principal, code_alternatif')
+
+    const alternatives = new Map<string, string[]>()
+    const codesAlt = new Set<string>()
+    for (const r of altRows || []) {
+      // L'equivalence joue dans les deux sens : si B remplace A, A remplace B.
+      const paires: [string, string][] = [
+        [r.code_principal, r.code_alternatif],
+        [r.code_alternatif, r.code_principal],
+      ]
+      for (const [de, vers] of paires) {
+        if (!codes.has(de)) continue
+        alternatives.set(de, [...(alternatives.get(de) || []), vers])
+        if (!codes.has(vers)) codesAlt.add(vers)
+      }
+    }
+
+    // Le stock des pieces du programme, plus celui des alternatives externes.
+    const stockParCode = new Map<string, number>()
+    for (const p of pieces) {
+      stockParCode.set(p.code_piece, p.stock_dispo + p.qte_transit + p.qte_commande)
+    }
+    if (codesAlt.size > 0) {
+      const liste = [...codesAlt]
+      for (let i = 0; i < liste.length; i += 300) {
+        const { data } = await supabaseAdmin
+          .from('sc_analyse_pieces')
+          .select('code_piece, stock_dispo, qte_transit, qte_commande')
+          .eq('run_id', run.run_id).in('code_piece', liste.slice(i, i + 300))
+        for (const r of data || []) {
+          stockParCode.set(r.code_piece,
+            Number(r.stock_dispo || 0) + Number(r.qte_transit || 0) + Number(r.qte_commande || 0))
+        }
+      }
+    }
+
     // La courbe saisonniere n'est peuplee que depuis le recalcul du 3 septembre.
     // Sur un run plus ancien le moteur retomberait sur une saison plate sans
     // le dire — mieux vaut l'annoncer.
@@ -88,6 +130,8 @@ export async function POST(req: NextRequest) {
       couvertureMois: body.couverture_mois ?? 6,
       palierVise: body.palier_vise ?? null,
       exclureJamaisVendues: body.exclure_jamais_vendues !== false,
+      alternatives,
+      stockParCode,
     })
 
     resultat.avertissements = [...alerteCourbe, ...resultat.avertissements]
