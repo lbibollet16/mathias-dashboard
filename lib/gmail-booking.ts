@@ -58,6 +58,10 @@ export function normaliserClePrivee(brut: string): string {
     } catch { /* on continue avec la valeur brute */ }
   }
 
+  // La ligne du JSON copiee telle quelle, prefixe compris :
+  //   "private_key": "-----BEGIN PRIVATE KEY-----\n...
+  k = k.replace(/^["']?private_key["']?\s*:\s*/i, '').trim()
+
   // Guillemets englobants, simples ou doubles.
   if ((k.startsWith('"') && k.endsWith('"')) || (k.startsWith("'") && k.endsWith("'"))) {
     k = k.slice(1, -1).trim()
@@ -66,15 +70,24 @@ export function normaliserClePrivee(brut: string): string {
   // Sauts de ligne echappes, puis retours chariot.
   k = k.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\r/g, '')
 
-  // Un PEM arrive parfois sur une seule ligne : on recoupe le base64 en 64.
-  const m = k.match(/-----BEGIN ([A-Z ]+)-----([\s\S]*?)-----END \1-----/)
-  if (m && !m[2].trim().includes('\n')) {
-    const lignes = m[2].replace(/\s+/g, '').match(/.{1,64}/g) || []
-    k = `-----BEGIN ${m[1]}-----\n${lignes.join('\n')}\n-----END ${m[1]}-----\n`
+  // On ne garde QUE le bloc entre BEGIN et END, et on jette tout ce qui
+  // l'entoure. C'est ce qui rend l'operation insensible aux miettes de JSON
+  // restees collees : le prefixe du champ, la virgule de fin de ligne, le
+  // guillemet fermant. Les depouiller un par un serait sans fin — on part
+  // plutot de ce qu'on cherche.
+  const bloc = k.match(/-----BEGIN ([A-Z0-9 ]+?)-----([\s\S]*?)-----END \1-----/)
+  if (!bloc) {
+    if (!k.endsWith('\n')) k += '\n'
+    return k
   }
 
-  if (!k.endsWith('\n')) k += '\n'
-  return k
+  // Le corps est du base64 et rien d'autre. La barre oblique inverse n'y
+  // figure jamais : quand il en reste une, c'est un echappement que la
+  // conversion n'a pas attrape (un \\n double-echappe, par exemple). On la
+  // retire, comme tout caractere etranger a l'alphabet.
+  const corps = bloc[2].replace(/[^A-Za-z0-9+/=]/g, '')
+  const lignes = corps.match(/.{1,64}/g) || []
+  return `-----BEGIN ${bloc[1]}-----\n${lignes.join('\n')}\n-----END ${bloc[1]}-----\n`
 }
 
 /**
