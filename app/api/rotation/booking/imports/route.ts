@@ -14,7 +14,7 @@ import { extraireProgramme, ProgrammeExtrait } from '@/lib/booking-extraction'
 import { etatFournisseurs } from '@/lib/claude'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 300
+export const maxDuration = 800
 
 const TYPES_PDF = ['application/pdf']
 const TYPES_TABLEUR = [

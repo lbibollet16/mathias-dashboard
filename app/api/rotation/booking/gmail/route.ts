@@ -23,7 +23,7 @@ import { pannePassagere } from '@/lib/ia-gateway'
 import { etatFournisseurs } from '@/lib/claude'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 300
+export const maxDuration = 800
 
 /**
  * De quoi reconnaitre ce qui a ete colle, sans jamais divulguer la cle. Ces
