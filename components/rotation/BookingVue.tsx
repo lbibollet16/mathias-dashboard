@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Theme, Carte, SectionTitre, KpiCard, GrilleKpi, Th, Badge, Message, fmtArgentCourt,
 } from '@/components/meca/MecaUI'
+import BookingImports from '@/components/rotation/BookingImports'
 
 const fmtPct = (v: number) => `${(Math.round(v * 100) / 100).toLocaleString('fr-CA')} %`
 const fmtDate = (s: string | null) => {
@@ -52,6 +53,7 @@ export default function BookingVue({ t, email }: { t: Theme; email: string | nul
   const [erreur, setErreur] = useState<string | null>(null)
   const [programmes, setProgrammes] = useState<any[]>([])
   const [bookings, setBookings] = useState<any[]>([])
+  const [fournisseursErp, setFournisseursErp] = useState<string[]>([])
 
   const [choisi, setChoisi] = useState<any | null>(null)
   const [objectif, setObjectif] = useState('optimal')
@@ -74,6 +76,7 @@ export default function BookingVue({ t, email }: { t: Theme; email: string | nul
       if (j.erreur) throw new Error(j.erreur)
       setProgrammes(j.programmes || [])
       setBookings(j.bookings || [])
+      setFournisseursErp(j.fournisseurs || [])
       setErreur(null)
     } catch (e: any) {
       setErreur(e.message)
@@ -156,6 +159,11 @@ export default function BookingVue({ t, email }: { t: Theme; email: string | nul
 
       {/* ── Ce qui ferme bientot ───────────────────────────────────── */}
       <Urgences t={t} programmes={ouverts} />
+
+      {/* ── Ce qui arrive par courriel, en attente de relecture ────── */}
+      <BookingImports t={t} email={email}
+        fournisseurs={fournisseursErp}
+        onValide={charger} />
 
       {/* ── Le choix du programme ──────────────────────────────────── */}
       <Carte t={t}>
