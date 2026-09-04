@@ -623,6 +623,7 @@ function Resultat({ t, p, programme, prevision, voirToutes, setVoirToutes }: {
                 <Th t={t}>Couvert par equiv.</Th>
                 <Th t={t}>Demande</Th>
                 <Th t={t}>Couv. apres</Th>
+                <Th t={t}>Ventes 12 m</Th>
                 <Th t={t}>Rotation</Th>
                 <Th t={t} align="left">Bareme</Th>
               </tr>
@@ -665,7 +666,17 @@ function Resultat({ t, p, programme, prevision, voirToutes, setVoirToutes }: {
                     </td>
                     <td style={tdStyle()}>{Number(l.demande_periode).toFixed(1)}</td>
                     <td style={tdStyle()}>{l.couverture_apres != null ? `${l.couverture_apres} m` : '—'}</td>
-                    <td style={tdStyle()}>{Number(l.rotation).toFixed(2)}</td>
+                    <td style={{ ...tdStyle(), fontWeight: l.ventes_12m <= 5 ? 700 : 400,
+                                 color: l.ventes_12m <= 2 ? t.C.red : l.ventes_12m <= 5 ? t.C.yellow : undefined }}>
+                      {Number(l.ventes_12m ?? 0).toFixed(0)}
+                    </td>
+                    {/* Une rotation nulle sur une piece qui s'est vendue veut dire
+                        « stock a zero toute l'annee », pas « ne tourne pas ». */}
+                    <td style={tdStyle()}>
+                      {Number(l.rotation) > 0
+                        ? Number(l.rotation).toFixed(2)
+                        : <span style={{ color: t.sub }} title="Stock a zero toute l'annee : il n'y avait rien a faire tourner.">—</span>}
+                    </td>
                     <td style={{ ...tdStyle('left'), fontSize: 11, color: t.sub }}>{l.bareme}</td>
                   </tr>
                 )
