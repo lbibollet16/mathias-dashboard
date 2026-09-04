@@ -25,7 +25,7 @@ const COLONNES = [
   'code_piece', 'description', 'fournisseur', 'code_ligne', 'marque',
   'categorie_nom', 'categorie_chemin', 'cout_unitaire', 'prix_vente',
   'stock_dispo', 'qte_transit', 'qte_commande', 'stock_securite',
-  'demande_mens', 'demande_deseason', 'indice_12m', 'rotation', 'ventes_12m_cogs',
+  'demande_mens', 'demande_deseason', 'indice_12m', 'rotation', 'ventes_12m_cogs', 'ventes_12m_qte',
   'classe_abc', 'statut', 'discontinue', 'popularite',
 ].join(', ')
 
