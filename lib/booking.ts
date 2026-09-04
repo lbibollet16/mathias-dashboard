@@ -60,6 +60,10 @@ export interface ProgrammeBooking {
   perimetre_categories: string[]
   perimetre_codes: string[]
   exclus_codes: string[]
+  /** Marques, categories et mots du libelle qui mettent une piece hors programme. */
+  exclus_marques: string[]
+  exclus_categories: string[]
+  exclus_mots: string[]
   min_commande: number | null
   min_reappro: number | null
   franco_seuil: number | null
@@ -404,9 +408,37 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
   const exclus = new Set((prog.exclus_codes || []).map(normaliser))
 
   let nbHorsPerimetre = 0
+  // Ce que chaque regle d'exclusion a ecarte, pour pouvoir le montrer. Une
+  // exclusion par mot-cle est puissante et aveugle : il faut pouvoir verifier
+  // qu'elle n'a pas emporte autre chose que ce qu'on visait.
+  const ecartes = new Map<string, { nb: number; valeur: number }>()
+  const noterExclusion = (regle: string, p: PieceBooking) => {
+    const e = ecartes.get(regle) || { nb: 0, valeur: 0 }
+    e.nb++
+    e.valeur += Math.max(0, p.demande_mens * 6 * p.cout_unitaire)
+    ecartes.set(regle, e)
+  }
+
+  const motsExclus = (prog.exclus_mots || []).map(normaliser).filter(Boolean)
+
   const eligibles = d.pieces.filter(p => {
     if (!fournisseurs.has(normaliser(p.fournisseur))) return false
     if (exclus.has(normaliser(p.code_piece))) return false
+
+    // Les exclusions passent AVANT le perimetre : « tous les produits Moto et
+    // VTT/UTV sauf les produits d'hiver » se lit dans cet ordre, et une piece
+    // exclue l'est quoi qu'elle rencontre ensuite.
+    if (prog.exclus_marques?.length && correspond(p, 'marque', prog.exclus_marques)) {
+      noterExclusion(`marque ecartee`, p); return false
+    }
+    if (prog.exclus_categories?.length && correspond(p, 'categorie', prog.exclus_categories)) {
+      noterExclusion(`categorie ecartee`, p); return false
+    }
+    if (motsExclus.length) {
+      const libelle = normaliser(p.description)
+      const mot = motsExclus.find(m => libelle.includes(m))
+      if (mot) { noterExclusion(`« ${mot} » dans le libelle`, p); return false }
+    }
     // Une piece que le fournisseur declare discontinuee ne se rebooke jamais.
     if (p.discontinue) return false
     if (p.cout_unitaire <= 0) return false
@@ -454,6 +486,18 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
         `ne correspond a aucune piece de ce fournisseur. C'est le vocabulaire du document, pas celui ` +
         `de l'ERP : il est ignore. Vide ce filtre dans le programme pour faire disparaitre cet avis.`)
     }
+  }
+
+  if (ecartes.size > 0) {
+    const total = [...ecartes.values()].reduce((s, e) => s + e.nb, 0)
+    const detail = [...ecartes.entries()]
+      .sort((a, b) => b[1].nb - a[1].nb)
+      .map(([r, e]) => `${r} : ${e.nb}`)
+      .join(' · ')
+    avertissements.push(
+      `${total} pieces mises hors programme par ses exclusions (${detail}). ` +
+      `Verifie que rien d'utile n'a ete emporte au passage — une exclusion par mot du libelle ` +
+      `est efficace mais aveugle.`)
   }
 
   if (eligibles.length === 0) {

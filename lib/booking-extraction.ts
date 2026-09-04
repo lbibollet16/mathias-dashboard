@@ -143,6 +143,16 @@ const ProgrammeSchema = z.object({
   perimetre_marques: z.array(z.string()),
   perimetre_categories: z.array(z.string()),
   exclus_codes: z.array(z.string()),
+  exclus_marques: z.array(z.string())
+    .describe('Marques que le programme EXCLUT explicitement.'),
+  exclus_categories: z.array(z.string())
+    .describe('Categories que le programme EXCLUT explicitement.'),
+  exclus_mots: z.array(z.string())
+    .describe(
+      'Mots a chercher dans le LIBELLE des pieces pour ecarter ce que le programme exclut ' +
+      'sans le nommer par marque ni par categorie. « sauf les produits d hiver » -> ' +
+      '["motoneige","passe-montagne","hiver","bottes","manchon"]. Choisis des mots DISCRIMINANTS : ' +
+      'ils ecarteront toute piece dont le libelle les contient. Vide si le programme n exclut rien.'),
 
   paliers: z.array(PalierSchema),
   bonus: z.array(BonusSchema),
@@ -277,6 +287,16 @@ groupe : quand un document offre une ECHELLE de dates decroissante ("3 % au 15 s
    correspond a la commande de reservation. Kimpex publie « PL » (placement)
    et « REG » (regulier) cote a cote : seule la colonne placement s'applique
    ici. Dis dans le champ notes quelle colonne tu as retenue.
+
+6quinquies. LES EXCLUSIONS COMPTENT AUTANT QUE LE PERIMETRE.
+   Presque tous les programmes disent « sauf ». Remplis exclus_marques,
+   exclus_categories ou exclus_mots selon la facon dont l'exclusion est
+   formulee. Une exclusion manquee fait commander des produits que le
+   fournisseur refusera — et peut faire tomber sous un palier.
+   exclus_mots est le dernier recours : quand l'exclusion ne suit ni une
+   marque ni une categorie (« sauf les produits d'hiver »), donne des mots
+   DISCRIMINANTS du libelle. Prefere quelques mots surs a une longue liste
+   approximative : chaque mot ecarte toute piece qui le contient.
 
 6quater. LE PERIMETRE SE LAISSE VIDE EN CAS DE DOUTE.
    perimetre_lignes, perimetre_marques et perimetre_categories servent a
