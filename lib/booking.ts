@@ -83,6 +83,12 @@ export interface PalierBooking {
   seuil_qte: number | null
   seuil_sur: 'groupe' | 'commande'
   escompte_pct: number
+  /**
+   * Le bareme s'ajoute aux autres meme quand le programme est exclusif.
+   * Un rabais de volume porte sur le TOTAL de la commande : il ne remplace
+   * pas l'escompte de la famille, il s'y ajoute.
+   */
+  cumulable: boolean
   sous_minimums: SousMinimum[]
   echeancier: Echeance[]
   franco_port: boolean
@@ -599,21 +605,38 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
   // l'ordre marque > categorie > ligne > tout evite qu'un casque Icon soit
   // compte dans « Casques » plutot que dans « Icon ».
   const ordreAxe: Record<AxeBareme, number> = { codes: 0, marque: 1, categorie: 2, ligne: 3, tout: 4 }
-  const groupes = new Map<string, { bareme: string; axe: AxeBareme; cible: string[]; paliers: PalierBooking[] }>()
+  const groupes = new Map<string, {
+    bareme: string; axe: AxeBareme; cible: string[]; cumulable: boolean; paliers: PalierBooking[]
+  }>()
   for (const pal of d.paliers) {
     const g = groupes.get(pal.bareme)
     if (g) { g.paliers.push(pal); continue }
-    groupes.set(pal.bareme, { bareme: pal.bareme, axe: pal.axe, cible: pal.cible || [], paliers: [pal] })
+    groupes.set(pal.bareme, {
+      bareme: pal.bareme, axe: pal.axe, cible: pal.cible || [],
+      cumulable: !!pal.cumulable, paliers: [pal],
+    })
   }
   for (const g of groupes.values()) g.paliers.sort((a, b) => a.seuil_montant - b.seuil_montant || a.rang - b.rang)
 
   const listeBaremes = [...groupes.values()].sort((a, b) => ordreAxe[a.axe] - ordreAxe[b.axe])
 
   /** Les baremes auxquels la piece contribue. */
+  /**
+   * Les baremes auxquels la piece contribue.
+   *
+   * En mode exclusif, un seul bareme SPECIFIQUE compte — le plus precis —
+   * mais les baremes marques `cumulable` s'y ajoutent toujours. C'est ce qui
+   * permet de representer « onze grilles par marque qui se partagent les
+   * pieces, plus un rabais de volume sur le total », structure qu'on retrouve
+   * chez Kimpex comme chez Parts Canada et que le drapeau binaire du
+   * programme ne savait pas exprimer.
+   */
   function baremesDe(p: PieceBooking): typeof listeBaremes {
     const touches = listeBaremes.filter(g => correspond(p, g.axe, g.cible))
     if (!prog.baremes_exclusifs) return touches
-    return touches.length ? [touches[0]] : []
+    const cumulables = touches.filter(g => g.cumulable)
+    const specifique = touches.find(g => !g.cumulable)
+    return specifique ? [specifique, ...cumulables] : cumulables
   }
 
   for (const c of candidats) {
@@ -888,8 +911,12 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
     if (!c) continue
     const siens = baremesDe(c.p)
     // Baremes exclusifs : un seul compte. Sinon ils s'additionnent.
-    const pcts = siens.map(g => etatsBaremes.find(e => e.bareme === g.bareme)?.escompte_pct ?? 0)
-    const pct = prog.baremes_exclusifs ? (pcts[0] ?? 0) : pcts.reduce((s, v) => s + v, 0)
+    // `baremesDe` a deja fait le tri : en mode exclusif il ne rend qu'un seul
+    // bareme specifique, plus les cumulables. On additionne donc dans les deux
+    // cas — c'est la selection qui porte la regle, pas la somme.
+    const pct = siens
+      .map(g => etatsBaremes.find(e => e.bareme === g.bareme)?.escompte_pct ?? 0)
+      .reduce((s, v) => s + v, 0)
     escompteDollars += l.montant * (pct / 100)
   }
 

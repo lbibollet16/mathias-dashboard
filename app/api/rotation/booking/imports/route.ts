@@ -273,6 +273,7 @@ export async function PATCH(req: NextRequest) {
           seuil_qte: pl.seuil_qte ?? null,
           seuil_sur: pl.seuil_sur || 'groupe',
           escompte_pct: pl.escompte_pct ?? 0,
+          cumulable: !!pl.cumulable,
           sous_minimums: pl.sous_minimums || [],
           echeancier: pl.echeancier || [],
           franco_port: !!pl.franco_port,

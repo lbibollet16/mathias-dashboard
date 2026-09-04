@@ -86,6 +86,11 @@ const PalierSchema = z.object({
   seuil_qte: z.number().describe('ZERO si le seuil est en dollars. Rempli UNIQUEMENT si le seuil est en unites.'),
   seuil_sur: z.enum(['groupe', 'commande']),
   escompte_pct: z.number(),
+  cumulable: z.boolean().describe(
+    'true si ce bareme s AJOUTE aux autres au lieu de les remplacer. Typiquement un rabais ' +
+    'de volume ou un supplement general, qui porte sur le TOTAL de la commande et non sur une ' +
+    'famille : « ce rabais de volume est accorde EN PLUS des escomptes des categories ci-dessus ». ' +
+    'false pour une grille par marque ou par categorie, qui se concurrencent entre elles.'),
   sous_minimums: z.string().describe(
     'Conditions supplementaires, sous la forme « axe:cible1,cible2=montant », separees par « ; ». ' +
     'Exemple : « categorie:Filtre,Plaquette,Courroie=3000 » pour « dont 3 000 $ de pieces ' +

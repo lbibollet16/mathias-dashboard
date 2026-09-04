@@ -3,6 +3,13 @@
 //
 // POST { programme_id, objectif, budget_max?, couverture_mois?, palier_vise?,
 //        date_commande?, exclure_jamais_vendues? }
+//
+// MODE PREVISION — sans programme_id :
+// POST { fournisseur, couvre_debut, couvre_fin }
+// Repond a « de quoi vais-je avoir besoin chez ce fournisseur entre ces deux
+// dates », sans grille commerciale. Meme calcul de besoin — saisonnalite,
+// stock en route, references interchangeables, exclusion des commandes
+// speciales — mais aucun escompte a arbitrer : le montant est le besoin nu.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -26,7 +33,13 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const programmeId = body.programme_id
-    if (!programmeId) return NextResponse.json({ erreur: 'programme_id requis' }, { status: 400 })
+    const prevision = !programmeId
+
+    if (prevision && !body.fournisseur) {
+      return NextResponse.json({
+        erreur: 'Precise un programme_id, ou bien un fournisseur et une periode pour une prevision.',
+      }, { status: 400 })
+    }
 
     const run = await dernierRun()
     if (!run) {
@@ -36,15 +49,47 @@ export async function POST(req: NextRequest) {
     }
 
     const [{ data: programme }, paliers, bonus, cfg] = await Promise.all([
-      supabaseAdmin.from('sc_booking_programmes').select('*').eq('id', programmeId).single(),
-      lireTout<PalierBooking>('sc_booking_paliers', '*', q =>
+      prevision
+        ? Promise.resolve({ data: null })
+        : supabaseAdmin.from('sc_booking_programmes').select('*').eq('id', programmeId).single(),
+      prevision ? Promise.resolve([]) : lireTout<PalierBooking>('sc_booking_paliers', '*', q =>
         q.eq('programme_id', programmeId).order('bareme').order('rang')),
-      lireTout<BonusBooking>('sc_booking_bonus', '*', q => q.eq('programme_id', programmeId)),
+      prevision ? Promise.resolve([]) : lireTout<BonusBooking>('sc_booking_bonus', '*', q =>
+        q.eq('programme_id', programmeId)),
       chargerConfig(),
     ])
-    if (!programme) return NextResponse.json({ erreur: 'Programme introuvable' }, { status: 404 })
+    if (!prevision && !programme) {
+      return NextResponse.json({ erreur: 'Programme introuvable' }, { status: 404 })
+    }
 
-    const prog = programme as ProgrammeBooking
+    // En prevision, on fabrique un programme sans grille : le moteur calcule
+    // alors le besoin nu, sans escompte ni palier a arbitrer. C'est la reponse
+    // a « de quoi vais-je avoir besoin », par opposition a « ce programme
+    // vaut-il le coup ».
+    const prog: ProgrammeBooking = prevision
+      ? {
+          id: 0,
+          nom: `Prevision de besoin — ${body.fournisseur}`,
+          fournisseur: String(body.fournisseur),
+          fournisseurs_alt: [],
+          saison: null,
+          ouvre_le: null, ferme_le: null,
+          // La livraison est immediate : on ne prevoit pas une commande
+          // future, on regarde ce qui manque pour tenir la periode demandee.
+          livraison_debut: body.couvre_debut || null,
+          livraison_fin: null,
+          couvre_debut: body.couvre_debut || null,
+          couvre_fin: body.couvre_fin || null,
+          perimetre_lignes: body.perimetre_lignes || [],
+          perimetre_marques: body.perimetre_marques || [],
+          perimetre_categories: body.perimetre_categories || [],
+          perimetre_codes: [], exclus_codes: [],
+          min_commande: null, min_reappro: null, franco_seuil: null,
+          transport_pct: null, retour_pct: null,
+          baremes_exclusifs: false,
+          notes: null, source_fichier: null, actif: true,
+        }
+      : (programme as ProgrammeBooking)
 
     // On ne descend que les pieces du ou des fournisseurs du programme.
     const fournisseurs = [prog.fournisseur, ...(prog.fournisseurs_alt || [])]
@@ -125,7 +170,8 @@ export async function POST(req: NextRequest) {
         termes_standard_jours: Number((cfg as any).termes_standard_jours) || 30,
       },
       dateCommande,
-      objectif: body.objectif || 'optimal',
+      // Sans grille, il n'y a rien a etirer : on reste au strict besoin.
+      objectif: prevision ? 'couverture' : (body.objectif || 'optimal'),
       budgetMax: body.budget_max ?? null,
       couvertureMois: body.couverture_mois ?? 6,
       palierVise: body.palier_vise ?? null,
@@ -138,6 +184,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      mode: prevision ? 'prevision' : 'programme',
       run_id: run.run_id,
       programme: prog,
       proposition: resultat,

@@ -62,6 +62,16 @@ export default function BookingVue({ t, email }: { t: Theme; email: string | nul
   const [palierVise, setPalierVise] = useState('')
   const [dateCommande, setDateCommande] = useState(new Date().toISOString().slice(0, 10))
 
+  // Prevision : un fournisseur, deux dates, et la question « de quoi vais-je
+  // avoir besoin » — sans qu'un programme existe.
+  const [prevFournisseur, setPrevFournisseur] = useState('')
+  const [prevDebut, setPrevDebut] = useState(new Date().toISOString().slice(0, 10))
+  const [prevFin, setPrevFin] = useState(() => {
+    const d = new Date(); d.setMonth(d.getMonth() + 6)
+    return d.toISOString().slice(0, 10)
+  })
+  const [prevision, setPrevision] = useState(false)
+
   const [calcul, setCalcul] = useState(false)
   const [proposition, setProposition] = useState<any | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
@@ -111,6 +121,29 @@ export default function BookingVue({ t, email }: { t: Theme; email: string | nul
       setCalcul(false)
     }
   }, [objectif, budget, couverture, palierVise, dateCommande])
+
+  const calculerPrevision = useCallback(async () => {
+    if (!prevFournisseur) return
+    setCalcul(true); setMessage(null); setProposition(null); setChoisi(null)
+    try {
+      const r = await fetch('/api/rotation/booking/calculer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fournisseur: prevFournisseur,
+          couvre_debut: prevDebut,
+          couvre_fin: prevFin,
+          date_commande: new Date().toISOString().slice(0, 10),
+        }),
+      })
+      const j = await r.json()
+      if (j.erreur) throw new Error(j.erreur)
+      setProposition(j.proposition)
+      setRunId(j.run_id)
+      setPrevision(true)
+    } catch (e: any) {
+      setMessage(`Erreur : ${e.message}`)
+    } finally { setCalcul(false) }
+  }, [prevFournisseur, prevDebut, prevFin])
 
   const enregistrer = useCallback(async () => {
     if (!proposition || !choisi) return
@@ -164,6 +197,32 @@ export default function BookingVue({ t, email }: { t: Theme; email: string | nul
       <BookingImports t={t} email={email}
         fournisseurs={fournisseursErp}
         onValide={charger} />
+
+      {/* ── Prevoir un besoin, sans programme ──────────────────────── */}
+      <Carte t={t}>
+        <SectionTitre t={t} titre="Prevoir le stock d'un fournisseur"
+          aide="Sans grille commerciale : juste ce qu'il te faudra chez ce fournisseur entre deux dates. Meme calcul que pour un booking — saisonnalite, stock en route, references interchangeables, commandes speciales ecartees — mais aucun escompte a arbitrer." />
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 14, marginTop: 16 }}>
+          <Champ t={t} label="Fournisseur">
+            <select value={prevFournisseur} onChange={e => setPrevFournisseur(e.target.value)} style={inputStyle(t)}>
+              <option value="">Choisir…</option>
+              {fournisseursErp.map(f => <option key={f} value={f}>{f}</option>)}
+            </select>
+          </Champ>
+          <Champ t={t} label="Du" aide="Debut de la periode a couvrir.">
+            <input type="date" value={prevDebut} onChange={e => setPrevDebut(e.target.value)} style={inputStyle(t)} />
+          </Champ>
+          <Champ t={t} label="Au" aide="Le besoin suit le rythme saisonnier de chaque piece sur cette fenetre.">
+            <input type="date" value={prevFin} onChange={e => setPrevFin(e.target.value)} style={inputStyle(t)} />
+          </Champ>
+        </div>
+
+        <button onClick={calculerPrevision} disabled={calcul || !prevFournisseur}
+          style={{ ...boutonStyle(t, t.C.blue, calcul || !prevFournisseur), marginTop: 16 }}>
+          {calcul ? 'Calcul en cours…' : 'Calculer le besoin'}
+        </button>
+      </Carte>
 
       {/* ── Le choix du programme ──────────────────────────────────── */}
       <Carte t={t}>
@@ -264,7 +323,7 @@ export default function BookingVue({ t, email }: { t: Theme; email: string | nul
 
       {/* ── Le resultat ────────────────────────────────────────────── */}
       {proposition && (
-        <Resultat t={t} p={proposition} programme={choisi}
+        <Resultat t={t} p={proposition} programme={choisi} prevision={prevision}
           voirToutes={voirToutesLignes} setVoirToutes={setVoirToutesLignes} />
       )}
 
@@ -399,8 +458,9 @@ function CarteProgramme({ t, p, actif, onChoisir }: {
 // Le resultat
 // ═══════════════════════════════════════════════════════════════════════
 
-function Resultat({ t, p, programme, voirToutes, setVoirToutes }: {
-  t: Theme; p: any; programme: any; voirToutes: boolean; setVoirToutes: (v: boolean) => void
+function Resultat({ t, p, programme, prevision, voirToutes, setVoirToutes }: {
+  t: Theme; p: any; programme: any; prevision?: boolean
+  voirToutes: boolean; setVoirToutes: (v: boolean) => void
 }) {
   const bon = p.gain_net_dollars > 0
   const lignes = voirToutes ? p.lignes : p.lignes.slice(0, 60)
@@ -410,10 +470,15 @@ function Resultat({ t, p, programme, voirToutes, setVoirToutes }: {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
       {/* Le verdict, en une phrase et cinq chiffres */}
-      <Carte t={t} style={{ borderColor: bon ? t.C.green : t.C.red }}>
-        <SectionTitre t={t} titre="Le verdict" />
+      <Carte t={t} style={{ borderColor: prevision ? t.bdr : (bon ? t.C.green : t.C.red) }}>
+        <SectionTitre t={t} titre={prevision ? 'Le besoin' : 'Le verdict'} />
         <p style={{ fontSize: 14, lineHeight: 1.7, color: t.dark ? '#e8eaed' : '#202124', margin: '10px 0 16px' }}>
-          {bon ? (
+          {prevision ? (
+            <>Pour tenir du <strong>{fmtDate(p.couvre_debut)}</strong> au <strong>{fmtDate(p.couvre_fin)}</strong>,
+            il te manque <strong>{fmtArgentCourt(p.montant_brut)}</strong> sur <strong>{p.nb_lignes}</strong> references,
+            compte tenu de ton stock et de ce qui est deja en route. Aucun escompte n'est applique :
+            c'est le besoin nu, celui qu'un programme viendrait ensuite remiser.</>
+          ) : bon ? (
             <>Cette commande de <strong>{fmtArgentCourt(p.montant_net)}</strong> net rapporte{' '}
             <strong style={{ color: t.C.green }}>{fmtArgentCourt(p.gain_net_dollars)}</strong> une fois
             le cout de portage deduit. L'escompte pese {fmtArgentCourt(p.escompte_dollars)}
@@ -429,13 +494,14 @@ function Resultat({ t, p, programme, voirToutes, setVoirToutes }: {
         </p>
 
         <GrilleKpi min={150}>
-          <KpiCard t={t} label="Montant brut" value={fmtArgentCourt(p.montant_brut)} />
-          <KpiCard t={t} label={`Escompte (${fmtPct(p.escompte_pct)})`} value={fmtArgentCourt(p.escompte_dollars)} />
-          <KpiCard t={t} label="Montant net" value={fmtArgentCourt(p.montant_net)} />
-          <KpiCard t={t} label={p.dating_jours > 0 ? `Dating (+${p.dating_jours} j)` : 'Dating'}
-            value={fmtArgentCourt(p.dating_dollars)} />
-          <KpiCard t={t} label="Cout de portage" value={fmtArgentCourt(p.portage_dollars)} warn={p.portage_dollars > p.escompte_dollars} />
-          <KpiCard t={t} label="Gain net" value={fmtArgentCourt(p.gain_net_dollars)} warn={!bon} />
+          <KpiCard t={t} label={prevision ? 'Besoin total' : 'Montant brut'} value={fmtArgentCourt(p.montant_brut)} />
+          {!prevision && <KpiCard t={t} label={`Escompte (${fmtPct(p.escompte_pct)})`} value={fmtArgentCourt(p.escompte_dollars)} />}
+          {!prevision && <KpiCard t={t} label="Montant net" value={fmtArgentCourt(p.montant_net)} />}
+          {!prevision && <KpiCard t={t} label={p.dating_jours > 0 ? `Dating (+${p.dating_jours} j)` : 'Dating'}
+            value={fmtArgentCourt(p.dating_dollars)} />}
+          <KpiCard t={t} label="Cout de portage" value={fmtArgentCourt(p.portage_dollars)} warn={!prevision && p.portage_dollars > p.escompte_dollars} />
+          {!prevision && <KpiCard t={t} label="Gain net" value={fmtArgentCourt(p.gain_net_dollars)} warn={!bon} />}
+          <KpiCard t={t} label="References" value={String(p.nb_lignes)} />
         </GrilleKpi>
 
         <p style={{ fontSize: 12, color: t.sub, margin: '14px 0 0', lineHeight: 1.6 }}>
