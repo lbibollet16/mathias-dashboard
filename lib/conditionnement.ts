@@ -37,9 +37,43 @@ export interface Conditionnement {
  * forcement une sous-unite. Un « 4L » peut aussi bien designer un bidon vendu
  * a l'unite : on ne s'en mele pas.
  */
+/**
+ * Ce qui interdit de lire un nombre comme une contenance.
+ *
+ * Chacune de ces trois gardes vient d'un faux positif trouve sur le vrai
+ * catalogue, pas d'une precaution theorique :
+ *
+ *   (?<![A-Z])     « OIL, XD100 Gallon » -> le 100 appartient au nom du
+ *                  produit, pas a la contenance.
+ *   (?<!\d)        deux nombres colles.
+ *   (?<!\d[.,])    « BIDON ESSENCE 1.75 GAL » -> la fin d'un decimal se lisait
+ *                  « 75 GAL », soit un fut de 283,9 litres. La prevision
+ *                  commandait alors 31 340 $ d'un bidon a 110 $.
+ *
+ * La virgule seule reste permise : « OIL-20W40,INDIAN,55 GAL DRUM » est un
+ * vrai fut de 55 gallons.
+ */
+const DEBUT_NOMBRE = '(?<![A-Z])(?<!\\d)(?<!\\d[.,])'
+
+/**
+ * Un contenant se remplit d'un liquide. Un reservoir, un bidon ou un jerrycan
+ * de 29 gallons se vend a l'unite : sa contenance decrit l'objet, pas un
+ * conditionnement d'achat.
+ */
+const CONTENANT_VENDU_TEL_QUEL = /TANK|RESERVOIR|BIDON|JERRY|JUG|CAN\b/
+
+/**
+ * Une chaine se mesure en MAILLONS, et le « L » qui suit le nombre les
+ * designe. « CHAIN,OIL PUMP,98XRH2010-52L » passait la garde des fluides
+ * parce qu'il contient « OIL » — c'est pourtant une chaine de pompe a huile
+ * de 52 maillons, pas un fut de 52 litres.
+ */
+const COMPTE_EN_MAILLONS = /CHAIN|CHAINE|MAILLE|LINK/
+
 export function detecterConditionnement(description: string | null | undefined): Conditionnement | null {
   const d = String(description || '').toUpperCase()
   if (!d) return null
+  if (CONTENANT_VENDU_TEL_QUEL.test(d)) return null
 
   // « 12X1L », « 4X4L » : une caisse de N contenants. L'unite de l'ERP est le
   // contenant, le conditionnement est la caisse.
@@ -57,7 +91,12 @@ export function detecterConditionnement(description: string | null | undefined):
 
   // « 55GL », « 55 GAL » : un fut en gallons. En deca de 20 gallons on ne
   // presume rien — un bidon de 5 gallons se vend souvent tel quel.
-  const gallons = d.match(/\b(\d{2,3})\s*(?:GL|GAL|GALLON)S?\b/)
+  //
+  // Le refus d'un chiffre, d'un point ou d'une virgule juste avant n'est pas
+  // theorique : « BIDON ESSENCE 1.75 GAL ROTOPAX » se lisait « 75 GAL », donc
+  // un fut de 283,9 litres. La prevision commandait 283,9 bidons a 110 $ —
+  // 31 340 $ et cent quarante-deux ans de couverture sur une seule ligne.
+  const gallons = d.match(new RegExp(DEBUT_NOMBRE + '(\\d{2,3})\\s*(?:GL|GAL|GALLON)S?\\b'))
   if (gallons) {
     const g = Number(gallons[1])
     if (g >= 20 && g <= 300) {
@@ -84,11 +123,11 @@ export function detecterConditionnement(description: string | null | undefined):
   // On exige donc que le libelle parle d'un fluide. Les gallons n'ont pas
   // besoin de cette precaution : au-dela de vingt gallons, c'est un liquide.
   const FLUIDE = /HUILE|OIL|LUBE|FLUID|ANTIFREEZE|ANTIGEL|COOLANT|GREASE|GRAISSE|KPO/
-  if (FLUIDE.test(d)) {
-    const litres = d.match(/(?<![\d.,])(\d{2,4}(?:[.,]\d)?)\s*L\b/)
+  if (FLUIDE.test(d) && !COMPTE_EN_MAILLONS.test(d)) {
+    const litres = d.match(new RegExp(DEBUT_NOMBRE + '(\\d{2,4}(?:[.,]\\d)?)\\s*L\\b'))
     if (litres) {
       const v = Number(litres[1].replace(',', '.'))
-      if (v >= 50 && v <= 1200) {
+      if (v >= 50 && v <= 250) {
         return {
           unites: v,
           libelle: `fut de ${v} L`,

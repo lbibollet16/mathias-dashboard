@@ -218,7 +218,14 @@ export interface LigneBooking {
   couverture_apres: number | null
   classe_abc: string
   statut_piece: string
+  /**
+   * La rotation vaut COGS / stock moyen. Une piece restee a zero toute
+   * l'annee affiche donc 0 meme si elle s'est vendue — ce n'est pas « elle ne
+   * tourne pas », c'est « il n'y avait rien a faire tourner ». D'ou les ventes
+   * brutes a cote : c'est elles qui disent si l'article bouge.
+   */
   rotation: number
+  ventes_12m: number
   portage_dollars: number
   /** Ce qu'on commande reellement quand la piece s'achete par contenant. */
   contenants: number
@@ -788,6 +795,7 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
       demande_periode: Math.round(c.demandePeriode * 100) / 100,
       couverture_apres: null,
       classe_abc: p.classe_abc, statut_piece: p.statut, rotation: p.rotation,
+      ventes_12m: p.ventes_12m_qte,
       portage_dollars: 0,
       contenants: 0, conditionnement: null,
       alt_couverture: c.altCouverture, alt_codes: c.altCodes,
