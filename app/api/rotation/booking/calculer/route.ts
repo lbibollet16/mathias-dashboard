@@ -84,6 +84,9 @@ export async function POST(req: NextRequest) {
           perimetre_marques: body.perimetre_marques || [],
           perimetre_categories: body.perimetre_categories || [],
           perimetre_codes: [], exclus_codes: [],
+          // Une prevision ne connait pas de regle d'exclusion : elle regarde
+          // tout ce que le fournisseur peut fournir.
+          exclus_marques: [], exclus_categories: [], exclus_mots: [],
           min_commande: null, min_reappro: null, franco_seuil: null,
           transport_pct: null, retour_pct: null,
           baremes_exclusifs: false,
