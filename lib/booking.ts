@@ -411,22 +411,59 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
     if (p.discontinue) return false
     if (p.cout_unitaire <= 0) return false
 
+    // Le perimetre se lit en OU, pas en ET.
+    //
+    // Un programme decrit son etendue de plusieurs facons a la fois — « tous
+    // les produits Moto et VTT/UTV », « equipement, accessoires, pieces »,
+    // puis la liste des marques concernees. Ce sont trois formulations du
+    // MEME ensemble, pas trois conditions cumulatives. Exiger les trois
+    // simultanement ne laisse rien passer : un casque CKX porte la marque CKX
+    // mais sa categorie est « Casques Modulaires », pas « Equipement ».
+    //
+    // C'est ce qui est arrive au programme Kimpex : perimetre vide de toute
+    // piece alors que le fournisseur en compte 2 170.
     const filtres: [string[], AxeBareme][] = [
       [prog.perimetre_lignes, 'ligne'],
       [prog.perimetre_marques, 'marque'],
       [prog.perimetre_categories, 'categorie'],
       [prog.perimetre_codes, 'codes'],
-    ]
-    for (const [cible, axe] of filtres) {
-      if (cible && cible.length > 0 && !correspond(p, axe, cible)) { nbHorsPerimetre++; return false }
+    ].filter(([c]) => Array.isArray(c) && c.length > 0) as [string[], AxeBareme][]
+
+    if (filtres.length > 0 && !filtres.some(([cible, axe]) => correspond(p, axe, cible))) {
+      nbHorsPerimetre++
+      return false
     }
     return true
   })
 
+  // Un filtre de perimetre qui n'attrape aucune piece est presque toujours du
+  // vocabulaire du document plaque sur celui de l'ERP — « Moto » la ou les
+  // codes de ligne sont « 16 » et « TOI ». Le dire nommement evite de chercher
+  // du cote du nom de fournisseur, qui lui est souvent bon.
+  const duFournisseur = d.pieces.filter(p => fournisseurs.has(normaliser(p.fournisseur)))
+  for (const [cible, axe, libelle] of [
+    [prog.perimetre_lignes, 'ligne', 'codes de ligne'],
+    [prog.perimetre_marques, 'marque', 'marques'],
+    [prog.perimetre_categories, 'categorie', 'categories'],
+  ] as [string[], AxeBareme, string][]) {
+    if (!Array.isArray(cible) || cible.length === 0) continue
+    const n = duFournisseur.filter(p => correspond(p, axe, cible)).length
+    if (n === 0) {
+      avertissements.push(
+        `Le perimetre par ${libelle} — ${cible.slice(0, 6).join(', ')}${cible.length > 6 ? '…' : ''} — ` +
+        `ne correspond a aucune piece de ce fournisseur. C'est le vocabulaire du document, pas celui ` +
+        `de l'ERP : il est ignore. Vide ce filtre dans le programme pour faire disparaitre cet avis.`)
+    }
+  }
+
   if (eligibles.length === 0) {
     avertissements.push(
-      `Aucune piece ne correspond au perimetre du programme. Verifie que le nom du fournisseur ` +
-      `« ${prog.fournisseur} » est bien celui du feed Traction.`)
+      duFournisseur.length === 0
+        ? `Aucune piece n'existe pour « ${prog.fournisseur} » dans la derniere analyse. Le nom du ` +
+          `fournisseur du programme doit correspondre exactement a celui du feed Traction.`
+        : `Le fournisseur « ${prog.fournisseur} » compte ${duFournisseur.length} pieces, mais aucune ne ` +
+          `passe le perimetre du programme. Vide les filtres de perimetre : les baremes suffisent a ` +
+          `cibler les bonnes familles.`)
   }
 
   // Est-ce que l'enrichissement permet vraiment de calculer des baremes par

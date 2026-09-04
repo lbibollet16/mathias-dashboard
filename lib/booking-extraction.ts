@@ -278,6 +278,21 @@ groupe : quand un document offre une ECHELLE de dates decroissante ("3 % au 15 s
    et « REG » (regulier) cote a cote : seule la colonne placement s'applique
    ici. Dis dans le champ notes quelle colonne tu as retenue.
 
+6quater. LE PERIMETRE SE LAISSE VIDE EN CAS DE DOUTE.
+   perimetre_lignes, perimetre_marques et perimetre_categories servent a
+   restreindre le calcul aux pieces concernees. Ils doivent contenir le
+   vocabulaire de l'ERP, pas celui du document.
+   · Les CODES DE LIGNE de l'ERP sont courts et souvent numeriques (« 16 »,
+     « 30 », « TOI »). « Moto » ou « VTT/UTV » n'en sont pas : ne les mets pas.
+   · Les CATEGORIES de l'ERP sont fines (« Casques Integraux », « Pneus de
+     Motocyclette »). « Equipement », « Accessoires » ou « Pieces » sont des
+     sections du document, pas des categories : ne les mets pas.
+   · Les MARQUES, elles, se recoupent souvent : celles-la sont utilisables.
+   Dans le doute, laisse le tableau VIDE et decris l'etendue dans notes. Un
+   perimetre vide veut dire « tout ce fournisseur », ce qui est presque
+   toujours plus juste qu'un filtre qui ne correspond a rien — et les baremes
+   suffisent deja a cibler les bonnes familles.
+
 7. incertitudes doit etre HONNETE et precis. Signale : une colonne illisible, une annee devinee, une condition que tu n'as pas su modeliser, un tableau qui semble tronque. Un import avec des incertitudes claires vaut mieux qu'un import faussement sur de lui — un humain relira.
 
 8. Ne remplis fournisseur_traction que si un nom de la liste correspond SANS AMBIGUITE. Sinon laisse-le VIDE : quelqu'un fera le rapprochement a la main, une seule fois.`
