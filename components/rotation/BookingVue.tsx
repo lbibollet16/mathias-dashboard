@@ -613,6 +613,7 @@ function Resultat({ t, p, programme, prevision, voirToutes, setVoirToutes }: {
               <tr>
                 <Th t={t} align="left">Piece</Th>
                 <Th t={t}>Qte</Th>
+                <Th t={t} align="left">A commander</Th>
                 <Th t={t}>Cout</Th>
                 <Th t={t}>Montant</Th>
                 <Th t={t} align="center">Pourquoi</Th>
@@ -638,6 +639,13 @@ function Resultat({ t, p, programme, prevision, voirToutes, setVoirToutes }: {
                       </div>
                     </td>
                     <td style={{ ...tdStyle(), fontWeight: 700 }}>{l.qte}</td>
+                    <td style={{ ...tdStyle('left'), fontSize: 11.5 }}>
+                      {l.contenants > 0
+                        ? <span style={{ color: t.C.blue, fontWeight: 700 }}>
+                            {l.contenants} × {l.conditionnement}
+                          </span>
+                        : <span style={{ color: t.sub }}>a l'unite</span>}
+                    </td>
                     <td style={tdStyle()}>{Number(l.cout_unitaire).toFixed(2)}</td>
                     <td style={{ ...tdStyle(), fontWeight: 700 }}>{fmtArgentCourt(l.montant)}</td>
                     <td style={tdStyle('center')}>

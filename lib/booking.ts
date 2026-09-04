@@ -22,6 +22,7 @@
  */
 
 import { IndiceSaison, SAISON_NEUTRE } from '@/lib/supply-chain-saison'
+import { detecterConditionnement, arrondirAuContenant, Conditionnement } from '@/lib/conditionnement'
 
 const JOURS_PAR_MOIS = 30.44
 
@@ -176,6 +177,8 @@ export interface DemandeBooking {
   palierVise?: string | null
   /** Ne proposer que des pieces deja vendues au moins une fois. */
   exclureJamaisVendues?: boolean
+  /** Conditionnements imposes a la main, qui l'emportent sur la detection. */
+  conditionnements?: Map<string, Conditionnement>
   /**
    * Couverture maximale apres livraison, en mois. Un etirement ne pousse
    * jamais une piece au-dela. Defaut : une fois et demie la fenetre couverte.
@@ -217,6 +220,9 @@ export interface LigneBooking {
   statut_piece: string
   rotation: number
   portage_dollars: number
+  /** Ce qu'on commande reellement quand la piece s'achete par contenant. */
+  contenants: number
+  conditionnement: string | null
   /** Unites du besoin deja couvertes par une reference interchangeable en stock. */
   alt_couverture: number
   /** Les references qui ont fourni cette couverture. */
@@ -554,6 +560,16 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
     altCodes: string[]
   }
 
+  // Le conditionnement d'achat, detecte dans le libelle. Une surcharge
+  // explicite l'emporte : c'est la seule facon de corriger une detection
+  // fausse sans toucher au code.
+  const conditionnements = new Map<string, Conditionnement>()
+  for (const p of eligibles) {
+    const impose = d.conditionnements?.get(p.code_piece)
+    const c = impose ?? detecterConditionnement(p.description)
+    if (c && c.unites > 1) conditionnements.set(p.code_piece, c)
+  }
+
   const candidats: Candidat[] = []
   let nbEcartesStatut = 0
   let nbEcartesTropPetit = 0
@@ -773,9 +789,23 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
       couverture_apres: null,
       classe_abc: p.classe_abc, statut_piece: p.statut, rotation: p.rotation,
       portage_dollars: 0,
+      contenants: 0, conditionnement: null,
       alt_couverture: c.altCouverture, alt_codes: c.altCodes,
     }
     l.qte += qte
+
+    // L'ERP compte certains articles dans leur unite de VENTE — le litre pour
+    // une huile en fut. On ne commande pas 783 litres, on commande 4 futs :
+    // la quantite monte donc au contenant superieur. Toujours vers le haut,
+    // parce que descendre laisserait la periode a decouvert.
+    const cond = conditionnements.get(p.code_piece) ?? null
+    if (cond) {
+      const a = arrondirAuContenant(l.qte, cond)
+      l.qte = a.qte
+      l.contenants = a.contenants
+      l.conditionnement = cond.libelle
+    }
+
     l.montant = Math.round(l.qte * p.cout_unitaire * 100) / 100
     if (etirement) { l.qte_etirement += qte; l.motif = l.motif === 'besoin' ? 'palier' : l.motif }
     else l.qte_besoin += qte
@@ -1026,6 +1056,16 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
     avertissements.push(
       `Commande plafonnee a ${d.budgetMax.toLocaleString('fr-CA')} $ : les lignes d'etirement ont ete ` +
       `retirees en premier, puis les besoins les moins urgents.`)
+  }
+
+  if (conditionnements.size > 0) {
+    const concernees = [...retenus.values()].filter(l => l.contenants > 0)
+    if (concernees.length > 0) {
+      avertissements.push(
+        `${concernees.length} lignes s'achetent par contenant et non a l'unite — futs d'huile, ` +
+        `caisses. Leur quantite est arrondie au contenant superieur : c'est le nombre de ` +
+        `contenants qu'il faut reporter sur le bon de commande, pas les unites.`)
+    }
   }
 
   // ── Escompte, dating, portage ─────────────────────────────────────
