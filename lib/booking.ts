@@ -140,6 +140,8 @@ export interface PieceBooking {
   stock_securite: number
   demande_mens: number
   demande_deseason: number
+  /** Unites vendues sur douze mois : sert a mesurer l'epaisseur du signal. */
+  ventes_12m_qte: number
   /** Cout des ventes sur 12 mois : sert a dire quelle part du fournisseur le booking couvre. */
   ventes_12m_cogs: number
   indice_12m: number[] | null
@@ -174,6 +176,11 @@ export interface DemandeBooking {
   palierVise?: string | null
   /** Ne proposer que des pieces deja vendues au moins une fois. */
   exclureJamaisVendues?: boolean
+  /**
+   * Couverture maximale apres livraison, en mois. Un etirement ne pousse
+   * jamais une piece au-dela. Defaut : une fois et demie la fenetre couverte.
+   */
+  couvertureMaxMois?: number
 
   /**
    * Les references interchangeables, depuis `pieces_alternatives` :
@@ -674,6 +681,21 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
     }
     avertissements.push(phrase)
   }
+  // Une piece vendue trois fois dans l'annee, dont deux le meme mois, ne donne
+  // pas une demande : elle donne un souvenir. Le calcul reste juste, mais son
+  // assise est mince, et sur les grosses lignes ca vaut d'etre dit.
+  const surSignalMince = candidats.filter(c =>
+    c.besoin > 0 && c.p.ventes_12m_qte > 0 && c.p.ventes_12m_qte <= 5)
+  if (surSignalMince.length > 0) {
+    const valeur = surSignalMince.reduce((s, c) => s + c.besoin * c.p.cout_unitaire, 0)
+    if (valeur > 0) {
+      avertissements.push(
+        `${surSignalMince.length} lignes reposent sur cinq ventes ou moins sur douze mois, ` +
+        `pour ${Math.round(valeur).toLocaleString('fr-CA')} $. La quantite est calculee, mais son ` +
+        `assise est mince : relis les plus grosses avant de commander.`)
+    }
+  }
+
   if (nbEcartesTropPetit > 0) {
     avertissements.push(
       `${nbEcartesTropPetit} pieces demandent moins d'une demi-unite sur la periode : elles ne sont ` +
@@ -834,6 +856,25 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
   // demande n'etire rien — c'est elle qui devient le stock mort de l'an
   // prochain. On les classe par cout de portage par dollar ajoute : la moins
   // chere a porter passe en premier.
+  // Plafond de couverture pour l'etirement.
+  //
+  // Sur la premiere commande Kimpex reelle, l'etirement laissait 16 mois de
+  // stock sur un casque carbone a 363 $ dont il se vend trois par an. Le
+  // calcul etait juste — le gain d'escompte depassait le portage — mais
+  // personne ne veut immobiliser un an et demi d'un article a ce prix sur la
+  // foi de trois ventes. Le portage moyen ne dit rien du risque de se tromper,
+  // et c'est ce risque-la que ce plafond borne.
+  const couvertureMax = d.couvertureMaxMois ?? Math.max(6, nbMoisFenetre * 1.5)
+
+  /** Ce qu'on peut encore ajouter a une piece sans depasser le plafond. */
+  function marge(c: Candidat): number {
+    if (c.deseason <= 0) return 0
+    const deja = retenus.get(c.p.code_piece)
+    const enMain = c.stockAuDebut + (deja?.qte ?? 0)
+    const plafond = couvertureMax * c.deseason
+    return Math.max(0, Math.floor(plafond - enMain))
+  }
+
   function candidatsEtirement(nomBareme: string): Candidat[] {
     return candidats
       .filter(c => c.deseason > 0)
@@ -878,7 +919,9 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
       let coutPortage = 0
       for (const c of candidatsEtirement(g.bareme)) {
         if (reste <= 0) break
-        const pris = Math.min(reste, c.p.cout_unitaire * Math.max(1, Math.ceil(c.deseason * 6)))
+        const possible = Math.min(marge(c), Math.max(1, Math.ceil(c.deseason * 6)))
+        if (possible <= 0) continue
+        const pris = Math.min(reste, c.p.cout_unitaire * possible)
         const qte = pris / c.p.cout_unitaire
         coutPortage += portage(pris, moisPortageEtirement(c, qte), cfg.taux_possession)
         reste -= pris
@@ -908,7 +951,8 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
           if (aPlacer <= 0.01) break
           // On n'ajoute jamais plus de six mois de demande supplementaire sur
           // une meme piece : au-dela, on fabrique du surstock, pas un escompte.
-          const qteMax = Math.max(1, Math.ceil(c.deseason * 6))
+          const qteMax = Math.min(marge(c), Math.max(1, Math.ceil(c.deseason * 6)))
+          if (qteMax <= 0) continue
           const qte = Math.min(qteMax, Math.ceil(aPlacer / c.p.cout_unitaire))
           ajouter(c, qte, 'palier', true)
           aPlacer -= qte * c.p.cout_unitaire
@@ -947,7 +991,9 @@ export function calculerBooking(d: DemandeBooking): ResultatBooking {
     for (const c of candidatsEtirement('global').length ? candidatsEtirement('global') : candidats) {
       if (aPlacer <= 0.01) break
       if (c.deseason <= 0) continue
-      const qte = Math.min(Math.max(1, Math.ceil(c.deseason * 6)), Math.ceil(aPlacer / c.p.cout_unitaire))
+      const place = Math.min(marge(c), Math.max(1, Math.ceil(c.deseason * 6)))
+      if (place <= 0) continue
+      const qte = Math.min(place, Math.ceil(aPlacer / c.p.cout_unitaire))
       ajouter(c, qte, 'minimum', true)
       aPlacer -= qte * c.p.cout_unitaire
     }
