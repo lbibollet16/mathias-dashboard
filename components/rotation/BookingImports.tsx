@@ -232,8 +232,8 @@ export default function BookingImports({ t, email, fournisseurs, onValide }: {
         </button>
         {totaux.erreur > 0 && (
           <button onClick={() => gmailAppel('relancer')} disabled={releve} style={boutonPlat(t, t.C.red, releve)}
-            title="Retelecharge les pieces jointes depuis Gmail et refait l'extraction. Utile quand l'echec venait du service et non du document.">
-            Relancer les {totaux.erreur} echecs
+            title="Retelecharge les pieces jointes DEPUIS GMAIL et refait l'extraction. Les fichiers deposes a la main ne sont pas conserves : il faut les redeposer.">
+            Relancer les echecs venus de Gmail
           </button>
         )}
       </div>
@@ -371,7 +371,16 @@ function LigneImport({ t, i, fournisseurs, ouvert, onOuvrir, onAgir }: {
         <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
 
           {i.statut === 'erreur' && (
-            <Message t={t} type="err">{i.erreur || 'Extraction impossible.'}</Message>
+            <Message t={t} type="err">
+              {i.erreur || 'Extraction impossible.'}
+              {i.source === 'televerse' && (
+                <div style={{ marginTop: 8, fontSize: 12 }}>
+                  Ce document a ete depose a la main. Le fichier n'est pas conserve apres l'analyse,
+                  donc « Relancer les echecs » ne peut pas le reprendre — <strong>redepose-le</strong> une
+                  fois la cause corrigee.
+                </div>
+              )}
+            </Message>
           )}
 
           {i.statut === 'lien_seulement' && (
